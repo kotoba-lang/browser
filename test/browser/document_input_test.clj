@@ -1,0 +1,1736 @@
+(ns browser.document-input-test
+  (:require [browser.core :as browser]
+            [browser.document-input :as document-input]
+            [browser.dom-bridge :as bridge]
+            [clojure.test :refer [deftest is]]
+            [kotoba.wasm.dom :as dom]))
+
+(deftest text-input-updates-form-control-value-selection-and-dispatches
+  (let [page (browser/load-html {:url "kotoba://input"
+                                 :html "<main><input id=\"field\" value=\"ab\"></main>"})
+        document (:browser/document page)
+        field (bridge/query-selector document "#field")
+        document (-> document
+                     (dom/add-event-listener field "beforeinput" "before-handler")
+                     (dom/add-event-listener field "input" "handler-1"))
+        result (document-input/reduce-event document {:event/type :text/selection
+                                                      :node/id field
+                                                      :start 1
+                                                      :end 2})
+        result (document-input/reduce-event (:document result) {:event/type :text/input
+                                                                :node/id field
+                                                                :text "Z"})
+        node (get-in result [:document :nodes field])]
+    (is (:handled? result))
+    (is (= "aZ" (get-in node [:attrs :value])))
+    (is (= 2 (get-in node [:attrs :selection-start])))
+    (is (= 2 (get-in node [:attrs :selection-end])))
+    (is (= [[:dom/dispatch-event
+             "before-handler"
+             {:event/type "beforeinput"
+              :target/id field
+              :inputType "insertText"
+              :value "ab"
+              :selection/start 1
+              :selection/end 2
+              :data "Z"}]
+            [:dom/dispatch-event
+             "handler-1"
+             {:event/type "input"
+              :target/id field
+              :value "aZ"
+              :selection/start 2
+              :selection/end 2}]]
+           (filterv #(= :dom/dispatch-event (first %))
+                    (get-in result [:document :ops]))))))
+
+(deftest composition-events-update-form-control-composition-state
+  (let [page (browser/load-html {:url "kotoba://input"
+                                 :html "<main><textarea id=\"field\" value=\"\"></textarea></main>"})
+        document (:browser/document page)
+        field (bridge/query-selector document "#field")
+        document (-> document
+                     (dom/add-event-listener field "beforeinput" "before-handler")
+                     (dom/add-event-listener field "compositionend" "composition-handler")
+                     (dom/add-event-listener field "input" "input-handler"))
+        result (reduce (fn [document event]
+                         (:document (document-input/reduce-event document (assoc event :node/id field))))
+                       document
+                       [{:event/type :composition/start}
+                        {:event/type :composition/update :text "ka"}
+                        {:event/type :composition/end :text "か"}])
+        node (get-in result [:nodes field])]
+    (is (= "か" (get-in node [:attrs :value])))
+    (is (= 1 (get-in node [:attrs :selection-start])))
+    (is (= 1 (get-in node [:attrs :selection-end])))
+    (is (= "" (get-in node [:attrs :composition])))
+    (is (= [[:dom/dispatch-event
+             "before-handler"
+             {:event/type "beforeinput"
+              :target/id field
+              :inputType "insertCompositionText"
+              :value ""
+              :selection/start 0
+              :selection/end 0
+              :data "か"}]
+            [:dom/dispatch-event
+             "composition-handler"
+             {:event/type "compositionend"
+              :target/id field
+              :value "か"
+              :composition nil}]
+            [:dom/dispatch-event
+             "input-handler"
+             {:event/type "input"
+              :target/id field
+              :value "か"
+              :selection/start 1
+              :selection/end 1}]]
+           (filterv #(= :dom/dispatch-event (first %))
+                    (:ops result))))))
+
+(deftest text-control-dispatches-change-on-blur-after-value-mutation
+  (let [page (browser/load-html {:url "kotoba://change"
+                                 :html "<main><input id=\"field\" value=\"old\"><button id=\"next\">Next</button></main>"})
+        document (:browser/document page)
+        field (bridge/query-selector document "#field")
+        next (bridge/query-selector document "#next")
+        document (-> document
+                     (dom/add-event-listener field "input" "input-handler")
+                     (dom/add-event-listener field "change" "change-handler")
+                     (dom/add-event-listener field "blur" "blur-handler")
+                     (dom/add-event-listener next "focus" "next-focus-handler"))
+        focused (document-input/reduce-event document {:event/type :pointer/click
+                                                       :node/id field})
+        typed (document-input/reduce-event (:document focused) {:event/type :text/input
+                                                                :node/id field
+                                                                :text "!"})
+        blurred (document-input/reduce-event (:document typed) {:event/type :pointer/click
+                                                                :node/id next})]
+    (is (= "old!" (get-in blurred [:document :nodes field :attrs :value])))
+    (is (= false (get-in blurred [:document :nodes field :attrs :dirty-value])))
+    (is (= next (get-in blurred [:document :focus])))
+    (is (= [[:dom/dispatch-event
+             "input-handler"
+             {:event/type "input"
+              :target/id field
+              :value "old!"
+              :selection/start 4
+              :selection/end 4}]
+            [:dom/dispatch-event
+             "change-handler"
+             {:event/type "change"
+              :target/id field
+              :value "old!"}]
+            [:dom/dispatch-event
+             "blur-handler"
+             {:event/type "blur"
+              :target/id field}]
+            [:dom/dispatch-event
+             "next-focus-handler"
+             {:event/type "focus"
+              :target/id next}]]
+           (filterv #(= :dom/dispatch-event (first %))
+                    (get-in blurred [:document :ops]))))))
+
+(deftest key-events-drive-selection-delete-home-end-and-select-all
+  (let [page (browser/load-html {:url "kotoba://input"
+                                 :html "<main><input id=\"field\" value=\"abcdef\"></main>"})
+        document (:browser/document page)
+        field (bridge/query-selector document "#field")
+        result (reduce (fn [document event]
+                         (:document (document-input/reduce-event document (assoc event :node/id field))))
+                       document
+                       [{:event/type :key/down :key "Home"}
+                        {:event/type :key/down :key "ArrowRight" :shift? true}
+                        {:event/type :key/down :key "ArrowRight" :shift? true}
+                        {:event/type :key/down :key "Delete"}
+                        {:event/type :key/down :key "End" :shift? true}
+                        {:event/type :text/input :text "Z"}
+                        {:event/type :key/down :key "a" :ctrl? true}
+                        {:event/type :text/input :text "done"}])
+        node (get-in result [:nodes field :attrs])]
+    (is (= "done" (:value node)))
+    (is (= 4 (:selection-start node)))
+    (is (= 4 (:selection-end node)))))
+
+(deftest keyboard-events-dispatch-keydown-and-keyup-listeners
+  (let [page (browser/load-html {:url "kotoba://keyboard"
+                                 :html "<main><input id=\"field\" value=\"abc\"></main>"})
+        document (:browser/document page)
+        field (bridge/query-selector document "#field")
+        document (-> document
+                     (dom/add-event-listener field "keydown" "down-handler")
+                     (dom/add-event-listener field "beforeinput" "before-handler")
+                     (dom/add-event-listener field "keyup" "up-handler"))
+        down-result (document-input/reduce-event document {:event/type :key/down
+                                                          :node/id field
+                                                          :key "Backspace"
+                                                          :code "Backspace"
+                                                          :shift? true})
+        up-result (document-input/reduce-event (:document down-result)
+                                               {:event/type :key/up
+                                                :node/id field
+                                                :key "Backspace"
+                                                :code "Backspace"
+                                                :shift? true})]
+    (is (= true (:handled? down-result)))
+    (is (= true (:handled? up-result)))
+    (is (= "ab" (get-in down-result [:document :nodes field :attrs :value])))
+    (is (= [[:dom/dispatch-event "down-handler"
+             {:event/type "keydown"
+              :target/id field
+              :key "Backspace"
+              :code "Backspace"
+              :shiftKey true}]
+            [:dom/dispatch-event "before-handler"
+             {:event/type "beforeinput"
+              :target/id field
+              :inputType "deleteContentBackward"
+              :value "abc"
+              :selection/start 3
+              :selection/end 3}]
+            [:dom/dispatch-event "up-handler"
+             {:event/type "keyup"
+              :target/id field
+              :key "Backspace"
+              :code "Backspace"
+              :shiftKey true}]]
+           (filterv #(= :dom/dispatch-event (first %))
+                    (get-in up-result [:document :ops]))))))
+
+(deftest wheel-events-update-scroll-container-and-dispatch-scroll
+  (let [page (browser/load-html {:url "kotoba://scroll"
+                                 :html "<main><section id=\"pane\" overflow=\"auto\" scroll-top=\"8\" scroll-left=\"2\"><p>Scrolled</p></section></main>"})
+        document (:browser/document page)
+        pane (bridge/query-selector document "#pane")
+        document (dom/add-event-listener document pane "scroll" "scroll-handler")
+        result (document-input/reduce-event document {:event/type :pointer/wheel
+                                                      :node/id pane
+                                                      :delta-x 3
+                                                      :delta-y 12})
+        attrs (get-in result [:document :nodes pane :attrs])]
+    (is (= true (:handled? result)))
+    (is (= 5 (:scroll-left attrs)))
+    (is (= 20 (:scroll-top attrs)))
+    (is (= [:dom/dispatch-event
+            "scroll-handler"
+            {:event/type "scroll"
+             :target/id pane
+             :scroll/left 5
+             :scroll/top 20
+             :delta/x 3
+             :delta/y 12}]
+           (last (get-in result [:document :ops]))))))
+
+(deftest wheel-events-ignore-non-scrollable-targets
+  (let [page (browser/load-html {:url "kotoba://scroll"
+                                 :html "<main><section id=\"pane\"><p>Static</p></section></main>"})
+        document (:browser/document page)
+        pane (bridge/query-selector document "#pane")
+        result (document-input/reduce-event document {:event/type :pointer/wheel
+                                                      :node/id pane
+                                                      :delta-y 12})]
+    (is (= false (:handled? result)))
+    (is (= document (:document result)))))
+
+(deftest pointer-move-updates-hover-state-and-dispatches-hover-events
+  (let [page (browser/load-html {:url "kotoba://hover"
+                                 :html "<main><button id=\"first\">First</button><button id=\"second\">Second</button></main>"})
+        document (:browser/document page)
+        first-id (bridge/query-selector document "#first")
+        second-id (bridge/query-selector document "#second")
+        document (-> document
+                     (dom/add-event-listener first-id "pointerover" "first-pointer-over")
+                     (dom/add-event-listener first-id "mouseover" "first-over")
+                     (dom/add-event-listener first-id "pointerenter" "first-pointer-enter")
+                     (dom/add-event-listener first-id "mouseenter" "first-enter")
+                     (dom/add-event-listener first-id "pointermove" "first-pointer-move")
+                     (dom/add-event-listener first-id "mousemove" "first-move")
+                     (dom/add-event-listener first-id "pointerout" "first-pointer-out")
+                     (dom/add-event-listener first-id "mouseout" "first-out")
+                     (dom/add-event-listener first-id "pointerleave" "first-pointer-leave")
+                     (dom/add-event-listener first-id "mouseleave" "first-leave")
+                     (dom/add-event-listener second-id "pointerover" "second-pointer-over")
+                     (dom/add-event-listener second-id "mouseover" "second-over")
+                     (dom/add-event-listener second-id "pointerenter" "second-pointer-enter")
+                     (dom/add-event-listener second-id "mouseenter" "second-enter")
+                     (dom/add-event-listener second-id "pointermove" "second-pointer-move")
+                     (dom/add-event-listener second-id "mousemove" "second-move"))
+        first-result (document-input/reduce-event document {:event/type :pointer/move
+                                                           :node/id first-id
+                                                           :x 10
+                                                           :y 12})
+        second-result (document-input/reduce-event (:document first-result)
+                                                   {:event/type :pointer/move
+                                                    :node/id second-id
+                                                    :x 40
+                                                    :y 12})]
+    (is (= true (:handled? first-result)))
+    (is (= first-id (get-in first-result [:document :hover])))
+    (is (= true (:handled? second-result)))
+    (is (= first-id (:previous/node-id second-result)))
+    (is (= second-id (get-in second-result [:document :hover])))
+    (is (= [[:dom/dispatch-event "first-pointer-over"
+            {:event/type "pointerover" :target/id first-id :x 10 :y 12}]
+            [:dom/dispatch-event "first-over"
+             {:event/type "mouseover" :target/id first-id :x 10 :y 12}]
+            [:dom/dispatch-event "first-pointer-enter"
+             {:event/type "pointerenter" :target/id first-id :x 10 :y 12}]
+            [:dom/dispatch-event "first-enter"
+             {:event/type "mouseenter" :target/id first-id :x 10 :y 12}]
+            [:dom/dispatch-event "first-pointer-move"
+             {:event/type "pointermove" :target/id first-id :x 10 :y 12}]
+            [:dom/dispatch-event "first-move"
+             {:event/type "mousemove" :target/id first-id :x 10 :y 12}]
+            [:dom/dispatch-event "first-pointer-out"
+             {:event/type "pointerout" :target/id first-id :x 40 :y 12}]
+            [:dom/dispatch-event "first-out"
+             {:event/type "mouseout" :target/id first-id :x 40 :y 12}]
+            [:dom/dispatch-event "first-pointer-leave"
+             {:event/type "pointerleave" :target/id first-id :x 40 :y 12}]
+            [:dom/dispatch-event "first-leave"
+             {:event/type "mouseleave" :target/id first-id :x 40 :y 12}]
+            [:dom/dispatch-event "second-pointer-over"
+             {:event/type "pointerover" :target/id second-id :x 40 :y 12}]
+            [:dom/dispatch-event "second-over"
+             {:event/type "mouseover" :target/id second-id :x 40 :y 12}]
+            [:dom/dispatch-event "second-pointer-enter"
+             {:event/type "pointerenter" :target/id second-id :x 40 :y 12}]
+            [:dom/dispatch-event "second-enter"
+             {:event/type "mouseenter" :target/id second-id :x 40 :y 12}]
+            [:dom/dispatch-event "second-pointer-move"
+             {:event/type "pointermove" :target/id second-id :x 40 :y 12}]
+            [:dom/dispatch-event "second-move"
+             {:event/type "mousemove" :target/id second-id :x 40 :y 12}]]
+           (filterv #(= :dom/dispatch-event (first %))
+                    (get-in second-result [:document :ops]))))))
+
+(deftest pointer-down-and-up-dispatch-listeners-without-click-activation
+  (let [page (browser/load-html {:url "kotoba://pointer"
+                                 :html "<main><button id=\"run\">Run</button></main>"})
+        document (:browser/document page)
+        button (bridge/query-selector document "#run")
+        document (-> document
+                     (dom/add-event-listener button "pointerdown" "down-handler")
+                     (dom/add-event-listener button "gotpointercapture" "got-capture")
+                     (dom/add-event-listener button "pointerup" "up-handler")
+                     (dom/add-event-listener button "lostpointercapture" "lost-capture")
+                     (dom/add-event-listener button "pointercancel" "cancel-handler")
+                     (dom/add-event-listener button "click" "click-handler"))
+        down-result (document-input/reduce-event document {:event/type :pointer/down
+                                                          :node/id button
+                                                          :button 0
+                                                          :x 10
+                                                          :y 12
+                                                          :pointerId 11
+                                                          :pointerType "mouse"
+                                                          :isPrimary true
+                                                          :pressure 0.25})
+        up-result (document-input/reduce-event (:document down-result)
+                                                {:event/type :pointer/up
+                                                 :node/id button
+                                                 :button 0
+                                                 :x 10
+                                                 :y 12
+                                                 :pointer-id 11
+                                                 :pointer-type "mouse"
+                                                 :is-primary? true})
+        cancel-result (document-input/reduce-event (:document up-result)
+                                                   {:event/type :pointer/cancel
+                                                    :node/id button
+                                                    :x 10
+                                                    :y 12
+                                                    :pointerId 11
+                                                    :pointerType "mouse"
+                                                    :isPrimary true})]
+    (is (= true (:handled? down-result)))
+    (is (= true (:handled? up-result)))
+    (is (= true (:handled? cancel-result)))
+    (is (= button (get-in down-result [:document :pointer/capture 11])))
+    (is (nil? (get-in up-result [:document :pointer/capture 11])))
+    (is (= [[:dom/dispatch-event "down-handler"
+             {:event/type "pointerdown"
+              :target/id button
+              :x 10
+              :y 12
+              :button 0
+              :pointerId 11
+              :pointerType "mouse"
+              :isPrimary true
+              :pressure 0.25}]
+            [:dom/dispatch-event "got-capture"
+             {:event/type "gotpointercapture"
+              :target/id button
+              :x 10
+              :y 12
+              :button 0
+              :pointerId 11
+              :pointerType "mouse"
+              :isPrimary true
+              :pressure 0.25}]
+            [:dom/dispatch-event "up-handler"
+             {:event/type "pointerup"
+              :target/id button
+              :x 10
+              :y 12
+              :button 0
+              :pointerId 11
+              :pointerType "mouse"
+              :isPrimary true}]
+            [:dom/dispatch-event "lost-capture"
+             {:event/type "lostpointercapture"
+              :target/id button
+              :x 10
+              :y 12
+              :button 0
+              :pointerId 11
+              :pointerType "mouse"
+              :isPrimary true}]
+            [:dom/dispatch-event "cancel-handler"
+             {:event/type "pointercancel"
+              :target/id button
+              :x 10
+              :y 12
+              :pointerId 11
+              :pointerType "mouse"
+              :isPrimary true}]]
+           (filterv #(= :dom/dispatch-event (first %))
+                    (get-in cancel-result [:document :ops]))))))
+
+(deftest click-events-dispatch-and-focus-editable-targets
+  (let [page (browser/load-html {:url "kotoba://click"
+                                 :html "<main><button id=\"run\">Run</button><input id=\"field\" value=\"ab\"><input id=\"secret\" type=\"hidden\" value=\"token\"><input id=\"upload\" type=\"file\" value=\"/secret/path.txt\"></main>"})
+        document (:browser/document page)
+        button (bridge/query-selector document "#run")
+        field (bridge/query-selector document "#field")
+        secret (bridge/query-selector document "#secret")
+        upload (bridge/query-selector document "#upload")
+        document (-> document
+                     (dom/add-event-listener button "click" "click-handler")
+                     (dom/add-event-listener field "focus" "focus-handler")
+                     (dom/add-event-listener secret "click" "secret-click-handler")
+                     (dom/add-event-listener secret "focus" "secret-focus-handler")
+                     (dom/add-event-listener upload "click" "upload-click-handler")
+                     (dom/add-event-listener upload "focus" "upload-focus-handler"))
+        clicked (document-input/reduce-event document {:event/type :pointer/click
+                                                       :node/id button
+                                                       :x 10
+                                                       :y 12})
+        focused (document-input/reduce-event (:document clicked) {:event/type :pointer/click
+                                                                  :node/id field})
+        typed (document-input/reduce-event (:document focused) {:event/type :text/input
+                                                                :text "Z"})
+        hidden-clicked (document-input/reduce-event (:document typed) {:event/type :pointer/click
+                                                                       :node/id secret})
+        file-clicked (document-input/reduce-event (:document typed) {:event/type :pointer/click
+                                                                     :node/id upload})
+        file-typed (document-input/reduce-event (:document file-clicked) {:event/type :text/input
+                                                                          :node/id upload
+                                                                          :text "ignored"})]
+    (is (= true (:handled? clicked)))
+    (is (= [:dom/dispatch-event
+            "click-handler"
+            {:event/type "click" :target/id button :x 10 :y 12}]
+           (last (get-in clicked [:document :ops]))))
+    (is (= true (:focused? focused)))
+    (is (= field (get-in focused [:document :focus])))
+    (is (= [:dom/dispatch-event
+            "focus-handler"
+            {:event/type "focus" :target/id field}]
+           (last (get-in focused [:document :ops]))))
+    (is (= "abZ" (get-in typed [:document :nodes field :attrs :value])))
+    (is (= false (:handled? hidden-clicked)))
+    (is (= field (get-in hidden-clicked [:document :focus])))
+    (is (= (get-in typed [:document :ops])
+           (get-in hidden-clicked [:document :ops])))
+    (is (= false (:handled? file-clicked)))
+    (is (= field (get-in file-clicked [:document :focus])))
+    (is (= (get-in typed [:document :ops])
+           (get-in file-clicked [:document :ops])))
+    (is (= false (:handled? file-typed)))
+    (is (= "/secret/path.txt" (get-in file-typed [:document :nodes upload :attrs :value])))))
+
+(deftest file-select-event-applies-explicit-file-picker-result
+  (let [page (browser/load-html {:url "kotoba://file"
+                                 :html "<main><input id=\"upload\" type=\"file\" name=\"upload\" value=\"/secret/path.txt\"></main>"})
+        document (:browser/document page)
+        upload (bridge/query-selector document "#upload")
+        document (-> document
+                     (dom/add-event-listener upload "input" "input-handler")
+                     (dom/add-event-listener upload "change" "change-handler"))
+        result (document-input/reduce-event document {:event/type :file/select
+                                                      :node/id upload
+                                                      :files [{:name "/Users/me/report.csv"
+                                                               :type "text/csv"
+                                                               :size 42}]})
+        attrs (get-in result [:document :nodes upload :attrs])]
+    (is (= true (:handled? result)))
+    (is (= [{:file/name "report.csv"
+             :file/type "text/csv"
+             :file/size 42}]
+           (:files attrs)))
+    (is (= "report.csv" (:value attrs)))
+    (is (= [{:file/name "report.csv"
+             :file/type "text/csv"
+             :file/size 42}]
+           (:files result)))
+    (is (= [[:dom/dispatch-event
+             "input-handler"
+             {:event/type "file"
+              :target/id upload
+              :files [{:file/name "report.csv"
+                       :file/type "text/csv"
+                       :file/size 42}]}]
+            [:dom/dispatch-event
+             "change-handler"
+             {:event/type "file"
+              :target/id upload
+              :files [{:file/name "report.csv"
+                       :file/type "text/csv"
+                       :file/size 42}]}]]
+           (take-last 2 (get-in result [:document :ops]))))))
+
+(deftest link-click-produces-navigation-default-action
+  (let [page (browser/load-html {:url "https://app.example/docs/"
+                                 :html "<main><a id=\"doc\" href=\"/next\" target=\"_blank\" rel=\"noopener\" referrerpolicy=\"no-referrer\"><span id=\"label\">Next</span></a></main>"})
+        document (:browser/document page)
+        link (bridge/query-selector document "#doc")
+        label (bridge/query-selector document "#label")
+        document (dom/add-event-listener document label "click" "label-click")
+        result (document-input/reduce-event document {:event/type :pointer/click
+                                                      :node/id label
+                                                      :x 20
+                                                      :y 10})]
+    (is (= true (:handled? result)))
+    (is (= true (:commit? result)))
+    (is (= label (:node/id result)))
+    (is (= link (:link/id result)))
+    (is (= "/next" (:navigation/href result)))
+    (is (= "_blank" (:navigation/target result)))
+    (is (= "noopener" (:navigation/rel result)))
+    (is (= "no-referrer" (:navigation/referrer-policy result)))
+    (is (= [:dom/dispatch-event
+            "label-click"
+            {:event/type "click" :target/id label :x 20 :y 10}]
+           (last (get-in result [:document :ops]))))))
+
+(deftest download-link-click-produces-download-boundary-metadata
+  (let [page (browser/load-html {:url "https://app.example/docs/"
+                                 :html "<main><a id=\"report\" href=\"/files/report.csv\" download=\"report.csv\">Report</a></main>"})
+        document (:browser/document page)
+        link (bridge/query-selector document "#report")
+        result (document-input/reduce-event document {:event/type :pointer/click
+                                                      :node/id link})]
+    (is (= true (:handled? result)))
+    (is (= false (:commit? result)))
+    (is (= link (:link/id result)))
+    (is (= "/files/report.csv" (:navigation/href result)))
+    (is (= true (:navigation/download? result)))
+    (is (= "report.csv" (:download/filename result)))))
+
+(deftest link-enter-key-activates-navigation-default-action
+  (let [page (browser/load-html {:url "https://app.example/docs/"
+                                 :html "<main><a id=\"next\" href=\"/next\">Next</a></main>"})
+        document (:browser/document page)
+        link (bridge/query-selector document "#next")
+        document (dom/add-event-listener document link "click" "link-click")
+        entered (document-input/reduce-event document {:event/type :key/down
+                                                       :node/id link
+                                                       :key "Enter"})
+        spaced (document-input/reduce-event document {:event/type :key/down
+                                                      :node/id link
+                                                      :key " "})]
+    (is (= true (:handled? entered)))
+    (is (= "/next" (:navigation/href entered)))
+    (is (= link (:link/id entered)))
+    (is (= [:dom/dispatch-event
+            "link-click"
+            {:event/type "click" :target/id link}]
+           (last (get-in entered [:document :ops]))))
+    (is (= false (:handled? spaced)))
+    (is (nil? (:navigation/href spaced)))))
+
+(deftest checkbox-click-toggles-checked-and-dispatches-input-change
+  (let [page (browser/load-html {:url "kotoba://checkbox"
+                                 :html "<main><input id=\"flag\" type=\"checkbox\"></main>"})
+        document (:browser/document page)
+        flag (bridge/query-selector document "#flag")
+        document (-> document
+                     (dom/add-event-listener flag "input" "input-handler")
+                     (dom/add-event-listener flag "change" "change-handler"))
+        checked (document-input/reduce-event document {:event/type :pointer/click
+                                                       :node/id flag})
+        typed (document-input/reduce-event (:document checked) {:event/type :text/input
+                                                                :text "ignored"})
+        unchecked (document-input/reduce-event (:document typed) {:event/type :pointer/click
+                                                                  :node/id flag})]
+    (is (= true (:handled? checked)))
+    (is (= true (get-in checked [:document :nodes flag :attrs :checked])))
+    (is (= [[:dom/dispatch-event
+             "input-handler"
+             {:event/type "input" :target/id flag :checked true}]
+            [:dom/dispatch-event
+             "change-handler"
+             {:event/type "change" :target/id flag :checked true}]]
+           (take-last 2 (get-in checked [:document :ops]))))
+    (is (= false (:handled? typed)))
+    (is (nil? (get-in typed [:document :nodes flag :attrs :value])))
+    (is (= false (get-in unchecked [:document :nodes flag :attrs :checked])))))
+
+(deftest label-click-activates-associated-control
+  (let [page (browser/load-html {:url "kotoba://label"
+                                 :html "<main><label id=\"label\" for=\"flag\">Flag</label><input id=\"flag\" type=\"checkbox\"></main>"})
+        document (:browser/document page)
+        label (bridge/query-selector document "#label")
+        flag (bridge/query-selector document "#flag")
+        document (-> document
+                     (dom/add-event-listener label "click" "label-handler")
+                     (dom/add-event-listener flag "input" "input-handler")
+                     (dom/add-event-listener flag "change" "change-handler"))
+        result (document-input/reduce-event document {:event/type :pointer/click
+                                                      :node/id label})]
+    (is (= true (:handled? result)))
+    (is (= label (:label/id result)))
+    (is (= flag (:node/id result)))
+    (is (= flag (get-in result [:document :focus])))
+    (is (= true (get-in result [:document :nodes flag :attrs :checked])))
+    (is (= [[:dom/dispatch-event
+             "label-handler"
+             {:event/type "click" :target/id label}]
+            [:dom/dispatch-event
+             "input-handler"
+             {:event/type "input" :target/id flag :checked true}]
+            [:dom/dispatch-event
+             "change-handler"
+             {:event/type "change" :target/id flag :checked true}]]
+           (filterv #(= :dom/dispatch-event (first %))
+                    (get-in result [:document :ops]))))))
+
+(deftest nested-label-click-activates-descendant-control
+  (let [page (browser/load-html {:url "kotoba://label"
+                                 :html "<main><label id=\"label\">Flag <input id=\"flag\" type=\"checkbox\"></label></main>"})
+        document (:browser/document page)
+        label (bridge/query-selector document "#label")
+        flag (bridge/query-selector document "#flag")
+        result (document-input/reduce-event document {:event/type :pointer/click
+                                                      :node/id label})]
+    (is (= true (:handled? result)))
+    (is (= label (:label/id result)))
+    (is (= flag (:node/id result)))
+    (is (= true (get-in result [:document :nodes flag :attrs :checked])))))
+
+(deftest disabled-fieldset-labels-only-activate-first-legend-controls
+  (let [page (browser/load-html {:url "kotoba://label"
+                                 :html "<main><fieldset disabled><legend><label id=\"legend-label\" for=\"legend-flag\">Legend</label><input id=\"legend-flag\" type=\"checkbox\"></legend><label id=\"blocked-label\" for=\"blocked-flag\">Blocked</label><input id=\"blocked-flag\" type=\"checkbox\"><label id=\"nested-blocked\">Nested <input id=\"nested-flag\" type=\"checkbox\"></label></fieldset></main>"})
+        document (:browser/document page)
+        legend-label (bridge/query-selector document "#legend-label")
+        blocked-label (bridge/query-selector document "#blocked-label")
+        nested-blocked (bridge/query-selector document "#nested-blocked")
+        legend-flag (bridge/query-selector document "#legend-flag")
+        blocked-flag (bridge/query-selector document "#blocked-flag")
+        nested-flag (bridge/query-selector document "#nested-flag")
+        legend-result (document-input/reduce-event document {:event/type :pointer/click
+                                                            :node/id legend-label})
+        blocked-result (document-input/reduce-event (:document legend-result) {:event/type :pointer/click
+                                                                               :node/id blocked-label})
+        nested-result (document-input/reduce-event (:document blocked-result) {:event/type :pointer/click
+                                                                               :node/id nested-blocked})]
+    (is (= true (:handled? legend-result)))
+    (is (= legend-label (:label/id legend-result)))
+    (is (= legend-flag (:node/id legend-result)))
+    (is (= true (get-in legend-result [:document :nodes legend-flag :attrs :checked])))
+    (is (= legend-flag (get-in legend-result [:document :focus])))
+    (is (= true (:handled? blocked-result)))
+    (is (= blocked-label (:node/id blocked-result)))
+    (is (nil? (:label/id blocked-result)))
+    (is (nil? (get-in blocked-result [:document :focus])))
+    (is (= false (:handled? nested-result)))
+    (is (= nested-blocked (:node/id nested-result)))
+    (is (nil? (:label/id nested-result)))
+    (is (not (true? (get-in nested-result [:document :nodes blocked-flag :attrs :checked]))))
+    (is (not (true? (get-in nested-result [:document :nodes nested-flag :attrs :checked]))))
+    (is (nil? (get-in nested-result [:document :focus])))))
+
+(deftest file-input-label-click-does-not-activate-file-picker-boundary
+  (let [page (browser/load-html {:url "kotoba://label"
+                                 :html "<main><label id=\"for-upload\" for=\"upload\">Upload</label><input id=\"upload\" type=\"file\" value=\"/secret/path.txt\"><label id=\"nested\">Nested <input id=\"nested-upload\" type=\"file\" value=\"/secret/nested.txt\"></label></main>"})
+        document (:browser/document page)
+        for-upload (bridge/query-selector document "#for-upload")
+        upload (bridge/query-selector document "#upload")
+        nested (bridge/query-selector document "#nested")
+        nested-upload (bridge/query-selector document "#nested-upload")
+        for-result (document-input/reduce-event document {:event/type :pointer/click
+                                                          :node/id for-upload})
+        nested-result (document-input/reduce-event (:document for-result) {:event/type :pointer/click
+                                                                           :node/id nested})]
+    (is (= false (:handled? for-result)))
+    (is (= for-upload (:node/id for-result)))
+    (is (nil? (:label/id for-result)))
+    (is (nil? (get-in for-result [:document :focus])))
+    (is (= "/secret/path.txt" (get-in for-result [:document :nodes upload :attrs :value])))
+    (is (= false (:handled? nested-result)))
+    (is (= nested (:node/id nested-result)))
+    (is (nil? (:label/id nested-result)))
+    (is (nil? (get-in nested-result [:document :focus])))
+    (is (= "/secret/nested.txt" (get-in nested-result [:document :nodes nested-upload :attrs :value])))))
+
+(deftest radio-click-checks-target-and-unchecks-group
+  (let [page (browser/load-html {:url "kotoba://radio"
+                                 :html "<main><input id=\"one\" type=\"radio\" name=\"mode\" checked><input id=\"two\" type=\"radio\" name=\"mode\"><input id=\"other\" type=\"radio\" name=\"other\" checked></main>"})
+        document (:browser/document page)
+        one (bridge/query-selector document "#one")
+        two (bridge/query-selector document "#two")
+        other (bridge/query-selector document "#other")
+        document (-> document
+                     (dom/add-event-listener two "input" "input-handler")
+                     (dom/add-event-listener two "change" "change-handler"))
+        selected (document-input/reduce-event document {:event/type :pointer/click
+                                                        :node/id two})
+        same (document-input/reduce-event (:document selected) {:event/type :pointer/click
+                                                                :node/id two})]
+    (is (= true (:handled? selected)))
+    (is (= false (get-in selected [:document :nodes one :attrs :checked])))
+    (is (= true (get-in selected [:document :nodes two :attrs :checked])))
+    (is (= true (get-in selected [:document :nodes other :attrs :checked])))
+    (is (= [[:dom/dispatch-event
+             "input-handler"
+             {:event/type "input" :target/id two :checked true}]
+            [:dom/dispatch-event
+             "change-handler"
+             {:event/type "change" :target/id two :checked true}]]
+           (take-last 2 (get-in selected [:document :ops]))))
+    (is (= (:ops (:document selected))
+           (:ops (:document same))))))
+
+(deftest focused-controls-activate-from-keyboard
+  (let [page (browser/load-html {:url "kotoba://keys"
+                                 :html "<main><button id=\"run\">Run</button><input id=\"input-button\" type=\"button\" value=\"Input button\"><input id=\"flag\" type=\"checkbox\"><input id=\"one\" type=\"radio\" name=\"mode\" checked><input id=\"two\" type=\"radio\" name=\"mode\"></main>"})
+        document (:browser/document page)
+        button (bridge/query-selector document "#run")
+        input-button (bridge/query-selector document "#input-button")
+        flag (bridge/query-selector document "#flag")
+        one (bridge/query-selector document "#one")
+        two (bridge/query-selector document "#two")
+        document (-> document
+                     (dom/add-event-listener button "click" "click-handler")
+                     (dom/add-event-listener input-button "click" "input-button-click-handler"))
+        button-focus (document-input/reduce-event document {:event/type :pointer/click
+                                                            :node/id button})
+        button-key (document-input/reduce-event (:document button-focus) {:event/type :key/down
+                                                                          :key "Enter"})
+        input-button-focus (document-input/reduce-event (:document button-key) {:event/type :pointer/click
+                                                                                :node/id input-button})
+        input-button-key (document-input/reduce-event (:document input-button-focus) {:event/type :key/down
+                                                                                      :key "Space"})
+        flag-focus (document-input/reduce-event (:document input-button-key) {:event/type :pointer/click
+                                                                        :node/id flag})
+        flag-key (document-input/reduce-event (:document flag-focus) {:event/type :key/down
+                                                                      :key " "})
+        two-focus (document-input/reduce-event (:document flag-key) {:event/type :pointer/click
+                                                                     :node/id two})
+        two-key (document-input/reduce-event (:document two-focus) {:event/type :key/down
+                                                                    :key "Space"})]
+    (is (= [:dom/dispatch-event
+            "click-handler"
+            {:event/type "click" :target/id button}]
+           (last (get-in button-key [:document :ops]))))
+    (is (= [:dom/dispatch-event
+            "input-button-click-handler"
+            {:event/type "click" :target/id input-button}]
+           (last (get-in input-button-key [:document :ops]))))
+    (is (nil? (:submitted? input-button-key)))
+    (is (nil? (:reset? input-button-key)))
+    (is (= true (get-in flag-focus [:document :nodes flag :attrs :checked])))
+    (is (= false (get-in flag-key [:document :nodes flag :attrs :checked])))
+    (is (= false (get-in two-key [:document :nodes one :attrs :checked])))
+    (is (= true (get-in two-key [:document :nodes two :attrs :checked])))))
+
+(deftest submit-buttons-dispatch-form-submit
+  (let [page (browser/load-html {:url "kotoba://submit"
+                                 :html "<main><form id=\"form\"><input id=\"field\" name=\"q\" value=\"Kotoba\"><input id=\"amount\" type=\"number\" name=\"amount\" value=\"7\"><input id=\"volume\" type=\"range\" name=\"volume\" value=\"4\"><input id=\"token\" type=\"hidden\" name=\"token\" value=\"abc\"><input id=\"upload\" type=\"file\" name=\"upload\" value=\"/secret/path.txt\"><input id=\"flag\" type=\"checkbox\" name=\"ok\" checked><input id=\"off\" type=\"checkbox\" name=\"off\"><button id=\"go\" name=\"action\" value=\"go\">Go</button><button id=\"noop\" type=\"button\" name=\"action\" value=\"noop\">Noop</button><input id=\"input-noop\" type=\"button\" name=\"action\" value=\"input-noop\"><input id=\"submit\" type=\"submit\" name=\"action\" value=\"send\"></form></main>"})
+        document (:browser/document page)
+        form (bridge/query-selector document "#form")
+        go (bridge/query-selector document "#go")
+        noop (bridge/query-selector document "#noop")
+        input-noop (bridge/query-selector document "#input-noop")
+        submit (bridge/query-selector document "#submit")
+        field (bridge/query-selector document "#field")
+        amount (bridge/query-selector document "#amount")
+        volume (bridge/query-selector document "#volume")
+        token (bridge/query-selector document "#token")
+        upload (bridge/query-selector document "#upload")
+        flag (bridge/query-selector document "#flag")
+        document (-> document
+                     (dom/add-event-listener form "submit" "submit-handler")
+                     (dom/add-event-listener go "click" "click-handler")
+                     (dom/add-event-listener noop "click" "noop-click-handler")
+                     (dom/add-event-listener input-noop "click" "input-noop-click-handler"))
+        clicked (document-input/reduce-event document {:event/type :pointer/click
+                                                       :node/id go})
+        noop-clicked (document-input/reduce-event (:document clicked) {:event/type :pointer/click
+                                                                       :node/id noop})
+        input-noop-clicked (document-input/reduce-event (:document noop-clicked) {:event/type :pointer/click
+                                                                                  :node/id input-noop})
+        input-submit (document-input/reduce-event (:document input-noop-clicked) {:event/type :pointer/click
+                                                                            :node/id submit})]
+    (is (= true (:submitted? clicked)))
+    (is (= form (:form/id clicked)))
+    (is (= [{:name "q" :value "Kotoba" :node/id field}
+            {:name "amount" :value "7" :node/id amount}
+            {:name "volume" :value "4" :node/id volume}
+            {:name "token" :value "abc" :node/id token}
+            {:name "ok" :value "on" :node/id flag}
+            {:name "action" :value "go" :node/id go}]
+           (:form/data clicked)))
+    (is (= [[:dom/dispatch-event
+             "click-handler"
+             {:event/type "click" :target/id go}]
+            [:dom/dispatch-event
+             "submit-handler"
+             {:event/type "submit"
+              :target/id form
+              :submitter/id go
+              :form/data [{:name "q" :value "Kotoba" :node/id field}
+                          {:name "amount" :value "7" :node/id amount}
+                          {:name "volume" :value "4" :node/id volume}
+                          {:name "token" :value "abc" :node/id token}
+                          {:name "ok" :value "on" :node/id flag}
+                          {:name "action" :value "go" :node/id go}]}]]
+           (filterv #(= :dom/dispatch-event (first %))
+                    (get-in clicked [:document :ops]))))
+    (is (nil? (:submitted? noop-clicked)))
+    (is (nil? (:reset? noop-clicked)))
+    (is (= [:dom/dispatch-event
+            "noop-click-handler"
+            {:event/type "click" :target/id noop}]
+           (last (get-in noop-clicked [:document :ops]))))
+    (is (nil? (:submitted? input-noop-clicked)))
+    (is (nil? (:reset? input-noop-clicked)))
+    (is (= [:dom/dispatch-event
+            "input-noop-click-handler"
+            {:event/type "click" :target/id input-noop}]
+           (last (get-in input-noop-clicked [:document :ops]))))
+    (is (= true (:submitted? input-submit)))
+    (is (= form (:form/id input-submit)))
+    (is (= [{:name "q" :value "Kotoba" :node/id field}
+            {:name "amount" :value "7" :node/id amount}
+            {:name "volume" :value "4" :node/id volume}
+            {:name "token" :value "abc" :node/id token}
+            {:name "ok" :value "on" :node/id flag}
+            {:name "action" :value "send" :node/id submit}]
+           (:form/data input-submit)))
+    (is (= [:dom/dispatch-event
+            "submit-handler"
+            {:event/type "submit"
+             :target/id form
+             :submitter/id submit
+             :form/data [{:name "q" :value "Kotoba" :node/id field}
+                         {:name "amount" :value "7" :node/id amount}
+                         {:name "volume" :value "4" :node/id volume}
+                         {:name "token" :value "abc" :node/id token}
+                         {:name "ok" :value "on" :node/id flag}
+                         {:name "action" :value "send" :node/id submit}]}]
+           (last (get-in input-submit [:document :ops]))))
+    (is (nil? (some #(= upload (:node/id %)) (:form/data clicked))))
+    (is (nil? (some #(= upload (:node/id %)) (:form/data input-submit))))))
+
+(deftest nameless-submitters-submit-form-without-successful-entry
+  (let [page (browser/load-html {:url "kotoba://submit"
+                                 :html "<main><form id=\"form\"><input id=\"field\" name=\"q\" value=\"Kotoba\"><button id=\"button-go\" value=\"button\">Button</button><input id=\"empty-submit\" type=\"submit\" name=\"\" value=\"empty\"></form></main>"})
+        document (:browser/document page)
+        form (bridge/query-selector document "#form")
+        field (bridge/query-selector document "#field")
+        button-go (bridge/query-selector document "#button-go")
+        empty-submit (bridge/query-selector document "#empty-submit")
+        document (dom/add-event-listener document form "submit" "submit-handler")
+        button-submitted (document-input/reduce-event document {:event/type :pointer/click
+                                                               :node/id button-go})
+        empty-submitted (document-input/reduce-event document {:event/type :pointer/click
+                                                              :node/id empty-submit})]
+    (is (= true (:submitted? button-submitted)))
+    (is (= [{:name "q" :value "Kotoba" :node/id field}]
+           (:form/data button-submitted)))
+    (is (= [:dom/dispatch-event
+            "submit-handler"
+            {:event/type "submit"
+             :target/id form
+             :submitter/id button-go
+             :form/data [{:name "q" :value "Kotoba" :node/id field}]}]
+           (last (get-in button-submitted [:document :ops]))))
+    (is (= true (:submitted? empty-submitted)))
+    (is (= [{:name "q" :value "Kotoba" :node/id field}]
+           (:form/data empty-submitted)))
+    (is (= [:dom/dispatch-event
+            "submit-handler"
+            {:event/type "submit"
+             :target/id form
+             :submitter/id empty-submit
+             :form/data [{:name "q" :value "Kotoba" :node/id field}]}]
+           (last (get-in empty-submitted [:document :ops]))))))
+
+(deftest disabled-submit-and-reset-controls-do-not-run-default-actions
+  (let [page (browser/load-html {:url "kotoba://submit"
+                                 :html "<main><form id=\"form\"><input id=\"field\" name=\"q\" value=\"initial\"><button id=\"submit\" disabled>Send</button><button id=\"reset\" type=\"reset\" disabled>Reset</button></form></main>"})
+        document (:browser/document page)
+        form (bridge/query-selector document "#form")
+        field (bridge/query-selector document "#field")
+        submit (bridge/query-selector document "#submit")
+        reset (bridge/query-selector document "#reset")
+        document (-> document
+                     (dom/set-attribute field :value "changed")
+                     (dom/add-event-listener form "submit" "submit-handler")
+                     (dom/add-event-listener form "reset" "reset-handler")
+                     (dom/add-event-listener submit "click" "submit-click-handler")
+                     (dom/add-event-listener reset "click" "reset-click-handler"))
+        submit-clicked (document-input/reduce-event document {:event/type :pointer/click
+                                                              :node/id submit})
+        reset-clicked (document-input/reduce-event (:document submit-clicked) {:event/type :pointer/click
+                                                                               :node/id reset})]
+    (is (= false (:handled? submit-clicked)))
+    (is (nil? (:submitted? submit-clicked)))
+    (is (nil? (get-in submit-clicked [:document :focus])))
+    (is (= "changed" (get-in submit-clicked [:document :nodes field :attrs :value])))
+    (is (= (:ops document) (get-in submit-clicked [:document :ops])))
+    (is (= false (:handled? reset-clicked)))
+    (is (nil? (:reset? reset-clicked)))
+    (is (nil? (get-in reset-clicked [:document :focus])))
+    (is (= "changed" (get-in reset-clicked [:document :nodes field :attrs :value])))
+    (is (= (:ops document) (get-in reset-clicked [:document :ops])))))
+
+(deftest disabled-focused-submit-and-reset-controls-ignore-key-activation
+  (let [page (browser/load-html {:url "kotoba://submit"
+                                 :html "<main><form id=\"form\"><input id=\"field\" name=\"q\" value=\"initial\"><button id=\"submit\" disabled>Send</button><button id=\"reset\" type=\"reset\" disabled>Reset</button></form></main>"})
+        document (:browser/document page)
+        form (bridge/query-selector document "#form")
+        field (bridge/query-selector document "#field")
+        submit (bridge/query-selector document "#submit")
+        reset (bridge/query-selector document "#reset")
+        document (-> document
+                     (dom/set-attribute field :value "changed")
+                     (dom/add-event-listener form "submit" "submit-handler")
+                     (dom/add-event-listener form "reset" "reset-handler")
+                     (assoc :focus submit))
+        submit-key (document-input/reduce-event document {:event/type :key/down
+                                                          :key "Enter"})
+        reset-document (assoc (:document submit-key) :focus reset)
+        reset-key (document-input/reduce-event reset-document {:event/type :key/down
+                                                               :key " "})]
+    (is (= false (:handled? submit-key)))
+    (is (nil? (:submitted? submit-key)))
+    (is (= submit (get-in submit-key [:document :focus])))
+    (is (= "changed" (get-in submit-key [:document :nodes field :attrs :value])))
+    (is (= (:ops document) (get-in submit-key [:document :ops])))
+    (is (= false (:handled? reset-key)))
+    (is (nil? (:reset? reset-key)))
+    (is (= reset (get-in reset-key [:document :focus])))
+    (is (= "changed" (get-in reset-key [:document :nodes field :attrs :value])))
+    (is (= (:ops reset-document) (get-in reset-key [:document :ops])))))
+
+(deftest enter-in-text-input-dispatches-form-submit
+  (let [page (browser/load-html {:url "kotoba://submit"
+                                 :html "<main><form id=\"form\"><input id=\"field\" name=\"q\" value=\"Kotoba\"><textarea id=\"message\" name=\"message\">Line</textarea></form></main>"})
+        document (:browser/document page)
+        form (bridge/query-selector document "#form")
+        field (bridge/query-selector document "#field")
+        message (bridge/query-selector document "#message")
+        document (dom/add-event-listener document form "submit" "submit-handler")
+        submitted (document-input/reduce-event document {:event/type :key/down
+                                                        :node/id field
+                                                        :key "Enter"})
+        textarea-enter (document-input/reduce-event (:document submitted) {:event/type :key/down
+                                                                           :node/id message
+                                                                           :key "Enter"})]
+    (is (= true (:submitted? submitted)))
+    (is (= form (:form/id submitted)))
+    (is (= [{:name "q" :value "Kotoba" :node/id field}
+            {:name "message" :value "Line" :node/id message}]
+           (:form/data submitted)))
+    (is (= [:dom/dispatch-event
+            "submit-handler"
+            {:event/type "submit"
+             :target/id form
+             :submitter/id field
+             :form/data [{:name "q" :value "Kotoba" :node/id field}
+                         {:name "message" :value "Line" :node/id message}]
+             :key "Enter"}]
+           (last (get-in submitted [:document :ops]))))
+    (is (= true (:handled? textarea-enter)))
+    (is (= [[:dom/dispatch-event
+             "submit-handler"
+             {:event/type "submit"
+              :target/id form
+              :submitter/id field
+              :form/data [{:name "q" :value "Kotoba" :node/id field}
+                          {:name "message" :value "Line" :node/id message}]
+              :key "Enter"}]]
+           (filterv #(= :dom/dispatch-event (first %))
+                    (get-in textarea-enter [:document :ops]))))))
+
+(deftest image-submit-button-adds-click-coordinate-entries
+  (let [page (browser/load-html {:url "kotoba://submit"
+                                 :html "<main><form id=\"form\"><input id=\"field\" name=\"q\" value=\"Kotoba\"><input id=\"image\" type=\"image\" name=\"spot\" value=\"ignored\"><input id=\"nameless\" type=\"image\" value=\"ignored\"></form></main>"})
+        document (:browser/document page)
+        form (bridge/query-selector document "#form")
+        field (bridge/query-selector document "#field")
+        image (bridge/query-selector document "#image")
+        nameless (bridge/query-selector document "#nameless")
+        document (dom/add-event-listener document form "submit" "submit-handler")
+        submitted (document-input/reduce-event document {:event/type :pointer/click
+                                                        :node/id image
+                                                        :x 17
+                                                        :y 29})
+        keyboard-submitted (document-input/reduce-event document {:event/type :key/down
+                                                                 :node/id image
+                                                                 :key "Enter"})
+        nameless-submitted (document-input/reduce-event document {:event/type :pointer/click
+                                                                 :node/id nameless
+                                                                 :x 5
+                                                                 :y 6})]
+    (is (= true (:submitted? submitted)))
+    (is (= [{:name "q" :value "Kotoba" :node/id field}
+            {:name "spot.x" :value "17" :node/id image}
+            {:name "spot.y" :value "29" :node/id image}]
+           (:form/data submitted)))
+    (is (= [:dom/dispatch-event
+            "submit-handler"
+            {:event/type "submit"
+             :target/id form
+             :submitter/id image
+             :form/data [{:name "q" :value "Kotoba" :node/id field}
+                         {:name "spot.x" :value "17" :node/id image}
+                         {:name "spot.y" :value "29" :node/id image}]
+             :x 17
+             :y 29}]
+           (last (get-in submitted [:document :ops]))))
+    (is (= [{:name "q" :value "Kotoba" :node/id field}
+            {:name "spot.x" :value "0" :node/id image}
+            {:name "spot.y" :value "0" :node/id image}]
+           (:form/data keyboard-submitted)))
+    (is (= [{:name "q" :value "Kotoba" :node/id field}]
+           (:form/data nameless-submitted)))))
+
+(deftest required-controls-block-submit-and-dispatch-invalid
+  (let [page (browser/load-html {:url "kotoba://submit"
+                                 :html "<main><form id=\"form\"><input id=\"hidden\" type=\"hidden\" name=\"token\" required><input id=\"upload\" type=\"file\" name=\"upload\" required value=\"/secret/path.txt\"><input id=\"field\" name=\"q\" required><input id=\"amount\" type=\"number\" name=\"amount\" required><input id=\"flag\" type=\"checkbox\" name=\"flag\" required><select id=\"mode\" name=\"mode\" required><option value=\"\">Choose</option><option id=\"go-option\" value=\"go\">Go</option></select><button id=\"go\">Go</button></form></main>"})
+        document (:browser/document page)
+        form (bridge/query-selector document "#form")
+        hidden (bridge/query-selector document "#hidden")
+        upload (bridge/query-selector document "#upload")
+        field (bridge/query-selector document "#field")
+        amount (bridge/query-selector document "#amount")
+        flag (bridge/query-selector document "#flag")
+        mode (bridge/query-selector document "#mode")
+        go-option (bridge/query-selector document "#go-option")
+        go (bridge/query-selector document "#go")
+        document (-> document
+                     (dom/add-event-listener hidden "invalid" "hidden-invalid")
+                     (dom/add-event-listener upload "invalid" "upload-invalid")
+                     (dom/add-event-listener field "invalid" "field-invalid")
+                     (dom/add-event-listener amount "invalid" "amount-invalid")
+                     (dom/add-event-listener flag "invalid" "flag-invalid")
+                     (dom/add-event-listener mode "invalid" "mode-invalid")
+                     (dom/add-event-listener form "submit" "submit-handler"))
+        result (document-input/reduce-event document {:event/type :pointer/click
+                                                      :node/id go})]
+    (is (= true (:invalid? result)))
+    (is (nil? (:submitted? result)))
+    (is (= form (:form/id result)))
+    (is (= [field amount flag mode] (:invalid/control-ids result)))
+    (is (nil? (get-in result [:document :nodes hidden :attrs :invalid])))
+    (is (nil? (get-in result [:document :nodes hidden :attrs :validation-reason])))
+    (is (nil? (get-in result [:document :nodes upload :attrs :invalid])))
+    (is (nil? (get-in result [:document :nodes upload :attrs :validation-reason])))
+    (is (= true (get-in result [:document :nodes field :attrs :invalid])))
+    (is (= "value-missing" (get-in result [:document :nodes field :attrs :validation-reason])))
+    (is (= true (get-in result [:document :nodes amount :attrs :invalid])))
+    (is (= "value-missing" (get-in result [:document :nodes amount :attrs :validation-reason])))
+    (is (= true (get-in result [:document :nodes flag :attrs :invalid])))
+    (is (= true (get-in result [:document :nodes mode :attrs :invalid])))
+    (let [typed (document-input/reduce-event (:document result) {:event/type :text/input
+                                                                 :node/id field
+                                                                 :text "A"})
+          checked (document-input/reduce-event (:document typed) {:event/type :pointer/click
+                                                                  :node/id flag})
+          selected (document-input/reduce-event (:document checked) {:event/type :pointer/click
+                                                                     :node/id go-option})]
+      (is (= false (get-in typed [:document :nodes field :attrs :invalid])))
+      (is (= "" (get-in typed [:document :nodes field :attrs :validation-reason])))
+      (is (= false (get-in checked [:document :nodes flag :attrs :invalid])))
+      (is (= false (get-in selected [:document :nodes mode :attrs :invalid]))))
+    (is (= [[:dom/dispatch-event
+             "field-invalid"
+             {:event/type "invalid" :target/id field :form/id form :submitter/id go :reason :value-missing}]
+            [:dom/dispatch-event
+             "amount-invalid"
+             {:event/type "invalid" :target/id amount :form/id form :submitter/id go :reason :value-missing}]
+            [:dom/dispatch-event
+             "flag-invalid"
+             {:event/type "invalid" :target/id flag :form/id form :submitter/id go :reason :value-missing}]
+            [:dom/dispatch-event
+             "mode-invalid"
+             {:event/type "invalid" :target/id mode :form/id form :submitter/id go :reason :value-missing}]]
+           (filterv #(= :dom/dispatch-event (first %))
+                    (get-in result [:document :ops]))))))
+
+(deftest novalidate-and-formnovalidate-skip-required-validation
+  (let [page (browser/load-html {:url "kotoba://submit"
+                                 :html "<main><form id=\"form\" novalidate><input id=\"field\" name=\"q\" required><button id=\"go\">Go</button></form><form id=\"strict\"><input id=\"strict-field\" name=\"q\" required><button id=\"skip\" formnovalidate>Skip</button></form><form id=\"external-strict\"><input id=\"external-field\" name=\"q\" required></form><button id=\"external-skip\" form=\"external-strict\" formnovalidate name=\"action\" value=\"skip\">Skip external</button><button id=\"disabled-external-skip\" form=\"external-strict\" formnovalidate disabled name=\"action\" value=\"disabled\">Disabled external</button></main>"})
+        document (:browser/document page)
+        form (bridge/query-selector document "#form")
+        strict (bridge/query-selector document "#strict")
+        external-strict (bridge/query-selector document "#external-strict")
+        field (bridge/query-selector document "#field")
+        strict-field (bridge/query-selector document "#strict-field")
+        external-field (bridge/query-selector document "#external-field")
+        go (bridge/query-selector document "#go")
+        skip (bridge/query-selector document "#skip")
+        external-skip (bridge/query-selector document "#external-skip")
+        disabled-external-skip (bridge/query-selector document "#disabled-external-skip")
+        document (-> document
+                     (dom/add-event-listener form "submit" "submit-handler")
+                     (dom/add-event-listener strict "submit" "strict-submit-handler")
+                     (dom/add-event-listener external-strict "submit" "external-submit-handler")
+                     (dom/add-event-listener external-field "invalid" "external-invalid-handler"))
+        disabled-external-result (document-input/reduce-event document
+                                                              {:event/type :pointer/click
+                                                               :node/id disabled-external-skip})
+        novalidate-result (document-input/reduce-event (:document disabled-external-result)
+                                                       {:event/type :pointer/click
+                                                                 :node/id go})
+        formnovalidate-result (document-input/reduce-event (:document novalidate-result)
+                                                           {:event/type :pointer/click
+                                                            :node/id skip})
+        external-result (document-input/reduce-event (:document disabled-external-result)
+                                                     {:event/type :pointer/click
+                                                      :node/id external-skip})]
+    (is (= true (:submitted? novalidate-result)))
+    (is (= false (get-in novalidate-result [:document :nodes field :attrs :invalid])))
+    (is (= [{:name "q" :value "" :node/id field}]
+           (:form/data novalidate-result)))
+    (is (= true (:submitted? formnovalidate-result)))
+    (is (= false (get-in formnovalidate-result [:document :nodes strict-field :attrs :invalid])))
+    (is (= [{:name "q" :value "" :node/id strict-field}]
+           (:form/data formnovalidate-result)))
+    (is (= false (:handled? disabled-external-result)))
+    (is (nil? (:submitted? disabled-external-result)))
+    (is (nil? (get-in disabled-external-result [:document :nodes external-field :attrs :invalid])))
+    (is (= true (:submitted? external-result)))
+    (is (= external-strict (:form/id external-result)))
+    (is (= false (get-in external-result [:document :nodes external-field :attrs :invalid])))
+    (is (= [{:name "q" :value "" :node/id external-field}
+            {:name "action" :value "skip" :node/id external-skip}]
+           (:form/data external-result)))
+    (is (= [:dom/dispatch-event
+            "external-submit-handler"
+            {:event/type "submit"
+             :target/id external-strict
+             :submitter/id external-skip
+             :form/data [{:name "q" :value "" :node/id external-field}
+                         {:name "action" :value "skip" :node/id external-skip}]}]
+           (last (get-in external-result [:document :ops]))))))
+
+(deftest disabled-fieldset-controls-do-not-submit-or-validate
+  (let [page (browser/load-html {:url "kotoba://submit"
+                                 :html "<main><form id=\"form\"><fieldset disabled><legend><input id=\"legend-field\" name=\"legend\" value=\"ok\"><input id=\"legend-external\" form=\"external\" name=\"legendExternal\" value=\"ok\"></legend><input id=\"field\" name=\"q\" required><input id=\"flag\" type=\"checkbox\" name=\"flag\" checked><input id=\"external-disabled\" form=\"external\" name=\"blocked\" value=\"blocked\" required></fieldset><input id=\"external-outside\" form=\"external\" name=\"outside\" value=\"ok\"><button id=\"go\">Go</button></form><form id=\"external\"><button id=\"external-go\">External</button></form></main>"})
+        document (:browser/document page)
+        legend-field (bridge/query-selector document "#legend-field")
+        legend-external (bridge/query-selector document "#legend-external")
+        field (bridge/query-selector document "#field")
+        flag (bridge/query-selector document "#flag")
+        external (bridge/query-selector document "#external")
+        external-disabled (bridge/query-selector document "#external-disabled")
+        external-outside (bridge/query-selector document "#external-outside")
+        go (bridge/query-selector document "#go")
+        external-go (bridge/query-selector document "#external-go")
+        result (document-input/reduce-event document {:event/type :pointer/click
+                                                      :node/id go})
+        external-result (document-input/reduce-event document {:event/type :pointer/click
+                                                              :node/id external-go})]
+    (is (= true (:submitted? result)))
+    (is (= [{:name "legend" :value "ok" :node/id legend-field}]
+           (:form/data result)))
+    (is (= false (get-in result [:document :nodes field :attrs :invalid])))
+    (is (= "" (get-in result [:document :nodes field :attrs :validation-reason])))
+    (is (nil? (some #(= flag (:node/id %)) (:form/data result))))
+    (is (= true (:submitted? external-result)))
+    (is (= external (:form/id external-result)))
+    (is (= [{:name "legendExternal" :value "ok" :node/id legend-external}
+            {:name "outside" :value "ok" :node/id external-outside}]
+           (:form/data external-result)))
+    (is (nil? (some #(= external-disabled (:node/id %)) (:form/data external-result))))
+    (is (= false (get-in external-result [:document :nodes external-disabled :attrs :invalid])))
+    (is (= "" (get-in external-result [:document :nodes external-disabled :attrs :validation-reason])))))
+
+(deftest text-length-validation-blocks-submit
+  (let [page (browser/load-html {:url "kotoba://submit"
+                                 :html "<main><form id=\"form\"><input id=\"short\" name=\"short\" value=\"ab\" minlength=\"3\"><textarea id=\"long\" name=\"long\" maxlength=\"4\">abcde</textarea><button id=\"go\">Go</button></form><form id=\"external-strict\"><input id=\"external-short\" name=\"short\" value=\"ab\" minlength=\"3\"><textarea id=\"external-long\" name=\"long\" maxlength=\"4\">abcde</textarea></form><button id=\"external-skip\" form=\"external-strict\" formnovalidate name=\"action\" value=\"skip\">Skip external</button><button id=\"disabled-external-skip\" form=\"external-strict\" formnovalidate disabled name=\"action\" value=\"disabled\">Disabled external</button></main>"})
+        document (:browser/document page)
+        form (bridge/query-selector document "#form")
+        external-strict (bridge/query-selector document "#external-strict")
+        short (bridge/query-selector document "#short")
+        long (bridge/query-selector document "#long")
+        external-short (bridge/query-selector document "#external-short")
+        external-long (bridge/query-selector document "#external-long")
+        go (bridge/query-selector document "#go")
+        external-skip (bridge/query-selector document "#external-skip")
+        disabled-external-skip (bridge/query-selector document "#disabled-external-skip")
+        document (-> document
+                     (dom/add-event-listener short "invalid" "short-invalid")
+                     (dom/add-event-listener long "invalid" "long-invalid")
+                     (dom/add-event-listener external-strict "submit" "external-submit-handler")
+                     (dom/add-event-listener external-short "invalid" "external-short-invalid")
+                     (dom/add-event-listener external-long "invalid" "external-long-invalid"))
+        result (document-input/reduce-event document {:event/type :pointer/click
+                                                      :node/id go})
+        disabled-external-result (document-input/reduce-event document
+                                                              {:event/type :pointer/click
+                                                               :node/id disabled-external-skip})
+        external-result (document-input/reduce-event (:document disabled-external-result)
+                                                     {:event/type :pointer/click
+                                                      :node/id external-skip})]
+    (is (= true (:invalid? result)))
+    (is (= [short long] (:invalid/control-ids result)))
+    (is (= "too-short" (get-in result [:document :nodes short :attrs :validation-reason])))
+    (is (= "too-long" (get-in result [:document :nodes long :attrs :validation-reason])))
+    (is (= [[:dom/dispatch-event
+             "short-invalid"
+             {:event/type "invalid" :target/id short :form/id form :submitter/id go :reason :too-short}]
+            [:dom/dispatch-event
+             "long-invalid"
+             {:event/type "invalid" :target/id long :form/id form :submitter/id go :reason :too-long}]]
+           (filterv #(= :dom/dispatch-event (first %))
+                    (get-in result [:document :ops]))))
+    (is (= false (:handled? disabled-external-result)))
+    (is (nil? (:submitted? disabled-external-result)))
+    (is (nil? (get-in disabled-external-result [:document :nodes external-short :attrs :invalid])))
+    (is (nil? (get-in disabled-external-result [:document :nodes external-long :attrs :invalid])))
+    (is (= true (:submitted? external-result)))
+    (is (= external-strict (:form/id external-result)))
+    (is (= false (get-in external-result [:document :nodes external-short :attrs :invalid])))
+    (is (= "" (get-in external-result [:document :nodes external-short :attrs :validation-reason])))
+    (is (= false (get-in external-result [:document :nodes external-long :attrs :invalid])))
+    (is (= "" (get-in external-result [:document :nodes external-long :attrs :validation-reason])))
+    (is (= [{:name "short" :value "ab" :node/id external-short}
+            {:name "long" :value "abcde" :node/id external-long}
+            {:name "action" :value "skip" :node/id external-skip}]
+           (:form/data external-result)))
+    (is (= [:dom/dispatch-event
+            "external-submit-handler"
+            {:event/type "submit"
+             :target/id external-strict
+             :submitter/id external-skip
+             :form/data [{:name "short" :value "ab" :node/id external-short}
+                         {:name "long" :value "abcde" :node/id external-long}
+                         {:name "action" :value "skip" :node/id external-skip}]}]
+           (last (get-in external-result [:document :ops]))))
+    (is (not-any? #(or (= "external-short-invalid" (second %))
+                       (= "external-long-invalid" (second %)))
+                  (get-in external-result [:document :ops])))))
+
+(deftest readonly-controls-submit-data-but-do-not-block-validation
+  (let [page (browser/load-html {:url "kotoba://submit"
+                                 :html "<main><form id=\"form\"><input id=\"field\" name=\"q\" required readonly><textarea id=\"long\" name=\"long\" maxlength=\"4\" readonly>abcde</textarea><button id=\"go\" name=\"action\" value=\"go\">Go</button></form></main>"})
+        document (:browser/document page)
+        form (bridge/query-selector document "#form")
+        field (bridge/query-selector document "#field")
+        long (bridge/query-selector document "#long")
+        go (bridge/query-selector document "#go")
+        document (-> document
+                     (dom/add-event-listener form "submit" "submit-handler")
+                     (dom/add-event-listener field "invalid" "field-invalid")
+                     (dom/add-event-listener long "invalid" "long-invalid"))
+        result (document-input/reduce-event document {:event/type :pointer/click
+                                                      :node/id go})]
+    (is (= true (:submitted? result)))
+    (is (nil? (:invalid? result)))
+    (is (= false (get-in result [:document :nodes field :attrs :invalid])))
+    (is (= "" (get-in result [:document :nodes field :attrs :validation-reason])))
+    (is (= false (get-in result [:document :nodes long :attrs :invalid])))
+    (is (= "" (get-in result [:document :nodes long :attrs :validation-reason])))
+    (is (= [{:name "q" :value "" :node/id field}
+            {:name "long" :value "abcde" :node/id long}
+            {:name "action" :value "go" :node/id go}]
+           (:form/data result)))
+    (is (= [:dom/dispatch-event
+            "submit-handler"
+            {:event/type "submit"
+             :target/id form
+             :submitter/id go
+             :form/data [{:name "q" :value "" :node/id field}
+                         {:name "long" :value "abcde" :node/id long}
+                         {:name "action" :value "go" :node/id go}]}]
+           (last (get-in result [:document :ops]))))
+    (is (not-any? #(or (= "field-invalid" (second %))
+                       (= "long-invalid" (second %)))
+                  (get-in result [:document :ops])))))
+
+(deftest form-attribute-associates-external-controls-and-submitters
+  (let [page (browser/load-html {:url "kotoba://submit"
+                                 :html "<main><form id=\"form\"><input id=\"inside\" name=\"inside\" value=\"one\"></form><input id=\"outside\" form=\"form\" name=\"outside\" value=\"two\"><button id=\"disabled-go\" form=\"form\" disabled formmethod=\"post\" formaction=\"/disabled\" name=\"action\" value=\"disabled\">Disabled</button><button id=\"go\" form=\"form\" name=\"action\" value=\"external\">Go</button></main>"})
+        document (:browser/document page)
+        form (bridge/query-selector document "#form")
+        inside (bridge/query-selector document "#inside")
+        outside (bridge/query-selector document "#outside")
+        disabled-go (bridge/query-selector document "#disabled-go")
+        go (bridge/query-selector document "#go")
+        document (dom/add-event-listener document form "submit" "submit-handler")
+        disabled-submitted (document-input/reduce-event document {:event/type :pointer/click
+                                                                  :node/id disabled-go})
+        submitted (document-input/reduce-event (:document disabled-submitted) {:event/type :pointer/click
+                                                                               :node/id go})]
+    (is (= false (:handled? disabled-submitted)))
+    (is (nil? (:submitted? disabled-submitted)))
+    (is (= (:ops document) (get-in disabled-submitted [:document :ops])))
+    (is (= true (:submitted? submitted)))
+    (is (= form (:form/id submitted)))
+    (is (= [{:name "inside" :value "one" :node/id inside}
+            {:name "outside" :value "two" :node/id outside}
+            {:name "action" :value "external" :node/id go}]
+           (:form/data submitted)))
+    (is (= [:dom/dispatch-event
+            "submit-handler"
+            {:event/type "submit"
+             :target/id form
+             :submitter/id go
+             :form/data [{:name "inside" :value "one" :node/id inside}
+                         {:name "outside" :value "two" :node/id outside}
+                         {:name "action" :value "external" :node/id go}]}]
+           (last (get-in submitted [:document :ops]))))))
+
+(deftest select-option-click-updates-value-and-form-data
+  (let [page (browser/load-html {:url "kotoba://select"
+                                 :html "<main><form id=\"form\"><select id=\"mode\" name=\"mode\"><option id=\"one\" value=\"one\" selected>One</option><option id=\"two\" value=\"two\">Two</option><option id=\"locked\" value=\"locked\" disabled>Locked</option></select><button id=\"go\">Go</button></form></main>"})
+        document (:browser/document page)
+        form (bridge/query-selector document "#form")
+        select (bridge/query-selector document "#mode")
+        one (bridge/query-selector document "#one")
+        two (bridge/query-selector document "#two")
+        locked (bridge/query-selector document "#locked")
+        go (bridge/query-selector document "#go")
+        document (-> document
+                     (dom/add-event-listener select "input" "input-handler")
+                     (dom/add-event-listener select "change" "change-handler")
+                     (dom/add-event-listener form "submit" "submit-handler"))
+        changed (document-input/reduce-event document {:event/type :pointer/click
+                                                       :node/id two})
+        disabled-clicked (document-input/reduce-event (:document changed) {:event/type :pointer/click
+                                                                           :node/id locked})
+        disabled-change (document-input/reduce-event (:document changed) {:event/type :select/change
+                                                                          :node/id select
+                                                                          :value "locked"})
+        submitted (document-input/reduce-event (:document changed) {:event/type :pointer/click
+                                                                    :node/id go})]
+    (is (= true (:selected? changed)))
+    (is (= select (:node/id changed)))
+    (is (= two (:option/id changed)))
+    (is (= "two" (:value changed)))
+    (is (= false (get-in changed [:document :nodes one :attrs :selected])))
+    (is (= true (get-in changed [:document :nodes two :attrs :selected])))
+    (is (= "two" (get-in changed [:document :nodes select :attrs :value])))
+    (is (= [[:dom/dispatch-event
+             "input-handler"
+             {:event/type "input" :target/id select :value "two"}]
+            [:dom/dispatch-event
+             "change-handler"
+             {:event/type "change" :target/id select :value "two"}]]
+           (take-last 2 (get-in changed [:document :ops]))))
+    (is (= false (:handled? disabled-clicked)))
+    (is (= locked (:node/id disabled-clicked)))
+    (is (= false (get-in disabled-clicked [:document :nodes locked :attrs :selected])))
+    (is (= "two" (get-in disabled-clicked [:document :nodes select :attrs :value])))
+    (is (= (get-in changed [:document :ops])
+           (get-in disabled-clicked [:document :ops])))
+    (is (= false (:handled? disabled-change)))
+    (is (= locked (:node/id disabled-change)))
+    (is (= false (get-in disabled-change [:document :nodes locked :attrs :selected])))
+    (is (= "two" (get-in disabled-change [:document :nodes select :attrs :value])))
+    (is (= (get-in changed [:document :ops])
+           (get-in disabled-change [:document :ops])))
+    (is (= [{:name "mode" :value "two" :node/id select}]
+           (:form/data submitted)))))
+
+(deftest disabled-selected-option-is-not-successful-or-valid
+  (let [page (browser/load-html {:url "kotoba://select"
+                                 :html "<main><form id=\"form\"><select id=\"mode\" name=\"mode\" required><option id=\"locked\" value=\"locked\" selected disabled>Locked</option><option id=\"go-option\" value=\"go\">Go</option></select><select id=\"optional\" name=\"optional\"><option id=\"optional-locked\" value=\"secret\" selected disabled>Secret</option><option value=\"public\">Public</option></select><button id=\"go\" name=\"action\" value=\"go\">Go</button></form></main>"})
+        document (:browser/document page)
+        form (bridge/query-selector document "#form")
+        mode (bridge/query-selector document "#mode")
+        optional (bridge/query-selector document "#optional")
+        go (bridge/query-selector document "#go")
+        document (-> document
+                     (dom/add-event-listener form "submit" "submit-handler")
+                     (dom/add-event-listener mode "invalid" "mode-invalid"))
+        invalid-result (document-input/reduce-event document {:event/type :pointer/click
+                                                             :node/id go})
+        skip-result (document-input/reduce-event (dom/set-attribute document form :novalidate true)
+                                                {:event/type :pointer/click
+                                                 :node/id go})]
+    (is (= true (:invalid? invalid-result)))
+    (is (= [mode] (:invalid/control-ids invalid-result)))
+    (is (= "value-missing" (get-in invalid-result [:document :nodes mode :attrs :validation-reason])))
+    (is (= [:dom/dispatch-event
+            "mode-invalid"
+            {:event/type "invalid" :target/id mode :form/id form :submitter/id go :reason :value-missing}]
+           (last (get-in invalid-result [:document :ops]))))
+    (is (= true (:submitted? skip-result)))
+    (is (= [{:name "action" :value "go" :node/id go}]
+           (:form/data skip-result)))
+    (is (nil? (some #(= mode (:node/id %)) (:form/data skip-result))))
+    (is (nil? (some #(= optional (:node/id %)) (:form/data skip-result))))))
+
+(deftest optgroup-disabled-options-are-not-successful-valid-or-selectable
+  (let [page (browser/load-html {:url "kotoba://select"
+                                 :html "<main><form id=\"form\"><select id=\"mode\" name=\"mode\" required><optgroup id=\"locked-group\" disabled><option id=\"locked\" value=\"locked\" selected>Locked</option></optgroup><optgroup label=\"Open\"><option id=\"go-option\" value=\"go\">Go</option></optgroup></select><button id=\"reset\" type=\"reset\">Reset</button><button id=\"go\" name=\"action\" value=\"go\">Go</button></form></main>"})
+        document (:browser/document page)
+        form (bridge/query-selector document "#form")
+        mode (bridge/query-selector document "#mode")
+        locked (bridge/query-selector document "#locked")
+        go-option (bridge/query-selector document "#go-option")
+        reset (bridge/query-selector document "#reset")
+        go (bridge/query-selector document "#go")
+        document (-> document
+                     (dom/add-event-listener mode "input" "input-handler")
+                     (dom/add-event-listener mode "change" "change-handler")
+                     (dom/add-event-listener mode "invalid" "invalid-handler")
+                     (dom/add-event-listener form "submit" "submit-handler"))
+        invalid-result (document-input/reduce-event document {:event/type :pointer/click
+                                                             :node/id go})
+        skip-result (document-input/reduce-event (dom/set-attribute document form :novalidate true)
+                                                {:event/type :pointer/click
+                                                 :node/id go})
+        locked-clicked (document-input/reduce-event document {:event/type :pointer/click
+                                                             :node/id locked})
+        locked-change (document-input/reduce-event document {:event/type :select/change
+                                                            :node/id mode
+                                                            :value "locked"})
+        selected (document-input/reduce-event document {:event/type :pointer/click
+                                                       :node/id go-option})
+        reset-result (document-input/reduce-event (:document selected) {:event/type :pointer/click
+                                                                       :node/id reset})]
+    (is (= true (:invalid? invalid-result)))
+    (is (= [mode] (:invalid/control-ids invalid-result)))
+    (is (= "value-missing" (get-in invalid-result [:document :nodes mode :attrs :validation-reason])))
+    (is (= [:dom/dispatch-event
+            "invalid-handler"
+            {:event/type "invalid" :target/id mode :form/id form :submitter/id go :reason :value-missing}]
+           (last (get-in invalid-result [:document :ops]))))
+    (is (= true (:submitted? skip-result)))
+    (is (= [{:name "action" :value "go" :node/id go}]
+           (:form/data skip-result)))
+    (is (= false (:handled? locked-clicked)))
+    (is (= locked (:node/id locked-clicked)))
+    (is (= true (get-in locked-clicked [:document :nodes locked :attrs :selected])))
+    (is (= (get-in document [:ops])
+           (get-in locked-clicked [:document :ops])))
+    (is (= false (:handled? locked-change)))
+    (is (= locked (:node/id locked-change)))
+    (is (= true (:selected? selected)))
+    (is (= "go" (:value selected)))
+    (is (= false (get-in selected [:document :nodes locked :attrs :selected])))
+    (is (= true (get-in selected [:document :nodes go-option :attrs :selected])))
+    (is (= true (:reset? reset-result)))
+    (is (= true (get-in reset-result [:document :nodes locked :attrs :selected])))
+    (is (= false (get-in reset-result [:document :nodes go-option :attrs :selected])))
+    (is (= "" (get-in reset-result [:document :nodes mode :attrs :value])))))
+
+(deftest multiple-select-submits-each-enabled-selected-option
+  (let [page (browser/load-html {:url "kotoba://select"
+                                 :html "<main><form id=\"form\"><select id=\"tags\" name=\"tag\" multiple required><option id=\"one\" value=\"one\" selected>One</option><option id=\"two\" value=\"two\" selected>Two</option><option id=\"locked\" value=\"locked\" selected disabled>Locked</option><option id=\"three\" value=\"three\">Three</option></select><select id=\"empty\" name=\"empty\" multiple required><option value=\"x\">X</option><option value=\"y\">Y</option></select><button id=\"go\" name=\"action\" value=\"go\">Go</button></form></main>"})
+        document (:browser/document page)
+        form (bridge/query-selector document "#form")
+        tags (bridge/query-selector document "#tags")
+        empty (bridge/query-selector document "#empty")
+        go (bridge/query-selector document "#go")
+        document (-> document
+                     (dom/add-event-listener form "submit" "submit-handler")
+                     (dom/add-event-listener empty "invalid" "empty-invalid"))
+        invalid-result (document-input/reduce-event document {:event/type :pointer/click
+                                                             :node/id go})
+        skip-result (document-input/reduce-event (dom/set-attribute document form :novalidate true)
+                                                {:event/type :pointer/click
+                                                 :node/id go})]
+    (is (= true (:invalid? invalid-result)))
+    (is (= [empty] (:invalid/control-ids invalid-result)))
+    (is (= "value-missing" (get-in invalid-result [:document :nodes empty :attrs :validation-reason])))
+    (is (= [:dom/dispatch-event
+            "empty-invalid"
+            {:event/type "invalid" :target/id empty :form/id form :submitter/id go :reason :value-missing}]
+           (last (get-in invalid-result [:document :ops]))))
+    (is (= true (:submitted? skip-result)))
+    (is (= [{:name "tag" :value "one" :node/id tags}
+            {:name "tag" :value "two" :node/id tags}
+            {:name "action" :value "go" :node/id go}]
+           (:form/data skip-result)))))
+
+(deftest disabled-select-does-not-update-value-or-dispatch-events
+  (let [page (browser/load-html {:url "kotoba://select"
+                                 :html "<main><select id=\"mode\" disabled><option id=\"one\" value=\"one\" selected>One</option><option id=\"two\" value=\"two\">Two</option></select></main>"})
+        document (:browser/document page)
+        select (bridge/query-selector document "#mode")
+        one (bridge/query-selector document "#one")
+        two (bridge/query-selector document "#two")
+        document (-> document
+                     (dom/add-event-listener select "input" "input-handler")
+                     (dom/add-event-listener select "change" "change-handler"))
+        clicked (document-input/reduce-event document {:event/type :pointer/click
+                                                       :node/id two})
+        changed (document-input/reduce-event document {:event/type :select/change
+                                                       :node/id select
+                                                       :value "two"})]
+    (is (= false (:handled? clicked)))
+    (is (= two (:node/id clicked)))
+    (is (nil? (get-in clicked [:document :focus])))
+    (is (= true (get-in clicked [:document :nodes one :attrs :selected])))
+    (is (= false (get-in clicked [:document :nodes two :attrs :selected])))
+    (is (= "one" (get-in clicked [:document :nodes select :attrs :value])))
+    (is (= (:ops document) (get-in clicked [:document :ops])))
+    (is (= false (:handled? changed)))
+    (is (= two (:node/id changed)))
+    (is (nil? (get-in changed [:document :focus])))
+    (is (= true (get-in changed [:document :nodes one :attrs :selected])))
+    (is (= false (get-in changed [:document :nodes two :attrs :selected])))
+    (is (= "one" (get-in changed [:document :nodes select :attrs :value])))
+    (is (= (:ops document) (get-in changed [:document :ops])))))
+
+(deftest fieldset-disabled-select-does-not-update-value-or-dispatch-events
+  (let [page (browser/load-html {:url "kotoba://select"
+                                 :html "<main><fieldset disabled><legend><select id=\"legend-mode\"><option id=\"legend-one\" value=\"one\" selected>One</option><option id=\"legend-two\" value=\"two\">Two</option></select></legend><select id=\"mode\"><option id=\"one\" value=\"one\" selected>One</option><option id=\"two\" value=\"two\">Two</option></select></fieldset></main>"})
+        document (:browser/document page)
+        legend-select (bridge/query-selector document "#legend-mode")
+        legend-two (bridge/query-selector document "#legend-two")
+        select (bridge/query-selector document "#mode")
+        one (bridge/query-selector document "#one")
+        two (bridge/query-selector document "#two")
+        document (-> document
+                     (dom/add-event-listener legend-select "change" "legend-change-handler")
+                     (dom/add-event-listener select "input" "input-handler")
+                     (dom/add-event-listener select "change" "change-handler"))
+        legend-clicked (document-input/reduce-event document {:event/type :pointer/click
+                                                              :node/id legend-two})
+        clicked (document-input/reduce-event document {:event/type :pointer/click
+                                                       :node/id two})
+        changed (document-input/reduce-event document {:event/type :select/change
+                                                       :node/id select
+                                                       :value "two"})]
+    (is (= true (:handled? legend-clicked)))
+    (is (= "two" (get-in legend-clicked [:document :nodes legend-select :attrs :value])))
+    (is (= false (:handled? clicked)))
+    (is (= two (:node/id clicked)))
+    (is (nil? (get-in clicked [:document :focus])))
+    (is (= true (get-in clicked [:document :nodes one :attrs :selected])))
+    (is (= false (get-in clicked [:document :nodes two :attrs :selected])))
+    (is (= "one" (get-in clicked [:document :nodes select :attrs :value])))
+    (is (= (:ops document) (get-in clicked [:document :ops])))
+    (is (= false (:handled? changed)))
+    (is (= two (:node/id changed)))
+    (is (nil? (get-in changed [:document :focus])))
+    (is (= true (get-in changed [:document :nodes one :attrs :selected])))
+    (is (= false (get-in changed [:document :nodes two :attrs :selected])))
+    (is (= "one" (get-in changed [:document :nodes select :attrs :value])))
+    (is (= (:ops document) (get-in changed [:document :ops])))))
+
+(deftest reset-buttons-reset-associated-form-controls
+  (let [page (browser/load-html {:url "kotoba://reset"
+                                 :html "<main><form id=\"form\"><input id=\"field\" name=\"q\" value=\"initial\"><input id=\"amount\" type=\"number\" name=\"amount\" value=\"7\"><input id=\"volume\" type=\"range\" name=\"volume\" value=\"4\"><textarea id=\"message\" name=\"message\">Hello</textarea><input id=\"flag\" type=\"checkbox\"><input id=\"radio\" type=\"radio\"><select id=\"mode\" name=\"mode\"><option id=\"one\" value=\"one\" selected>One</option><option id=\"two\" value=\"two\">Two</option></select><select id=\"tags\" name=\"tag\" multiple><option id=\"tag-one\" value=\"one\" selected>One</option><option id=\"tag-two\" value=\"two\" selected>Two</option><optgroup disabled><option id=\"tag-locked\" value=\"locked\" selected>Locked</option></optgroup><option id=\"tag-three\" value=\"three\">Three</option></select><button id=\"reset\" type=\"reset\">Reset</button></form><input id=\"outside\" form=\"form\" name=\"outside\" value=\"external\"></main>"})
+        document (:browser/document page)
+        form (bridge/query-selector document "#form")
+        field (bridge/query-selector document "#field")
+        amount (bridge/query-selector document "#amount")
+        volume (bridge/query-selector document "#volume")
+        message (bridge/query-selector document "#message")
+        flag (bridge/query-selector document "#flag")
+        radio (bridge/query-selector document "#radio")
+        select (bridge/query-selector document "#mode")
+        one (bridge/query-selector document "#one")
+        two (bridge/query-selector document "#two")
+        tags (bridge/query-selector document "#tags")
+        tag-one (bridge/query-selector document "#tag-one")
+        tag-two (bridge/query-selector document "#tag-two")
+        tag-locked (bridge/query-selector document "#tag-locked")
+        tag-three (bridge/query-selector document "#tag-three")
+        reset (bridge/query-selector document "#reset")
+        outside (bridge/query-selector document "#outside")
+        document (-> document
+                     (dom/set-attribute field :value "changed")
+                     (dom/set-attribute amount :value "99")
+                     (dom/set-attribute volume :value "10")
+                     (dom/set-attribute message :value "Changed")
+                     (dom/set-attribute flag :checked true)
+                     (dom/set-attribute radio :checked true)
+                     (dom/set-attribute one :selected false)
+                     (dom/set-attribute two :selected true)
+                     (dom/set-attribute select :value "two")
+                     (dom/set-attribute tag-one :selected false)
+                     (dom/set-attribute tag-two :selected false)
+                     (dom/set-attribute tag-locked :selected false)
+                     (dom/set-attribute tag-three :selected true)
+                     (dom/set-attribute tags :value "three")
+                     (dom/set-attribute outside :value "changed")
+                     (dom/add-event-listener form "reset" "reset-handler"))
+        result (document-input/reduce-event document {:event/type :pointer/click
+                                                      :node/id reset})
+        attrs (fn [node-id] (get-in result [:document :nodes node-id :attrs]))]
+    (is (= true (:reset? result)))
+    (is (= form (:form/id result)))
+    (is (= "initial" (:value (attrs field))))
+    (is (= 7 (:selection-start (attrs field))))
+    (is (= 7 (:selection-end (attrs field))))
+    (is (= "7" (:value (attrs amount))))
+    (is (= "4" (:value (attrs volume))))
+    (is (nil? (:selection-start (attrs amount))))
+    (is (nil? (:selection-start (attrs volume))))
+    (is (= "Hello" (:value (attrs message))))
+    (is (= false (:checked (attrs flag))))
+    (is (= false (:checked (attrs radio))))
+    (is (= true (:selected (attrs one))))
+    (is (= false (:selected (attrs two))))
+    (is (= "one" (:value (attrs select))))
+    (is (= true (:selected (attrs tag-one))))
+    (is (= true (:selected (attrs tag-two))))
+    (is (= true (:selected (attrs tag-locked))))
+    (is (= false (:selected (attrs tag-three))))
+    (is (= "one" (:value (attrs tags))))
+    (is (= "external" (:value (attrs outside))))
+    (is (= [:dom/dispatch-event
+            "reset-handler"
+            {:event/type "reset" :target/id form :resetter/id reset}]
+           (last (get-in result [:document :ops]))))))
+
+(deftest form-attribute-associates-external-resetters
+  (let [page (browser/load-html {:url "kotoba://reset"
+                                 :html "<main><form id=\"form\"><input id=\"inside\" name=\"inside\" value=\"initial\"><input id=\"foreign-inside\" form=\"other\" name=\"foreign\" value=\"foreign-initial\"></form><form id=\"other\"></form><input id=\"outside\" form=\"form\" name=\"outside\" value=\"external\"><button id=\"reset\" type=\"reset\" form=\"form\">Reset</button><button id=\"other-reset\" type=\"reset\" form=\"other\">Other reset</button><button id=\"disabled-reset\" type=\"reset\" form=\"form\" disabled>Disabled</button></main>"})
+        document (:browser/document page)
+        form (bridge/query-selector document "#form")
+        other (bridge/query-selector document "#other")
+        inside (bridge/query-selector document "#inside")
+        foreign-inside (bridge/query-selector document "#foreign-inside")
+        outside (bridge/query-selector document "#outside")
+        reset (bridge/query-selector document "#reset")
+        other-reset (bridge/query-selector document "#other-reset")
+        disabled-reset (bridge/query-selector document "#disabled-reset")
+        document (-> document
+                     (dom/set-attribute inside :value "changed-inside")
+                     (dom/set-attribute foreign-inside :value "changed-foreign")
+                     (dom/set-attribute outside :value "changed-outside")
+                     (dom/add-event-listener form "reset" "reset-handler")
+                     (dom/add-event-listener other "reset" "other-reset-handler")
+                     (dom/add-event-listener disabled-reset "click" "disabled-click-handler"))
+        disabled-result (document-input/reduce-event document {:event/type :pointer/click
+                                                               :node/id disabled-reset})
+        result (document-input/reduce-event (:document disabled-result) {:event/type :pointer/click
+                                                                         :node/id reset})
+        other-result (document-input/reduce-event (:document result) {:event/type :pointer/click
+                                                                      :node/id other-reset})]
+    (is (= false (:handled? disabled-result)))
+    (is (nil? (:reset? disabled-result)))
+    (is (= "changed-inside" (get-in disabled-result [:document :nodes inside :attrs :value])))
+    (is (= "changed-foreign" (get-in disabled-result [:document :nodes foreign-inside :attrs :value])))
+    (is (= "changed-outside" (get-in disabled-result [:document :nodes outside :attrs :value])))
+    (is (= (:ops document) (get-in disabled-result [:document :ops])))
+    (is (= true (:reset? result)))
+    (is (= form (:form/id result)))
+    (is (= "initial" (get-in result [:document :nodes inside :attrs :value])))
+    (is (= "changed-foreign" (get-in result [:document :nodes foreign-inside :attrs :value])))
+    (is (= "external" (get-in result [:document :nodes outside :attrs :value])))
+    (is (= [:dom/dispatch-event
+            "reset-handler"
+            {:event/type "reset" :target/id form :resetter/id reset}]
+           (last (get-in result [:document :ops]))))
+    (is (= true (:reset? other-result)))
+    (is (= other (:form/id other-result)))
+    (is (= "foreign-initial" (get-in other-result [:document :nodes foreign-inside :attrs :value])))
+    (is (= [:dom/dispatch-event
+            "other-reset-handler"
+            {:event/type "reset" :target/id other :resetter/id other-reset}]
+           (last (get-in other-result [:document :ops]))))))
+
+(deftest focus-transition-dispatches-blur-before-next-focus
+  (let [page (browser/load-html {:url "kotoba://focus"
+                                 :html "<main><input id=\"first\" value=\"a\"><input id=\"second\" value=\"b\"></main>"})
+        document (:browser/document page)
+        first-field (bridge/query-selector document "#first")
+        second-field (bridge/query-selector document "#second")
+        document (-> document
+                     (dom/add-event-listener first-field "blur" "blur-handler")
+                     (dom/add-event-listener second-field "focus" "focus-handler"))
+        first-focus (document-input/reduce-event document {:event/type :pointer/click
+                                                           :node/id first-field})
+        second-focus (document-input/reduce-event (:document first-focus)
+                                                  {:event/type :pointer/click
+                                                   :node/id second-field})]
+    (is (= second-field (get-in second-focus [:document :focus])))
+    (is (= [[:dom/dispatch-event
+             "blur-handler"
+             {:event/type "blur" :target/id first-field}]
+            [:dom/dispatch-event
+             "focus-handler"
+             {:event/type "focus" :target/id second-field}]]
+           (take-last 2 (get-in second-focus [:document :ops]))))))
+
+(deftest disabled-form-controls-do-not-focus-or-edit
+  (let [page (browser/load-html {:url "kotoba://disabled"
+                                 :html "<main><input id=\"field\" value=\"ab\" disabled></main>"})
+        document (:browser/document page)
+        field (bridge/query-selector document "#field")
+        document (-> document
+                     (dom/add-event-listener field "focus" "focus-handler")
+                     (dom/add-event-listener field "click" "click-handler")
+                     (dom/add-event-listener field "input" "input-handler"))
+        focused (document-input/reduce-event document {:event/type :pointer/click
+                                                       :node/id field})
+        typed (document-input/reduce-event (:document focused) {:event/type :text/input
+                                                                :node/id field
+                                                                :text "Z"})]
+    (is (= false (:handled? focused)))
+    (is (nil? (get-in focused [:document :focus])))
+    (is (= "ab" (get-in typed [:document :nodes field :attrs :value])))
+    (is (= false (:handled? typed)))
+    (is (= (:ops document) (get-in typed [:document :ops])))))
+
+(deftest readonly-form-controls-focus-and-select-but-do-not-mutate-value
+  (let [page (browser/load-html {:url "kotoba://readonly"
+                                 :html "<main><input id=\"field\" value=\"ab\" readonly><input id=\"amount\" type=\"number\" value=\"7\" readonly></main>"})
+        document (:browser/document page)
+        field (bridge/query-selector document "#field")
+        amount (bridge/query-selector document "#amount")
+        focused (document-input/reduce-event document {:event/type :pointer/click
+                                                       :node/id field})
+        selected (document-input/reduce-event (:document focused) {:event/type :text/selection
+                                                                   :start 0
+                                                                   :end 2})
+        typed (document-input/reduce-event (:document selected) {:event/type :text/input
+                                                                 :text "Z"})
+        deleted (document-input/reduce-event (:document typed) {:event/type :key/down
+                                                                :key "Backspace"})
+        composed (document-input/reduce-event (:document deleted) {:event/type :composition/start})
+        amount-focused (document-input/reduce-event (:document composed) {:event/type :pointer/click
+                                                                          :node/id amount})
+        amount-typed (document-input/reduce-event (:document amount-focused) {:event/type :text/input
+                                                                              :node/id amount
+                                                                              :text "9"})
+        attrs (get-in composed [:document :nodes field :attrs])]
+    (is (= true (:handled? focused)))
+    (is (= field (get-in focused [:document :focus])))
+    (is (= true (:handled? selected)))
+    (is (= 0 (:selection-start attrs)))
+    (is (= 2 (:selection-end attrs)))
+    (is (= false (:handled? typed)))
+    (is (= false (:handled? deleted)))
+    (is (= false (:handled? composed)))
+    (is (= "ab" (:value attrs)))
+    (is (= true (:handled? amount-focused)))
+    (is (= amount (get-in amount-focused [:document :focus])))
+    (is (= false (:handled? amount-typed)))
+    (is (= "7" (get-in amount-typed [:document :nodes amount :attrs :value])))))
+
+(deftest non-editable-target-is-not-handled
+  (let [page (browser/load-html {:url "kotoba://input"
+                                 :html "<main><p id=\"body\">Text</p></main>"})
+        document (:browser/document page)
+        p (bridge/query-selector document "#body")
+        result (document-input/reduce-event document {:event/type :text/input
+                                                      :node/id p
+                                                      :text "!"})]
+    (is (= false (:handled? result)))
+    (is (= document (:document result)))))

@@ -1,0 +1,457 @@
+(ns browser.browser-use-test
+  (:require [browser.browser-use :as kotoba-browser]
+            [browser.dom-bridge :as dom-bridge]
+            [browseruse.browser :as browser-use]
+            [browseruse.recipe :as recipe]
+            [clojure.edn :as edn]
+            [clojure.string :as str]
+            [clojure.test :refer [deftest is]]))
+
+(deftest kotoba-browser-implements-browser-use-protocol-with-existing-actions
+  (let [calls (atom [])
+        browser (kotoba-browser/kotoba-browser
+                 {:start-url "kotoba://home"
+                  :fetch-fn (fn [{:keys [url] :as request}]
+                              (swap! calls conj request)
+                              (case url
+                                "kotoba://home"
+                                {:status 200
+                                 :body "<main><a href=\"kotoba://next\">Next</a><input name=\"q\" value=\"old\"></main>"}
+
+                                "kotoba://next"
+                                {:status 200
+                                 :body "<main><h1>Next page</h1></main>"}
+
+                                {:status 404
+                                 :body "<main>Missing</main>"}))})]
+    (is (satisfies? browser-use/IBrowser browser))
+    (is (= "kotoba://home" (:url (browser-use/-state browser))))
+    (is (= ["a" "input"]
+           (mapv :tag (:elements (browser-use/-state browser)))))
+
+    (browser-use/-input-text! browser 1 "kotoba")
+    (is (= "kotoba"
+           (get-in (browser-use/-state browser)
+                   [:elements 1 :attrs :value])))
+    (let [node-id (get-in (browser-use/-state browser) [:elements 1 :node/id])]
+      (is (= "kotoba"
+             (get-in (kotoba-browser/session browser)
+                     [:browser.session/page :browser/document :nodes node-id :attrs :value]))))
+
+    (browser-use/-click! browser 0)
+    (is (= "kotoba://next" (:url (browser-use/-state browser))))
+    (is (= ["kotoba://home" "kotoba://next"] (mapv :url @calls)))
+
+    (browser-use/-back! browser)
+    (is (= "kotoba://home" (:url (browser-use/-state browser))))
+    (is (seq (get-in (browser-use/-state browser) [:debug :history-tail])))))
+
+(deftest kotoba-browser-can-load-static-html-for-debug
+  (let [browser (kotoba-browser/kotoba-browser
+                 {:start-url "kotoba://static"
+                  :html "<main><button id=\"save\">Save</button></main>"})
+        state (browser-use/-state browser)
+        debug (:debug state)]
+    (is (= "kotoba://static" (:url state)))
+    (is (= [{:index 0
+             :node/id (get-in state [:elements 0 :node/id])
+             :tag "button"
+             :text "Save"
+             :attrs {:id "save"}}]
+           (:elements state)))
+    (is (seq (:draw-ops debug)))
+    (is (= {:index 0
+            :entries [{:url "kotoba://static"
+                       :status nil
+                       :error nil}]
+            :redirects []
+            :error nil
+            :page-generation 1}
+           (get-in debug [:navigation])))
+    (is (= {:page/commit 1} (:audit-summary debug)))
+    (is (= :page/commit (-> debug :audit-events-tail first :audit/event)))
+    (is (= 1 (get-in debug [:host-recorded :present-count])))
+    (is (= "kotoba://static" (get-in debug [:accessibility-tree :browser/url])))))
+
+(deftest browser-use-state-resolves-link-and-image-input-urls-against-base-uri
+  (let [browser (kotoba-browser/kotoba-browser
+                 {:start-url "https://app.example/docs/index.html"
+                  :html "<head><base href=\"https://cdn.example/assets/\"></head><main><a id=\"next\" href=\"./next.html\">Next</a><input type=\"image\" name=\"go\" src=\"img/submit.png\"></main>"})
+        state (browser-use/-state browser)]
+    (is (= "https://cdn.example/assets/next.html"
+           (get-in state [:elements 0 :attrs :href])))
+    (is (= "https://cdn.example/assets/img/submit.png"
+           (get-in state [:elements 1 :attrs :src])))
+    (is (= 0
+           (recipe/match-index (:elements state)
+                               {:href "cdn.example/assets/next.html"})))))
+
+(deftest kotoba-extended-actions-drive-focus-hover-key-and-scroll-to
+  (let [browser (kotoba-browser/kotoba-browser
+                 {:start-url "kotoba://extended"
+                  :html "<main><section id=\"pane\" overflow=\"auto\" scroll-top=\"0\"><input id=\"field\" name=\"q\" value=\"ab\"><button id=\"save\">Save</button></section></main>"})
+        actions (kotoba-browser/extended-actions browser)
+        action (fn [name] (some #(when (= name (:name %)) %) actions))
+        field-id (get-in (browser-use/-state browser) [:elements 0 :node/id])
+        button-id (get-in (browser-use/-state browser) [:elements 1 :node/id])
+        pane-id (dom-bridge/query-selector
+                 (get-in (kotoba-browser/session browser)
+                         [:browser.session/page :browser/document])
+                 "#pane")]
+    (is (every? action ["focus_element" "hover_element" "press_key"
+                        "scroll_to_element"]))
+
+    ((:fn (action "focus_element")) {:index 0})
+    ((:fn (action "press_key")) {:key "Backspace"})
+    ((:fn (action "hover_element")) {:index 1})
+    ((:fn (action "scroll_to_element")) {:index 1})
+
+    (let [session (kotoba-browser/session browser)
+          state (browser-use/-state browser)
+          history (get-in state [:debug :history-tail])
+          document (get-in session [:browser.session/page :browser/document])]
+      (is (= field-id (:focus document)))
+      (is (= button-id (:hover document)))
+      (is (= "a" (get-in document [:nodes field-id :attrs :value])))
+      (is (some #(and (= :document/input (:event %))
+                      (= :pointer/move (:input/event-type %))
+                      (= true (:handled? %)))
+                history))
+      (is (pos? (get-in document [:nodes pane-id :attrs :scroll-top] 0)))
+      (is (some #(and (= :document/input (:event %))
+                      (= :pointer/wheel (:input/event-type %)))
+                history)))))
+
+(deftest kotoba-browser-use-actions-include-compat-wrapper-and-snapshot
+  (let [shot (java.io.File/createTempFile "kotoba-browser-use-" ".edn")
+        _ (.deleteOnExit shot)
+        browser (kotoba-browser/kotoba-browser
+                 {:start-url "kotoba://compat"
+                  :html "<main><input id=\"field\" value=\"old\"><button id=\"save\">Save</button></main>"})
+        actions (kotoba-browser/browser-use-actions browser)
+        action (fn [name] (some #(when (= name (:name %)) %) actions))]
+    (is (every? action ["navigate" "click_element" "input_text" "get_state"
+                        "click" "click_selector" "click_at"
+                        "type" "type_selector" "check_selector"
+                        "uncheck" "uncheck_selector"
+                        "clear" "clear_selector"
+                        "append_text" "append_text_selector"
+                        "select_selector" "scroll_selector" "scroll_at"
+                        "press" "wait_for" "diagnose" "screenshot"]))
+
+    ((:fn (action "type")) {:index 0 :text "new"})
+    ((:fn (action "press")) {:key "Backspace" :index 0})
+    ((:fn (action "click")) {:index 1})
+    ((:fn (action "screenshot")) {:path (.getPath shot)})
+
+    (let [state (kotoba-browser/get-state browser)
+          snapshot (edn/read-string (slurp shot))
+          prompt ((:fn (action "get_state")) {})]
+      (is (= "ne" (get-in state [:elements 0 :attrs :value])))
+      (is (str/includes? prompt "Current page:"))
+      (is (= :kotoba.browser/snapshot (:format snapshot)))
+      (is (= "kotoba://compat" (:url snapshot)))
+      (is (seq (:draw-ops snapshot)))
+      (is (seq (:accessibility-tree snapshot))))))
+
+(deftest kotoba-browser-use-actions-drive-selector-and-coordinate-form-input
+  (let [browser (kotoba-browser/kotoba-browser
+                 {:start-url "kotoba://targeting"
+                  :html "<main><section id=\"pane\" overflow=\"auto\" scroll-top=\"1\" scroll-left=\"2\" style=\"height: 30px; width: 120px\"><p>Scrollable content</p></section><input id=\"field\" value=\"old\"><input id=\"flag\" type=\"checkbox\"><input id=\"secondary\" type=\"checkbox\" checked><select id=\"mode\"><option value=\"basic\" selected>Basic</option><option value=\"advanced\">Advanced</option></select><button id=\"save\">Save</button></main>"})
+        actions (kotoba-browser/extended-actions browser)
+        action (fn [name] (some #(when (= name (:name %)) %) actions))
+        center (fn [node-id]
+                 (let [op (some #(when (and (= :node (:draw/op %))
+                                             (= node-id (:id %)))
+                                    %)
+                                (get-in (kotoba-browser/get-state browser)
+                                        [:debug :draw-ops]))]
+                   {:x (+ (:x op) (/ (:w op) 2))
+                    :y (+ (:y op) (/ (:h op) 2))}))
+        state (kotoba-browser/get-state browser)
+        field-id (get-in state [:elements 0 :node/id])
+        flag-id (get-in state [:elements 1 :node/id])
+        secondary-id (get-in state [:elements 2 :node/id])
+        mode-id (get-in state [:elements 3 :node/id])
+        save-id (get-in state [:elements 4 :node/id])
+        pane-id (dom-bridge/query-selector
+                 (get-in (kotoba-browser/session browser)
+                         [:browser.session/page :browser/document])
+                 "#pane")
+        flag-center (center flag-id)
+        pane-center (center pane-id)
+        save-center (center save-id)]
+    ((:fn (action "type_selector")) {:selector "#field" :text "typed"})
+    ((:fn (action "append_text_selector")) {:selector "#field" :text "-more"})
+    ((:fn (action "clear_selector")) {:selector "#field"})
+    ((:fn (action "append_text")) {:index 0 :text "again"})
+    ((:fn (action "clear")) {:index 0})
+    ((:fn (action "type")) {:index 0 :text "final"})
+    ((:fn (action "check_selector")) {:selector "#flag"})
+    ((:fn (action "uncheck_selector")) {:selector "#secondary"})
+    ((:fn (action "select_selector")) {:selector "#mode" :value "advanced"})
+    ((:fn (action "click_at")) flag-center)
+    ((:fn (action "check_selector")) {:selector "#flag"})
+    ((:fn (action "uncheck")) {:index 1})
+    ((:fn (action "scroll_selector")) {:selector "#pane"
+                                        :delta_x 3
+                                        :delta_y 11})
+    ((:fn (action "scroll_at")) (assoc pane-center
+                                       :delta_x 1
+                                       :delta_y 5))
+    ((:fn (action "hover_at")) save-center)
+
+    (let [session (kotoba-browser/session browser)
+          document (get-in session [:browser.session/page :browser/document])
+          history (get-in (kotoba-browser/get-state browser) [:debug :history-tail])]
+      (is (= "final" (get-in document [:nodes field-id :attrs :value])))
+      (is (false? (boolean (get-in document [:nodes flag-id :attrs :checked]))))
+      (is (false? (boolean (get-in document [:nodes secondary-id :attrs :checked]))))
+      (is (= "advanced" (get-in document [:nodes mode-id :attrs :value])))
+      (is (= 6 (get-in document [:nodes pane-id :attrs :scroll-left])))
+      (is (= 17 (get-in document [:nodes pane-id :attrs :scroll-top])))
+      (is (= save-id (:hover document)))
+      (is (some #(and (= :document/input (:event %))
+                      (= :pointer/click (:input/event-type %))
+                      (= flag-id (:node/id %))
+                      (= true (:handled? %)))
+                history))
+      (is (some #(and (= :document/input (:event %))
+                      (= :pointer/move (:input/event-type %))
+                      (= save-id (:node/id %))
+                      (= true (:handled? %)))
+                history))
+      (is (some #(and (= :document/input (:event %))
+                      (= :select/change (:input/event-type %))
+                      (= mode-id (:node/id %))
+                      (= true (:handled? %)))
+                history))
+      (is (some #(and (= :document/input (:event %))
+                      (= :pointer/wheel (:input/event-type %))
+                      (= pane-id (:node/id %))
+                      (= true (:handled? %)))
+                history)))))
+
+(deftest kotoba-browser-use-wait-for-checks-current-state
+  (let [browser (kotoba-browser/kotoba-browser
+                 {:start-url "https://app.example/dashboard"
+                  :html "<main><h1>Dashboard</h1><button id=\"save\">Save</button></main>"})
+        actions (kotoba-browser/extended-actions browser)
+        wait-action (some #(when (= "wait_for" (:name %)) %) actions)
+        selector-result (kotoba-browser/wait-for! browser {:selector "#save"})
+        text-result (kotoba-browser/wait-for! browser {:text "dash"})
+        url-result (kotoba-browser/wait-for! browser {:url "/dashboard"})
+        absent-result (kotoba-browser/wait-for! browser {:selector "#missing"
+                                                         :kind "absent"})
+        failed-result (kotoba-browser/wait-for! browser {:selector "#missing"})
+        action-result (edn/read-string ((:fn wait-action)
+                                        {:selector "#save"
+                                         :text "Dashboard"
+                                         :url "app.example"}))]
+    (is (:ok selector-result))
+    (is (get-in selector-result [:matches :selector :node/id]))
+    (is (:ok text-result))
+    (is (= "Dashboard Save" (get-in text-result [:matches :text :value])))
+    (is (:ok url-result))
+    (is (:ok absent-result))
+    (is (false? (:ok failed-result)))
+    (is (:ok action-result))
+    (is (= "https://app.example/dashboard" (:url action-result)))))
+
+(deftest kotoba-browser-use-diagnose-reports-targeting-state-without-throwing
+  (let [browser (kotoba-browser/kotoba-browser
+                 {:start-url "https://app.example/dashboard"
+                  :html "<main><h1>Dashboard</h1><button id=\"save\">Save</button><input name=\"q\" value=\"old\"></main>"})
+        actions (kotoba-browser/extended-actions browser)
+        diagnose-action (some #(when (= "diagnose" (:name %)) %) actions)
+        result (kotoba-browser/diagnose browser {:selector "#save"
+                                                 :index 1
+                                                 :text "Dash"
+                                                 :url "dashboard"})
+        miss (kotoba-browser/diagnose browser {:selector "#missing"
+                                               :index 99
+                                               :text "Settings"})
+        action-result (edn/read-string ((:fn diagnose-action)
+                                        {:selector "#save"
+                                         :text "Dashboard"}))]
+    (is (:ok result))
+    (is (get-in result [:matches :selector :node/id]))
+    (is (= "input" (get-in result [:matches :index :element :tag])))
+    (is (= "Dashboard Save" (get-in result [:matches :text :value])))
+    (is (= "https://app.example/dashboard" (get-in result [:matches :url :value])))
+    (is (= 2 (:candidate-count result)))
+    (is (= ["button" "input"] (mapv :tag (:elements result))))
+    (is (false? (:ok miss)))
+    (is (false? (get-in miss [:matches :selector :ok])))
+    (is (false? (get-in miss [:matches :index :ok])))
+    (is (false? (get-in miss [:matches :text :ok])))
+    (is (:ok action-result))
+    (is (= 2 (:candidate-count action-result)))))
+
+(deftest kotoba-browser-use-actions-expose-navigation-lifecycle
+  (let [calls (atom [])
+        browser (kotoba-browser/kotoba-browser
+                 {:start-url "kotoba://one"
+                  :fetch-fn (fn [{:keys [url] :as request}]
+                              (swap! calls conj request)
+                              (case url
+                                "kotoba://one"
+                                {:status 200 :body "<main><a href=\"kotoba://redir\">One</a></main>"}
+
+                                "kotoba://redir"
+                                {:status 302
+                                 :headers {"Location" "kotoba://two"}}
+
+                                "kotoba://two"
+                                {:status 200 :body "<main><button>Two</button></main>"}
+
+                                "kotoba://fail"
+                                {:status 500 :body "<main>Fail</main>"}))})
+        actions (kotoba-browser/browser-use-actions browser)
+        action (fn [name] (some #(when (= name (:name %)) %) actions))]
+    (is (every? action ["navigate" "go_back" "go_forward" "reload"
+                        "navigation_state"]))
+
+    ((:fn (action "navigate")) {:url "kotoba://redir"})
+    (let [redirected (edn/read-string ((:fn (action "navigation_state")) {}))]
+      (is (= "kotoba://two" (:url (kotoba-browser/get-state browser))))
+      (is (= [{:from "kotoba://redir" :to "kotoba://two" :status 302}]
+             (:redirects redirected)))
+      (is (= ["kotoba://one" "kotoba://two"]
+             (mapv :url (:entries redirected)))))
+
+    ((:fn (action "go_back")) {})
+    (is (= "kotoba://one" (:url (kotoba-browser/get-state browser))))
+    ((:fn (action "go_forward")) {})
+    (is (= "kotoba://two" (:url (kotoba-browser/get-state browser))))
+    ((:fn (action "reload")) {})
+    ((:fn (action "navigate")) {:url "kotoba://fail"})
+
+    (let [failed (edn/read-string ((:fn (action "navigation_state")) {}))
+          history (get-in (kotoba-browser/get-state browser)
+                          [:debug :history-tail])]
+      (is (= ["kotoba://one" "kotoba://redir" "kotoba://two"
+              "kotoba://two" "kotoba://fail"]
+             (mapv :url @calls)))
+      (is (= :navigation/http-error (:error failed)))
+      (is (= "Navigation errorhttp-error" (:error-document-text failed)))
+      (is (= [:navigation/back :page/commit :navigation/forward
+              :page/commit :navigation/reload :navigation/error]
+             (->> history
+                  (map :event)
+                  (filter #{:navigation/back :navigation/forward
+                            :navigation/reload :navigation/error
+                            :page/commit})
+                  (take-last 6)
+                  vec))))))
+
+(deftest kotoba-browser-use-extracts-semantic-page-state
+  (let [browser (kotoba-browser/kotoba-browser
+                 {:start-url "https://app.example/articles/1"
+                  :html "<main><article id=\"story\"><h1>Title</h1><p>Body <strong>copy</strong></p><img alt=\"Diagram\" src=\"./diagram.png\"><a href=\"./next\">Next</a><div hidden>Secret</div></article></main>"})
+        state (kotoba-browser/get-state browser)
+        semantic (kotoba-browser/extract browser :semantic)
+        text (kotoba-browser/extract browser "text")
+        a11y (kotoba-browser/extract browser "accessibility")
+        snapshot (kotoba-browser/extract browser "snapshot")
+        actions (kotoba-browser/extended-actions browser)
+        extract-action (some #(when (= "extract" (:name %)) %) actions)
+        action-semantic (edn/read-string ((:fn extract-action) {:kind "semantic"}))]
+    (is (= "document" (:tag semantic)))
+    (is (= "main" (get-in semantic [:children 0 :tag])))
+    (is (= "article" (get-in semantic [:children 0 :children 0 :tag])))
+    (is (= {:id "story"} (get-in semantic [:children 0 :children 0 :attrs])))
+    (is (= "Title" (get-in semantic [:children 0 :children 0 :children 0 :children 0 :text])))
+    (is (= "Diagram" (get-in semantic [:children 0 :children 0 :children 2 :attrs :alt])))
+    (is (= "https://app.example/articles/diagram.png"
+           (get-in semantic [:children 0 :children 0 :children 2 :attrs :src])))
+    (is (= "https://app.example/articles/next"
+           (get-in semantic [:children 0 :children 0 :children 3 :attrs :href])))
+    (is (not (str/includes? (pr-str semantic) "Secret")))
+    (is (= semantic (:semantic-tree state)))
+    (is (= semantic action-semantic))
+    (is (= "Title Body copy Diagram Next" text))
+    (is (= "https://app.example/articles/1" (:url snapshot)))
+    (is (= semantic (:semantic-tree snapshot)))
+    (is (seq a11y))))
+
+(deftest browser-use-recipe-runs-against-kotoba-browser-without-browser-use-changes
+  (let [calls (atom [])
+        browser (kotoba-browser/kotoba-browser
+                 {:start-url "kotoba://register"
+                  :fetch-fn (fn [{:keys [url] :as request}]
+                              (swap! calls conj request)
+                              (case url
+                                "kotoba://register"
+                                {:status 200
+                                 :body "<main><form><input name=\"name\" placeholder=\"Username\"><input name=\"mail\" placeholder=\"E-mail address\"><button>Continue</button></form></main>"}
+
+                                "kotoba://done"
+                                {:status 200
+                                 :body "<main>Done</main>"}
+
+                                {:status 404 :body "<main>Missing</main>"}))})
+        result (recipe/run-recipe!
+                browser
+                {:steps [{:do :assert :match {:tag "input" :name "name"}}
+                         {:do :fill :match {:tag "input" :name "name"} :value "kotoba"}
+                         {:do :fill :match {:placeholder "e-mail"} :value "dev@kotoba.example"}
+                         {:do :navigate :url "kotoba://done"}]}
+                {})
+        state (:state result)]
+    (is (:ok result))
+    (is (= 4 (count (:log result))))
+    (is (= "kotoba://done" (:url state)))
+    (is (= ["kotoba://register" "kotoba://done"] (mapv :url @calls)))
+    (is (some #(= :document/input (:event %))
+              (get-in state [:debug :history-tail])))
+    (is (some #(= :input/reduce (:audit/event %))
+              (get-in state [:debug :audit-events-tail])))))
+
+(deftest browser-use-recipe-checks-and-selects-through-kotoba-host-capability-opts
+  (let [browser (kotoba-browser/kotoba-browser
+                 {:start-url "kotoba://prefs"
+                  :html "<main><form><input type=\"checkbox\" name=\"terms\"><select name=\"mode\"><option value=\"basic\" selected>Basic</option><option value=\"advanced\">Advanced</option></select></form></main>"})
+        result (recipe/run-recipe!
+                browser
+                {:steps [{:do :check :match {:tag "input" :name "terms"}}
+                         {:do :select :match {:tag "select" :name "mode"} :value "advanced"}]}
+                (kotoba-browser/recipe-options browser))
+        state (:state result)
+        terms-id (get-in state [:elements 0 :node/id])
+        mode-id (get-in state [:elements 1 :node/id])
+        session (kotoba-browser/session browser)]
+    (is (:ok result))
+    (is (= 2 (count (:log result))))
+    (is (= "true" (get-in state [:elements 0 :attrs :checked])))
+    (is (= "advanced" (get-in state [:elements 1 :attrs :value])))
+    (is (= true
+           (get-in session [:browser.session/page :browser/document :nodes terms-id :attrs :checked])))
+    (is (= "advanced"
+           (get-in session [:browser.session/page :browser/document :nodes mode-id :attrs :value])))
+    (is (some #(= :select/change (:input/event-type %))
+              (get-in state [:debug :history-tail])))))
+
+(deftest kotoba-session-mirrors-playwright-session-host-shape
+  (let [shot (java.io.File/createTempFile "kotoba-session-" ".edn")
+        _ (.deleteOnExit shot)
+        {:keys [browser screenshot select check close]}
+        (kotoba-browser/kotoba-session
+         {:start-url "kotoba://session"
+          :html "<main><input type=\"checkbox\" name=\"terms\"><select name=\"mode\"><option value=\"basic\" selected>Basic</option><option value=\"advanced\">Advanced</option></select></main>"})
+        result (recipe/run-recipe!
+                browser
+                {:steps [{:do :check :match {:name "terms"}}
+                         {:do :select :match {:name "mode"} :value "advanced"}
+                         {:do :screenshot :as "after"}]}
+                {:screenshot (fn [_] (screenshot (.getPath shot)))
+                 :select select
+                 :check check})
+        snapshot (edn/read-string (slurp shot))]
+    (is (:ok result))
+    (is (= "true" (get-in (:state result) [:elements 0 :attrs :checked])))
+    (is (= "advanced" (get-in (:state result) [:elements 1 :attrs :value])))
+    (is (= (.getPath shot) (get-in result [:log 2 :path])))
+    (is (= :kotoba.browser/snapshot (:format snapshot)))
+    (is (seq (:draw-ops snapshot)))
+    (is (nil? (close)))))
