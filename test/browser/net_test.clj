@@ -1,0 +1,1177 @@
+(ns browser.net-test
+  (:require [browser.net :as net]
+            [browser.profile :as profile]
+            [browser.storage :as storage]
+            [clojure.test :refer [deftest is]]))
+
+(deftest same-origin-fetch-stores-cookie-and-cache
+  (let [p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "https://app.example" :net/fetch))
+        calls (atom [])
+        result (net/fetch-resource
+                {:store (storage/empty-store)
+                 :profile p
+                 :page-url "https://app.example/page"
+                 :fetch-fn (fn [request]
+                             (swap! calls conj request)
+                             {:status 200
+                              :headers {"set-cookie" "sid=abc; Path=/"}
+                              :body "ok"})}
+                {:url "https://app.example/api" :method :get})
+        cached (net/fetch-resource
+                {:store (:store result)
+                 :profile p
+                 :page-url "https://app.example/page"
+                 :fetch-fn (fn [request]
+                             (swap! calls conj request)
+                             {:status 500 :body "miss"})}
+                {:url "https://app.example/api" :method :get})]
+    (is (= true (:allowed? result)))
+    (is (= {"sid" "abc"}
+           (storage/get-value (:store result) p "https://app.example/api" net/cookie-key)))
+    (is (= true (:cache/hit? cached)))
+    (is (= "ok" (get-in cached [:response :body])))
+    (is (= 1 (count @calls)))))
+
+(deftest cache-policy-skips-no-store-and-non-get-responses
+  (let [p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "https://app.example" :net/fetch))
+        no-store-calls (atom 0)
+        no-store (net/fetch-resource
+                  {:store (storage/empty-store)
+                   :profile p
+                   :page-url "https://app.example/page"
+                   :fetch-fn (fn [_]
+                               (swap! no-store-calls inc)
+                               {:status 200
+                                :headers {"cache-control" "private, no-store"}
+                                :body "uncached"})}
+                  {:url "https://app.example/no-store" :method :get})
+        no-store-again (net/fetch-resource
+                        {:store (:store no-store)
+                         :profile p
+                         :page-url "https://app.example/page"
+                         :fetch-fn (fn [_]
+                                     (swap! no-store-calls inc)
+                                     {:status 200
+                                      :headers {"cache-control" "private, no-store"}
+                                      :body "uncached-again"})}
+                        {:url "https://app.example/no-store" :method :get})
+        post-result (net/fetch-resource
+                     {:store (storage/empty-store)
+                      :profile p
+                      :page-url "https://app.example/page"
+                      :fetch-fn (fn [_]
+                                  {:status 200
+                                   :headers {}
+                                   :body "posted"})}
+                     {:url "https://app.example/post" :method :post})]
+    (is (= false (:cache/hit? no-store)))
+    (is (= false (:cache/hit? no-store-again)))
+    (is (= 2 @no-store-calls))
+    (is (nil? (storage/get-value (:store no-store)
+                                 p
+                                 "https://app.example/no-store"
+                                 net/cache-key)))
+    (is (nil? (storage/get-value (:store post-result)
+                                 p
+                                 "https://app.example/post"
+                                 net/cache-key)))))
+
+(deftest cached-cross-origin-response-misses-when-cors-origin-does-not-match
+  (let [p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "https://api.example" :net/fetch))
+        cached-store (-> (storage/empty-store)
+                         (storage/put-value
+                          p
+                          "https://api.example/data"
+                          net/cache-key
+                          {:status 200
+                           :headers {"access-control-allow-origin" "https://app-a.example"}
+                           :body "for-a"}))
+        calls (atom [])
+        result (net/fetch-resource
+                {:store cached-store
+                 :profile p
+                 :page-url "https://app-b.example/page"
+                 :fetch-fn (fn [request]
+                             (swap! calls conj request)
+                             {:status 200
+                              :headers {"access-control-allow-origin" "https://app-b.example"}
+                              :body "for-b"})}
+                {:url "https://api.example/data" :method :get})]
+    (is (= false (:cache/hit? result)))
+    (is (= true (:allowed? result)))
+    (is (= "for-b" (get-in result [:response :body])))
+    (is (= [{:url "https://api.example/data"
+             :method :get
+             :headers {"origin" "https://app-b.example"}}]
+           @calls))
+    (is (= "for-b"
+           (get-in (storage/get-value (:store result)
+                                      p
+                                      "https://api.example/data"
+                                      net/cache-key)
+                   [:body])))))
+
+(deftest cross-origin-cache-is-partitioned-by-requesting-origin
+  (let [p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "https://api.example" :net/fetch))
+        calls (atom [])
+        fetcher (fn [request]
+                  (swap! calls conj request)
+                  (let [requesting-origin (get-in request [:headers "origin"])]
+                    {:status 200
+                     :headers {"access-control-allow-origin" requesting-origin}
+                     :body (case requesting-origin
+                             "https://app-a.example" "for-a"
+                             "https://app-b.example" "for-b")}))
+        from-a (net/fetch-resource
+                {:store (storage/empty-store)
+                 :profile p
+                 :page-url "https://app-a.example/page"
+                 :fetch-fn fetcher}
+                {:url "https://api.example/data" :method :get})
+        from-b (net/fetch-resource
+                {:store (:store from-a)
+                 :profile p
+                 :page-url "https://app-b.example/page"
+                 :fetch-fn fetcher}
+                {:url "https://api.example/data" :method :get})
+        from-a-again (net/fetch-resource
+                      {:store (:store from-b)
+                       :profile p
+                       :page-url "https://app-a.example/page"
+                       :fetch-fn fetcher}
+                      {:url "https://api.example/data" :method :get})]
+    (is (= false (:cache/hit? from-a)))
+    (is (= false (:cache/hit? from-b)))
+    (is (= true (:cache/hit? from-a-again)))
+    (is (= "for-a" (get-in from-a-again [:response :body])))
+    (is (= ["https://app-a.example" "https://app-b.example"]
+           (mapv #(get-in % [:headers "origin"]) @calls)))
+    (is (= #{[:cross-origin "https://app-a.example" :anonymous]
+             [:cross-origin "https://app-b.example" :anonymous]}
+           (set (keys (storage/get-value (:store from-b)
+                                         p
+                                         "https://api.example/data"
+                                         net/cache-variant-key)))))))
+
+(deftest cross-origin-cache-is-partitioned-by-credentials-mode
+  (let [p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "https://api.example" :net/fetch))
+        calls (atom [])
+        fetcher (fn [request]
+                  (swap! calls conj request)
+                  (if (get-in request [:headers "cookie"])
+                    {:status 200
+                     :headers {"access-control-allow-origin" "https://app.example"
+                               "access-control-allow-credentials" "true"}
+                     :body "private"}
+                    {:status 200
+                     :headers {"access-control-allow-origin" "https://app.example"}
+                     :body "public"}))
+        credentialed (net/fetch-resource
+                      {:store (-> (storage/empty-store)
+                                  (storage/put-value p
+                                                     "https://api.example/data"
+                                                     net/cookie-key
+                                                     {"sid" "abc"}))
+                       :profile p
+                       :page-url "https://app.example/page"
+                       :credentials :include
+                       :fetch-fn fetcher}
+                      {:url "https://api.example/data" :method :get})
+        anonymous (net/fetch-resource
+                   {:store (:store credentialed)
+                    :profile p
+                    :page-url "https://app.example/page"
+                    :credentials :omit
+                    :fetch-fn fetcher}
+                   {:url "https://api.example/data" :method :get})
+        credentialed-again (net/fetch-resource
+                            {:store (:store anonymous)
+                             :profile p
+                             :page-url "https://app.example/page"
+                             :credentials :include
+                             :fetch-fn fetcher}
+                            {:url "https://api.example/data" :method :get})]
+    (is (= false (:cache/hit? credentialed)))
+    (is (= "private" (get-in credentialed [:response :body])))
+    (is (= false (:cache/hit? anonymous)))
+    (is (= "public" (get-in anonymous [:response :body])))
+    (is (= true (:cache/hit? credentialed-again)))
+    (is (= "private" (get-in credentialed-again [:response :body])))
+    (is (= ["sid=abc" nil]
+           (mapv #(get-in % [:headers "cookie"]) @calls)))
+    (is (= #{[:cross-origin "https://app.example" :credentialed]
+             [:cross-origin "https://app.example" :anonymous]}
+           (set (keys (storage/get-value (:store anonymous)
+                                         p
+                                         "https://api.example/data"
+                                         net/cache-variant-key)))))))
+
+(deftest set-cookie-enforces-secure-and-samesite-none-constraints
+  (let [secure-profile (-> (profile/new-profile {:id "default"})
+                           (profile/grant-permission "https://app.example" :net/fetch))
+        insecure-profile (-> (profile/new-profile {:id "default"})
+                             (profile/grant-permission "http://app.example" :net/fetch))
+        secure-result (net/fetch-resource
+                       {:store (storage/empty-store)
+                        :profile secure-profile
+                        :page-url "https://app.example/page"
+                        :fetch-fn (fn [_]
+                                    {:status 200
+                                     :headers {"set-cookie" "sid=secure; Secure; SameSite=None"}
+                                     :body "ok"})}
+                       {:url "https://app.example/api" :method :get})
+        insecure-secure-cookie (net/fetch-resource
+                                {:store (storage/empty-store)
+                                 :profile insecure-profile
+                                 :page-url "http://app.example/page"
+                                 :fetch-fn (fn [_]
+                                             {:status 200
+                                              :headers {"set-cookie" "sid=blocked; Secure"}
+                                              :body "ok"})}
+                                {:url "http://app.example/api" :method :get})
+        insecure-samesite-none (net/fetch-resource
+                                {:store (storage/empty-store)
+                                 :profile insecure-profile
+                                 :page-url "http://app.example/page"
+                                 :fetch-fn (fn [_]
+                                             {:status 200
+                                              :headers {"set-cookie" "sid=blocked; SameSite=None"}
+                                              :body "ok"})}
+                                {:url "http://app.example/api" :method :get})]
+    (is (= {"sid" "secure"}
+           (storage/get-value (:store secure-result)
+                              secure-profile
+                              "https://app.example/api"
+                              net/cookie-key)))
+    (is (nil? (storage/get-value (:store insecure-secure-cookie)
+                                 insecure-profile
+                                 "http://app.example/api"
+                                 net/cookie-key)))
+    (is (nil? (storage/get-value (:store insecure-samesite-none)
+                                 insecure-profile
+                                 "http://app.example/api"
+                                 net/cookie-key)))))
+
+(deftest secure-cookie-is-not-sent-over-http
+  (let [p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "https://app.example" :net/fetch)
+              (profile/grant-permission "http://app.example" :net/fetch))
+        stored (net/fetch-resource
+                {:store (storage/empty-store)
+                 :profile p
+                 :page-url "https://app.example/page"
+                 :fetch-fn (fn [_]
+                             {:status 200
+                              :headers {"set-cookie" "sid=secure; Secure; Path=/"}
+                              :body "ok"})}
+                {:url "https://app.example/api" :method :get})
+        https-seen (atom nil)
+        _https (net/fetch-resource
+                {:store (:store stored)
+                 :profile p
+                 :page-url "https://app.example/page"
+                 :cache? false
+                 :fetch-fn (fn [request]
+                             (reset! https-seen request)
+                             {:status 200 :headers {} :body "ok"})}
+                {:url "https://app.example/account" :method :get})
+        http-seen (atom nil)
+        _http (net/fetch-resource
+               {:store (:store stored)
+                :profile p
+                :page-url "http://app.example/page"
+                :cache? false
+                :fetch-fn (fn [request]
+                            (reset! http-seen request)
+                            {:status 200 :headers {} :body "ok"})}
+               {:url "http://app.example/account" :method :get})
+        overwritten (net/fetch-resource
+                     {:store (:store stored)
+                      :profile p
+                      :page-url "https://app.example/page"
+                      :cache? false
+                      :fetch-fn (fn [_]
+                                  {:status 200
+                                   :headers {"set-cookie" "sid=open; Path=/"}
+                                   :body "ok"})}
+                     {:url "https://app.example/api" :method :get})]
+    (is (= {"sid" true}
+           (storage/get-value (:store stored) p "https://app.example/api" net/cookie-secure-key)))
+    (is (= "sid=secure" (get-in @https-seen [:headers "cookie"])))
+    (is (nil? (get-in @http-seen [:headers "cookie"])))
+    (is (= {}
+           (storage/get-value (:store overwritten) p "https://app.example/api" net/cookie-secure-key)))))
+
+(deftest set-cookie-enforces-secure-and-host-prefixes
+  (let [p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "https://app.example" :net/fetch)
+              (profile/grant-permission "http://app.example" :net/fetch))
+        valid-secure (net/fetch-resource
+                      {:store (storage/empty-store)
+                       :profile p
+                       :page-url "https://app.example/page"
+                       :fetch-fn (fn [_]
+                                   {:status 200
+                                    :headers {"set-cookie" "__Secure-sid=ok; Secure; Path=/"}
+                                    :body "ok"})}
+                      {:url "https://app.example/api" :method :get})
+        missing-secure (net/fetch-resource
+                        {:store (storage/empty-store)
+                         :profile p
+                         :page-url "https://app.example/page"
+                         :fetch-fn (fn [_]
+                                     {:status 200
+                                      :headers {"set-cookie" "__Secure-sid=blocked; Path=/"}
+                                      :body "ok"})}
+                        {:url "https://app.example/api" :method :get})
+        insecure-scheme (net/fetch-resource
+                         {:store (storage/empty-store)
+                          :profile p
+                          :page-url "http://app.example/page"
+                          :fetch-fn (fn [_]
+                                      {:status 200
+                                       :headers {"set-cookie" "__Secure-sid=blocked; Secure; Path=/"}
+                                       :body "ok"})}
+                         {:url "http://app.example/api" :method :get})
+        valid-host (net/fetch-resource
+                    {:store (storage/empty-store)
+                     :profile p
+                     :page-url "https://app.example/page"
+                     :fetch-fn (fn [_]
+                                 {:status 200
+                                  :headers {"set-cookie" "__Host-sid=ok; Secure; Path=/"}
+                                  :body "ok"})}
+                    {:url "https://app.example/api" :method :get})
+        host-with-domain (net/fetch-resource
+                          {:store (storage/empty-store)
+                           :profile p
+                           :page-url "https://app.example/page"
+                           :fetch-fn (fn [_]
+                                       {:status 200
+                                        :headers {"set-cookie" "__Host-sid=blocked; Secure; Domain=app.example; Path=/"}
+                                        :body "ok"})}
+                          {:url "https://app.example/api" :method :get})
+        host-without-root-path (net/fetch-resource
+                                {:store (storage/empty-store)
+                                 :profile p
+                                 :page-url "https://app.example/page"
+                                 :fetch-fn (fn [_]
+                                             {:status 200
+                                              :headers {"set-cookie" "__Host-sid=blocked; Secure; Path=/account"}
+                                              :body "ok"})}
+                                {:url "https://app.example/api" :method :get})]
+    (is (= {"__Secure-sid" "ok"}
+           (storage/get-value (:store valid-secure) p "https://app.example/api" net/cookie-key)))
+    (is (nil? (storage/get-value (:store missing-secure) p "https://app.example/api" net/cookie-key)))
+    (is (nil? (storage/get-value (:store insecure-scheme) p "http://app.example/api" net/cookie-key)))
+    (is (= {"__Host-sid" "ok"}
+           (storage/get-value (:store valid-host) p "https://app.example/api" net/cookie-key)))
+    (is (nil? (storage/get-value (:store host-with-domain) p "https://app.example/" net/cookie-key)))
+    (is (nil? (storage/get-value (:store host-without-root-path) p "https://app.example/api" net/cookie-key)))))
+
+(deftest set-cookie-max-age-zero-deletes-profile-cookie
+  (let [p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "https://app.example" :net/fetch))
+        store (-> (storage/empty-store)
+                  (storage/put-value p "https://app.example/api" net/cookie-key {"sid" "abc" "theme" "dark"}))
+        seen (atom nil)
+        result (net/fetch-resource
+                {:store store
+                 :profile p
+                 :page-url "https://app.example/page"
+                 :fetch-fn (fn [request]
+                             (reset! seen request)
+                             {:status 200
+                              :headers {"set-cookie" "sid=gone; Max-Age=0"}
+                              :body "ok"})}
+                {:url "https://app.example/api" :method :get})]
+    (is (= "sid=abc; theme=dark" (get-in @seen [:headers "cookie"])))
+    (is (= {"theme" "dark"}
+           (storage/get-value (:store result) p "https://app.example/api" net/cookie-key)))))
+
+(deftest set-cookie-expires-past-deletes-profile-cookie
+  (let [p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "https://app.example" :net/fetch))
+        store (-> (storage/empty-store)
+                  (storage/put-value p "https://app.example/api" net/cookie-key {"sid" "abc" "theme" "dark" "old" "1"}))
+        result (net/fetch-resource
+                {:store store
+                 :profile p
+                 :page-url "https://app.example/page"
+                 :fetch-fn (fn [_]
+                             {:status 200
+                              :headers {"set-cookie" "theme=gone; Expires=Thu, 01 Jan 1970 00:00:00 GMT"}
+                              :body "ok"})}
+                {:url "https://app.example/api" :method :get})
+        general-past (net/fetch-resource
+                      {:store (:store result)
+                       :profile p
+                       :page-url "https://app.example/page"
+                       :cache? false
+                       :fetch-fn (fn [_]
+                                   {:status 200
+                                    :headers {"set-cookie" "old=gone; Expires=Wed, 31 Dec 2025 23:59:59 GMT"}
+                                    :body "ok"})}
+                      {:url "https://app.example/api" :method :get})]
+    (is (= {"sid" "abc"}
+           (storage/get-value (:store general-past) p "https://app.example/api" net/cookie-key)))))
+
+(deftest set-cookie-max-age-positive-expires-and-purges-on-send
+  (let [now (atom 1000)
+        p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "https://app.example" :net/fetch))]
+    (with-redefs [net/current-time-ms (fn [] @now)]
+      (let [stored (net/fetch-resource
+                    {:store (storage/empty-store)
+                     :profile p
+                     :page-url "https://app.example/page"
+                     :fetch-fn (fn [_]
+                                 {:status 200
+                                  :headers {"set-cookie" "sid=short; Max-Age=2; Path=/"}
+                                  :body "ok"})}
+                    {:url "https://app.example/api" :method :get})
+            seen-before (atom nil)
+            _ (reset! now 2500)
+            before-expiry (net/fetch-resource
+                           {:store (:store stored)
+                            :profile p
+                            :page-url "https://app.example/page"
+                            :cache? false
+                            :fetch-fn (fn [request]
+                                        (reset! seen-before request)
+                                        {:status 200 :headers {} :body "ok"})}
+                           {:url "https://app.example/account" :method :get})
+            seen-after (atom nil)
+            _ (reset! now 3500)
+            after-expiry (net/fetch-resource
+                          {:store (:store before-expiry)
+                           :profile p
+                           :page-url "https://app.example/page"
+                           :cache? false
+                           :fetch-fn (fn [request]
+                                       (reset! seen-after request)
+                                       {:status 200 :headers {} :body "ok"})}
+                          {:url "https://app.example/account" :method :get})]
+        (is (= {"sid" 3000}
+               (storage/get-value (:store stored) p "https://app.example/api" net/cookie-expires-at-key)))
+        (is (= "sid=short" (get-in @seen-before [:headers "cookie"])))
+        (is (nil? (get-in @seen-after [:headers "cookie"])))
+        (is (= {}
+               (storage/get-value (:store after-expiry) p "https://app.example/api" net/cookie-key)))
+        (is (= {}
+               (storage/get-value (:store after-expiry) p "https://app.example/api" net/cookie-expires-at-key)))))))
+
+(deftest set-cookie-future-expires-is-tracked
+  (let [p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "https://app.example" :net/fetch))
+        result (net/fetch-resource
+                {:store (storage/empty-store)
+                 :profile p
+                 :page-url "https://app.example/page"
+                 :fetch-fn (fn [_]
+                             {:status 200
+                              :headers {"set-cookie" "sid=future; Expires=Tue, 01 Jan 2030 00:00:00 GMT; Path=/"}
+                              :body "ok"})}
+                {:url "https://app.example/api" :method :get})
+        expires-at (get (storage/get-value (:store result)
+                                           p
+                                           "https://app.example/api"
+                                           net/cookie-expires-at-key)
+                        "sid")]
+    (is (= {"sid" "future"}
+           (storage/get-value (:store result) p "https://app.example/api" net/cookie-key)))
+    (is (int? expires-at))
+    (is (< (System/currentTimeMillis) expires-at))))
+
+(deftest multiple-set-cookie-values-are-applied-in-order
+  (let [p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "https://app.example" :net/fetch))
+        store (-> (storage/empty-store)
+                  (storage/put-value p "https://app.example/api" net/cookie-key {"old" "1"}))
+        result (net/fetch-resource
+                {:store store
+                 :profile p
+                 :page-url "https://app.example/page"
+                 :fetch-fn (fn [_]
+                             {:status 200
+                              :headers {"set-cookie" ["sid=abc; Path=/"
+                                                      "old=gone; Max-Age=0"
+                                                      "strict=yes; SameSite=Strict; Path=/secure"]}
+                              :body "ok"})}
+                {:url "https://app.example/api" :method :get})]
+    (is (= {"sid" "abc" "strict" "yes"}
+           (storage/get-value (:store result) p "https://app.example/api" net/cookie-key)))
+    (is (= {"sid" "/" "strict" "/secure"}
+           (storage/get-value (:store result) p "https://app.example/api" net/cookie-path-key)))
+    (is (= {"strict" "strict"}
+           (storage/get-value (:store result) p "https://app.example/api" net/cookie-same-site-key)))))
+
+(deftest set-cookie-httponly-is-tracked-for-script-boundary
+  (let [p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "https://app.example" :net/fetch))
+        stored (net/fetch-resource
+                {:store (storage/empty-store)
+                 :profile p
+                 :page-url "https://app.example/page"
+                 :fetch-fn (fn [_]
+                             {:status 200
+                              :headers {"set-cookie" ["sid=abc; HttpOnly; Path=/"
+                                                      "theme=dark; Path=/"]}
+                              :body "ok"})}
+                {:url "https://app.example/api" :method :get})
+        seen (atom nil)
+        _sent (net/fetch-resource
+               {:store (:store stored)
+                :profile p
+                :page-url "https://app.example/page"
+                :cache? false
+                :fetch-fn (fn [request]
+                            (reset! seen request)
+                            {:status 200 :headers {} :body "ok"})}
+               {:url "https://app.example/account" :method :get})
+        deleted (net/fetch-resource
+                 {:store (:store stored)
+                  :profile p
+                  :page-url "https://app.example/page"
+                  :cache? false
+                  :fetch-fn (fn [_]
+                              {:status 200
+                               :headers {"set-cookie" "sid=gone; Max-Age=0"}
+                               :body "ok"})}
+                 {:url "https://app.example/api" :method :get})]
+    (is (= {"sid" true}
+           (storage/get-value (:store stored) p "https://app.example/api" net/cookie-http-only-key)))
+    (is (= "sid=abc; theme=dark" (get-in @seen [:headers "cookie"])))
+    (is (= "theme=dark"
+           (net/script-cookie-header (:store stored)
+                                     p
+                                     "https://app.example/page"
+                                     "https://app.example/account")))
+    (is (= {}
+           (storage/get-value (:store deleted) p "https://app.example/api" net/cookie-http-only-key)))))
+
+(deftest script-set-cookie-cannot-create-httponly-cookie
+  (let [p (profile/new-profile {:id "default"})
+        store (net/script-set-cookie (storage/empty-store)
+                                     p
+                                     "https://app.example/page"
+                                     "theme=dark; HttpOnly; Path=/")
+        seen (net/script-cookie-header store
+                                       p
+                                       "https://app.example/page"
+                                       "https://app.example/account")]
+    (is (= {"theme" "dark"}
+           (storage/get-value store p "https://app.example/page" net/cookie-key)))
+    (is (= "theme=dark" seen))
+    (is (= {}
+           (storage/get-value store p "https://app.example/page" net/cookie-http-only-key)))))
+
+(deftest script-set-cookie-respects-domain-and-samesite-policy
+  (let [p (profile/new-profile {:id "default"})
+        rejected-domain (net/script-set-cookie (storage/empty-store)
+                                               p
+                                               "https://app.example/page"
+                                               "bad=1; Domain=other.example; Path=/")
+        rejected-samesite-none (net/script-set-cookie (storage/empty-store)
+                                                      p
+                                                      "http://app.example/page"
+                                                      "bad=1; SameSite=None; Path=/")
+        accepted-domain (net/script-set-cookie (storage/empty-store)
+                                               p
+                                               "https://app.example.com/page"
+                                               "shared=yes; Domain=example.com; Path=/")]
+    (is (nil? (storage/get-value rejected-domain p "https://app.example/page" net/cookie-key)))
+    (is (nil? (storage/get-value rejected-samesite-none p "http://app.example/page" net/cookie-key)))
+    (is (= {"shared" "yes"}
+           (storage/get-value accepted-domain p "https://example.com/" net/cookie-key)))
+    (is (= "shared=yes"
+           (net/script-cookie-header accepted-domain
+                                     p
+                                     "https://app.example.com/page"
+                                     "https://api.example.com/data")))))
+
+(deftest cookie-overwrite-clears-stale-metadata
+  (let [p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "https://app.example" :net/fetch))
+        server-stored (net/fetch-resource
+                       {:store (storage/empty-store)
+                        :profile p
+                        :page-url "https://app.example/page"
+                        :fetch-fn (fn [_]
+                                    {:status 200
+                                     :headers {"set-cookie" "sid=locked; HttpOnly; SameSite=Strict; Path=/"}
+                                     :body "ok"})}
+                       {:url "https://app.example/api" :method :get})
+        server-overwritten (net/fetch-resource
+                            {:store (:store server-stored)
+                             :profile p
+                             :page-url "https://app.example/page"
+                             :cache? false
+                             :fetch-fn (fn [_]
+                                         {:status 200
+                                          :headers {"set-cookie" "sid=open; Path=/"}
+                                          :body "ok"})}
+                            {:url "https://app.example/api" :method :get})
+        script-overwritten (net/script-set-cookie (:store server-stored)
+                                                  p
+                                                  "https://app.example/api"
+                                                  "sid=script; HttpOnly; Path=/")]
+    (is (= "sid=open"
+           (net/script-cookie-header (:store server-overwritten)
+                                     p
+                                     "https://app.example/page"
+                                     "https://app.example/api")))
+    (is (= {}
+           (storage/get-value (:store server-overwritten) p "https://app.example/api" net/cookie-http-only-key)))
+    (is (= {}
+           (storage/get-value (:store server-overwritten) p "https://app.example/api" net/cookie-same-site-key)))
+    (is (= "sid=script"
+           (net/script-cookie-header script-overwritten
+                                     p
+                                     "https://app.example/page"
+                                     "https://app.example/api")))
+    (is (= {}
+           (storage/get-value script-overwritten p "https://app.example/api" net/cookie-http-only-key)))))
+
+(deftest cookie-header-respects-set-cookie-path
+  (let [p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "https://app.example" :net/fetch))
+        stored (net/fetch-resource
+                {:store (storage/empty-store)
+                 :profile p
+                 :page-url "https://app.example/admin/login"
+                 :fetch-fn (fn [_]
+                             {:status 200
+                              :headers {"set-cookie" "sid=admin; Path=/admin"}
+                              :body "ok"})}
+                {:url "https://app.example/admin/login" :method :get})
+        admin-seen (atom nil)
+        _admin (net/fetch-resource
+                {:store (:store stored)
+                 :profile p
+                 :page-url "https://app.example/admin/login"
+                 :cache? false
+                 :fetch-fn (fn [request]
+                             (reset! admin-seen request)
+                             {:status 200 :headers {} :body "ok"})}
+                {:url "https://app.example/admin/settings" :method :get})
+        public-seen (atom nil)
+        _public (net/fetch-resource
+                 {:store (:store stored)
+                  :profile p
+                  :page-url "https://app.example/admin/login"
+                  :cache? false
+                  :fetch-fn (fn [request]
+                              (reset! public-seen request)
+                              {:status 200 :headers {} :body "ok"})}
+                 {:url "https://app.example/public" :method :get})]
+    (is (= {"sid" "admin"}
+           (storage/get-value (:store stored) p "https://app.example/admin/login" net/cookie-key)))
+    (is (= {"sid" "/admin"}
+           (storage/get-value (:store stored) p "https://app.example/admin/login" net/cookie-path-key)))
+    (is (= "sid=admin" (get-in @admin-seen [:headers "cookie"])))
+    (is (nil? (get-in @public-seen [:headers "cookie"])))))
+
+(deftest same-name-cookies-can-coexist-across-paths
+  (let [p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "https://app.example" :net/fetch))
+        root-cookie (net/fetch-resource
+                     {:store (storage/empty-store)
+                      :profile p
+                      :page-url "https://app.example/login"
+                      :fetch-fn (fn [_]
+                                  {:status 200
+                                   :headers {"set-cookie" "sid=root; Path=/"}
+                                   :body "ok"})}
+                     {:url "https://app.example/login" :method :get})
+        admin-cookie (net/fetch-resource
+                      {:store (:store root-cookie)
+                       :profile p
+                       :page-url "https://app.example/admin/login"
+                       :cache? false
+                       :fetch-fn (fn [_]
+                                   {:status 200
+                                    :headers {"set-cookie" "sid=admin; Path=/admin"}
+                                    :body "ok"})}
+                      {:url "https://app.example/admin/login" :method :get})
+        admin-seen (atom nil)
+        _admin (net/fetch-resource
+                {:store (:store admin-cookie)
+                 :profile p
+                 :page-url "https://app.example/admin/login"
+                 :cache? false
+                 :fetch-fn (fn [request]
+                             (reset! admin-seen request)
+                             {:status 200 :headers {} :body "ok"})}
+                {:url "https://app.example/admin/settings" :method :get})
+        public-seen (atom nil)
+        _public (net/fetch-resource
+                 {:store (:store admin-cookie)
+                  :profile p
+                  :page-url "https://app.example/login"
+                  :cache? false
+                  :fetch-fn (fn [request]
+                              (reset! public-seen request)
+                              {:status 200 :headers {} :body "ok"})}
+                 {:url "https://app.example/public" :method :get})
+        deleted-admin (net/fetch-resource
+                       {:store (:store admin-cookie)
+                        :profile p
+                        :page-url "https://app.example/admin/login"
+                        :cache? false
+                        :fetch-fn (fn [_]
+                                    {:status 200
+                                     :headers {"set-cookie" "sid=gone; Max-Age=0; Path=/admin"}
+                                     :body "ok"})}
+                       {:url "https://app.example/admin/logout" :method :get})
+        after-delete-seen (atom nil)
+        _after-delete (net/fetch-resource
+                       {:store (:store deleted-admin)
+                        :profile p
+                        :page-url "https://app.example/admin/login"
+                        :cache? false
+                        :fetch-fn (fn [request]
+                                    (reset! after-delete-seen request)
+                                    {:status 200 :headers {} :body "ok"})}
+                       {:url "https://app.example/admin/settings" :method :get})]
+    (is (= {"sid" "admin"}
+           (storage/get-value (:store admin-cookie) p "https://app.example" net/cookie-key)))
+    (is (= {"sid" "/admin"}
+           (storage/get-value (:store admin-cookie) p "https://app.example" net/cookie-path-key)))
+    (is (= "sid=admin" (get-in @admin-seen [:headers "cookie"])))
+    (is (= "sid=root" (get-in @public-seen [:headers "cookie"])))
+    (is (= "sid=root" (get-in @after-delete-seen [:headers "cookie"])))
+    (is (= {"sid" "/"}
+           (storage/get-value (:store deleted-admin) p "https://app.example" net/cookie-path-key)))))
+
+(deftest cookie-header-respects-domain-scope
+  (let [p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "https://app.example.com" :net/fetch)
+              (profile/grant-permission "https://api.example.com" :net/fetch))
+        host-only (net/fetch-resource
+                   {:store (storage/empty-store)
+                    :profile p
+                    :page-url "https://app.example.com/login"
+                    :fetch-fn (fn [_]
+                                {:status 200
+                                 :headers {"set-cookie" "host=only; Path=/"}
+                                 :body "ok"})}
+                   {:url "https://app.example.com/login" :method :get})
+        domain-cookie (net/fetch-resource
+                       {:store (:store host-only)
+                        :profile p
+                        :page-url "https://app.example.com/login"
+                        :cache? false
+                        :fetch-fn (fn [_]
+                                    {:status 200
+                                     :headers {"set-cookie" "shared=yes; Domain=example.com; Path=/"}
+                                     :body "ok"})}
+                       {:url "https://app.example.com/domain" :method :get})
+        api-seen (atom nil)
+        _api (net/fetch-resource
+              {:store (:store domain-cookie)
+               :profile p
+               :page-url "https://app.example.com/login"
+               :credentials :include
+               :cache? false
+               :fetch-fn (fn [request]
+                           (reset! api-seen request)
+                           {:status 200
+                            :headers {"access-control-allow-origin" "https://app.example.com"
+                                      "access-control-allow-credentials" "true"}
+                            :body "ok"})}
+              {:url "https://api.example.com/data" :method :get})
+        rejected (net/fetch-resource
+                  {:store (storage/empty-store)
+                   :profile p
+                   :page-url "https://app.example.com/login"
+                   :fetch-fn (fn [_]
+                               {:status 200
+                                :headers {"set-cookie" "bad=1; Domain=other.example.com; Path=/"}
+                                :body "ok"})}
+                  {:url "https://app.example.com/login" :method :get})]
+    (is (= {"host" "only"}
+           (storage/get-value (:store domain-cookie) p "https://app.example.com/login" net/cookie-key)))
+    (is (= {"shared" "yes"}
+           (storage/get-value (:store domain-cookie) p "https://example.com/" net/cookie-key)))
+    (is (= {"shared" "example.com"}
+           (storage/get-value (:store domain-cookie) p "https://example.com/" net/cookie-domain-key)))
+    (is (= "shared=yes" (get-in @api-seen [:headers "cookie"])))
+    (is (nil? (storage/get-value (:store rejected) p "https://app.example.com/login" net/cookie-key)))))
+
+(deftest set-cookie-rejects-public-suffix-like-domain-scope
+  (let [p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "https://app.example.com" :net/fetch)
+              (profile/grant-permission "https://app.example.co.uk" :net/fetch))
+        top-level (net/fetch-resource
+                   {:store (storage/empty-store)
+                    :profile p
+                    :page-url "https://app.example.com/login"
+                    :fetch-fn (fn [_]
+                                {:status 200
+                                 :headers {"set-cookie" "bad=1; Domain=com; Path=/"}
+                                 :body "ok"})}
+                   {:url "https://app.example.com/login" :method :get})
+        second-level (net/fetch-resource
+                      {:store (storage/empty-store)
+                       :profile p
+                       :page-url "https://app.example.co.uk/login"
+                       :fetch-fn (fn [_]
+                                   {:status 200
+                                    :headers {"set-cookie" "bad=1; Domain=co.uk; Path=/"}
+                                    :body "ok"})}
+                      {:url "https://app.example.co.uk/login" :method :get})
+        accepted (net/fetch-resource
+                  {:store (storage/empty-store)
+                   :profile p
+                   :page-url "https://app.example.com/login"
+                   :fetch-fn (fn [_]
+                               {:status 200
+                                :headers {"set-cookie" "shared=yes; Domain=example.com; Path=/"}
+                                :body "ok"})}
+                  {:url "https://app.example.com/login" :method :get})]
+    (is (nil? (storage/get-value (:store top-level) p "https://com/" net/cookie-key)))
+    (is (nil? (storage/get-value (:store second-level) p "https://co.uk/" net/cookie-key)))
+    (is (= {"shared" "yes"}
+           (storage/get-value (:store accepted) p "https://example.com/" net/cookie-key)))))
+
+(deftest cookie-header-prefers-host-cookie-over-domain-cookie-with-same-name
+  (let [p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "https://api.example.com" :net/fetch))
+        domain-cookie (net/fetch-resource
+                       {:store (storage/empty-store)
+                        :profile p
+                        :page-url "https://api.example.com/login"
+                        :fetch-fn (fn [_]
+                                    {:status 200
+                                     :headers {"set-cookie" "sid=domain; Domain=example.com; Path=/"}
+                                     :body "ok"})}
+                       {:url "https://api.example.com/domain" :method :get})
+        host-cookie (net/fetch-resource
+                     {:store (:store domain-cookie)
+                      :profile p
+                      :page-url "https://api.example.com/login"
+                      :cache? false
+                      :fetch-fn (fn [_]
+                                  {:status 200
+                                   :headers {"set-cookie" "sid=host; Path=/"}
+                                   :body "ok"})}
+                     {:url "https://api.example.com/login" :method :get})
+        seen (atom nil)
+        _sent (net/fetch-resource
+               {:store (:store host-cookie)
+                :profile p
+                :page-url "https://api.example.com/login"
+                :cache? false
+                :fetch-fn (fn [request]
+                            (reset! seen request)
+                            {:status 200 :headers {} :body "ok"})}
+               {:url "https://api.example.com/account" :method :get})]
+    (is (= "sid=host" (get-in @seen [:headers "cookie"])))))
+
+(deftest cookie-header-respects-samesite-strict
+  (let [p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "https://app.example.com" :net/fetch)
+              (profile/grant-permission "https://api.example.com" :net/fetch))
+        stored (net/fetch-resource
+                {:store (storage/empty-store)
+                 :profile p
+                 :page-url "https://app.example.com/login"
+                 :fetch-fn (fn [_]
+                             {:status 200
+                              :headers {"set-cookie" "strict=yes; Domain=example.com; Path=/; SameSite=Strict"}
+                              :body "ok"})}
+                {:url "https://app.example.com/login" :method :get})
+        same-site-seen (atom nil)
+        _same-site (net/fetch-resource
+                    {:store (:store stored)
+                     :profile p
+                     :page-url "https://app.example.com/page"
+                     :credentials :include
+                     :cache? false
+                     :fetch-fn (fn [request]
+                                 (reset! same-site-seen request)
+                                 {:status 200
+                                  :headers {"access-control-allow-origin" "https://app.example.com"
+                                            "access-control-allow-credentials" "true"}
+                                  :body "ok"})}
+                    {:url "https://api.example.com/data" :method :get})
+        cross-site-seen (atom nil)
+        _cross-site (net/fetch-resource
+                     {:store (:store stored)
+                      :profile p
+                      :page-url "https://other.test/page"
+                      :credentials :include
+                      :cache? false
+                      :fetch-fn (fn [request]
+                                  (reset! cross-site-seen request)
+                                  {:status 200
+                                   :headers {"access-control-allow-origin" "https://other.test"
+                                             "access-control-allow-credentials" "true"}
+                                   :body "ok"})}
+                     {:url "https://api.example.com/data" :method :get})]
+    (is (= {"strict" "strict"}
+           (storage/get-value (:store stored) p "https://example.com/" net/cookie-same-site-key)))
+    (is (= "strict=yes" (get-in @same-site-seen [:headers "cookie"])))
+    (is (nil? (get-in @cross-site-seen [:headers "cookie"])))))
+
+(deftest credentialed-fetch-sends-profile-cookie
+  (let [p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "https://app.example" :net/fetch))
+        store (-> (storage/empty-store)
+                  (storage/put-value p "https://app.example/api" net/cookie-key {"sid" "abc"}))
+        seen (atom nil)
+        result (net/fetch-resource
+                {:store store
+                 :profile p
+                 :page-url "https://app.example/page"
+                 :fetch-fn (fn [request]
+                             (reset! seen request)
+                             {:status 200 :headers {} :body "ok"})}
+                {:url "https://app.example/api" :method :post})]
+    (is (= "sid=abc" (get-in @seen [:headers "cookie"])))
+    (is (= true (:allowed? result)))))
+
+(deftest cross-origin-credentialed-fetch-requires-explicit-origin-and-credentials
+  (let [p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "https://api.example" :net/fetch))
+        store (-> (storage/empty-store)
+                  (storage/put-value p "https://api.example/data" net/cookie-key {"sid" "abc"}))
+        wildcard-seen (atom nil)
+        wildcard (net/fetch-resource
+                  {:store store
+                   :profile p
+                   :page-url "https://app.example/page"
+                   :credentials :include
+                   :fetch-fn (fn [request]
+                               (reset! wildcard-seen request)
+                               {:status 200
+                                :headers {"access-control-allow-origin" "*"
+                                          "access-control-allow-credentials" "true"
+                                          "set-cookie" "token=blocked"}
+                                :body "blocked"})}
+                  {:url "https://api.example/data" :method :get})
+        explicit (net/fetch-resource
+                  {:store store
+                   :profile p
+                   :page-url "https://app.example/page"
+                   :credentials :include
+                   :fetch-fn (fn [_]
+                               {:status 200
+                                :headers {"access-control-allow-origin" "https://app.example"
+                                          "access-control-allow-credentials" "true"
+                                          "set-cookie" "token=allowed"}
+                                :body "allowed"})}
+                  {:url "https://api.example/data" :method :get})]
+    (is (= "sid=abc" (get-in @wildcard-seen [:headers "cookie"])))
+    (is (= false (:allowed? wildcard)))
+    (is (= :cors/blocked (get-in wildcard [:response :error])))
+    (is (= {"sid" "abc"}
+           (storage/get-value (:store wildcard) p "https://api.example/data" net/cookie-key)))
+    (is (= true (:allowed? explicit)))
+    (is (= {"sid" "abc" "token" "allowed"}
+           (storage/get-value (:store explicit) p "https://api.example/data" net/cookie-key)))))
+
+(deftest fetch-resource-sends-explicit-referrer-header
+  (let [p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "https://app.example" :net/fetch))
+        seen (atom nil)
+        result (net/fetch-resource
+                {:store (storage/empty-store)
+                 :profile p
+                 :page-url "https://app.example/page"
+                 :fetch-fn (fn [request]
+                             (reset! seen request)
+                             {:status 200 :headers {} :body "ok"})}
+                {:url "https://app.example/api"
+                 :method :post
+                 :referrer/header "https://app.example"})]
+    (is (= "https://app.example" (get-in @seen [:headers "referer"])))
+    (is (not (contains? @seen :referrer/header)))
+    (is (= true (:allowed? result)))))
+
+(deftest cross-origin-fetch-requires-cors-header
+  (let [p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "https://api.example" :net/fetch))
+        blocked (net/fetch-resource
+                 {:store (storage/empty-store)
+                  :profile p
+                  :page-url "https://app.example/page"
+                  :fetch-fn (fn [_] {:status 200 :headers {} :body "blocked"})}
+                 {:url "https://api.example/data" :method :get})
+        allowed (net/fetch-resource
+                 {:store (storage/empty-store)
+                  :profile p
+                  :page-url "https://app.example/page"
+                  :fetch-fn (fn [request]
+                              {:status 200
+                               :headers {"access-control-allow-origin" (get-in request [:headers "origin"])}
+                               :body "allowed"})}
+                 {:url "https://api.example/data" :method :get})]
+    (is (= false (:allowed? blocked)))
+    (is (= :cors/blocked (get-in blocked [:response :error])))
+    (is (= true (:allowed? allowed)))
+    (is (= "allowed" (get-in allowed [:response :body])))))
+
+(deftest cross-origin-non-simple-fetch-runs-preflight
+  (let [p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "https://api.example" :net/fetch))
+        calls (atom [])
+        result (net/fetch-resource
+                {:store (storage/empty-store)
+                 :profile p
+                 :page-url "https://app.example/page"
+                 :fetch-fn (fn [request]
+                             (swap! calls conj request)
+                             (case (:method request)
+                               :options {:status 204
+                                         :headers {"access-control-allow-origin" "https://app.example"
+                                                   "access-control-allow-methods" "PUT"
+                                                   "access-control-allow-headers" "x-kotoba-token"}}
+                               :put {:status 200
+                                     :headers {"access-control-allow-origin" "https://app.example"}
+                                     :body "updated"}))}
+                {:url "https://api.example/data"
+                 :method :put
+                 :headers {"x-kotoba-token" "abc"}})]
+    (is (= [{:url "https://api.example/data"
+             :method :options
+             :headers {"origin" "https://app.example"
+                       "access-control-request-method" "PUT"
+                       "access-control-request-headers" "x-kotoba-token"}}
+            {:url "https://api.example/data"
+             :method :put
+             :headers {"x-kotoba-token" "abc"
+                       "origin" "https://app.example"}}]
+           @calls))
+    (is (= true (:allowed? result)))
+    (is (= "updated" (get-in result [:response :body])))))
+
+(deftest cross-origin-preflight-denial-blocks-fetch
+  (let [p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "https://api.example" :net/fetch))
+        calls (atom [])
+        result (net/fetch-resource
+                {:store (storage/empty-store)
+                 :profile p
+                 :page-url "https://app.example/page"
+                 :fetch-fn (fn [request]
+                             (swap! calls conj request)
+                             {:status 204
+                              :headers {"access-control-allow-origin" "https://app.example"
+                                        "access-control-allow-methods" "GET"
+                                        "access-control-allow-headers" "x-other"}})}
+                {:url "https://api.example/data"
+                 :method :delete
+                 :headers {"x-kotoba-token" "abc"}})]
+    (is (= [{:url "https://api.example/data"
+             :method :options
+             :headers {"origin" "https://app.example"
+                       "access-control-request-method" "DELETE"
+                       "access-control-request-headers" "x-kotoba-token"}}]
+           @calls))
+    (is (= false (:allowed? result)))
+    (is (= :cors/preflight-blocked (get-in result [:response :error])))))
+
+(deftest cross-origin-preflight-wildcard-headers-are-not-credentialed
+  (let [p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "https://api.example" :net/fetch))
+        anonymous-calls (atom [])
+        anonymous (net/fetch-resource
+                   {:store (storage/empty-store)
+                    :profile p
+                    :page-url "https://app.example/page"
+                    :fetch-fn (fn [request]
+                                (swap! anonymous-calls conj request)
+                                (case (:method request)
+                                  :options {:status 204
+                                            :headers {"access-control-allow-origin" "*"
+                                                      "access-control-allow-methods" "PUT"
+                                                      "access-control-allow-headers" "*"}}
+                                  :put {:status 200
+                                        :headers {"access-control-allow-origin" "*"}
+                                        :body "anonymous"}))}
+                   {:url "https://api.example/data"
+                    :method :put
+                    :headers {"x-kotoba-token" "abc"}})
+        credentialed-calls (atom [])
+        credentialed (net/fetch-resource
+                      {:store (storage/empty-store)
+                       :profile p
+                       :page-url "https://app.example/page"
+                       :credentials :include
+                       :fetch-fn (fn [request]
+                                   (swap! credentialed-calls conj request)
+                                   {:status 204
+                                    :headers {"access-control-allow-origin" "https://app.example"
+                                              "access-control-allow-credentials" "true"
+                                              "access-control-allow-methods" "PUT"
+                                              "access-control-allow-headers" "*"}})}
+                      {:url "https://api.example/data"
+                       :method :put
+                       :headers {"x-kotoba-token" "abc"}})]
+    (is (= true (:allowed? anonymous)))
+    (is (= 2 (count @anonymous-calls)))
+    (is (= false (:allowed? credentialed)))
+    (is (= :cors/preflight-blocked (get-in credentialed [:response :error])))
+    (is (= 1 (count @credentialed-calls)))))
+
+(deftest cross-origin-preflight-wildcard-methods-are-not-credentialed
+  (let [p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "https://api.example" :net/fetch))
+        anonymous-calls (atom [])
+        anonymous (net/fetch-resource
+                   {:store (storage/empty-store)
+                    :profile p
+                    :page-url "https://app.example/page"
+                    :fetch-fn (fn [request]
+                                (swap! anonymous-calls conj request)
+                                (case (:method request)
+                                  :options {:status 204
+                                            :headers {"access-control-allow-origin" "*"
+                                                      "access-control-allow-methods" "*"}}
+                                  :delete {:status 200
+                                           :headers {"access-control-allow-origin" "*"}
+                                           :body "anonymous"}))}
+                   {:url "https://api.example/data"
+                    :method :delete})
+        credentialed-calls (atom [])
+        credentialed (net/fetch-resource
+                      {:store (storage/empty-store)
+                       :profile p
+                       :page-url "https://app.example/page"
+                       :credentials :include
+                       :fetch-fn (fn [request]
+                                   (swap! credentialed-calls conj request)
+                                   {:status 204
+                                    :headers {"access-control-allow-origin" "https://app.example"
+                                              "access-control-allow-credentials" "true"
+                                              "access-control-allow-methods" "*"}})}
+                      {:url "https://api.example/data"
+                       :method :delete})]
+    (is (= true (:allowed? anonymous)))
+    (is (= 2 (count @anonymous-calls)))
+    (is (= false (:allowed? credentialed)))
+    (is (= :cors/preflight-blocked (get-in credentialed [:response :error])))
+    (is (= 1 (count @credentialed-calls)))))
+
+(deftest fetch-denied-by-profile-permission-does-not-call-host-fetch
+  (let [p (profile/new-profile {:id "default"})
+        calls (atom [])
+        result (net/fetch-resource
+                {:store (storage/empty-store)
+                 :profile p
+                 :page-url "https://app.example/page"
+                 :fetch-fn (fn [request]
+                             (swap! calls conj request)
+                             {:status 200 :headers {} :body "nope"})}
+                {:url "https://api.example/data" :method :get})]
+    (is (empty? @calls))
+    (is (= false (:allowed? result)))
+    (is (= :permission/not-granted (get-in result [:response :error])))
+    (is (= :deny (get-in result [:permission/decision :permission/decision])))))

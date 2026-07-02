@@ -1,0 +1,2410 @@
+(ns browser.quickjs-execution-test
+  (:require [browser.audit :as audit]
+            [browser.compat.quickjs :as quickjs]
+            [browser.compat.quickjs-binding :as binding]
+            [browser.compat.quickjs-binary :as binary]
+            [browser.compat.quickjs-execution :as execution]
+            [browser.core :as browser]
+            [browser.dom-bridge :as bridge]
+            [browser.net :as net]
+            [browser.profile :as profile]
+            [browser.runtime :as runtime]
+            [browser.session :as session]
+            [browser.storage :as storage]
+            [clojure.test :refer [deftest is]]
+            [kotoba.wasm.dom :as dom]
+            [kotoba.wasm.host :as host]))
+
+(deftest quickjs-engine-eval-applies-capability-imports
+  (let [page (browser/load-html {:url "kotoba://quickjs"
+                                 :html "<main id=\"root\"></main>"})
+        root (bridge/query-selector (:browser/document page) "#root")
+        adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :document (:browser/document page)
+                :engine (fn [{:quickjs/keys [call]}]
+                          (case call
+                            :js/evaluate
+                            {:result :ok
+                             :requests [{:capability :dom/mutate
+                                          :dom/op :create-text
+                                          :text "js-wasm"}
+                                         {:capability :dom/mutate
+                                          :dom/op :append-child
+                                          :parent/id root
+                                          :child/id 3}
+                                         {:capability :timer/schedule
+                                          :callback/id "cb"
+                                          :delay-ms 5}]}
+                            :js/job
+                            {:result :drained
+                             :requests [{:capability :storage/put
+                                          :storage/key "ran"
+                                          :storage/value true}]}
+                            {:result :noop}))})
+        after-eval (execution/evaluate! state {:source "document.body.append('js-wasm')"
+                                               :url "kotoba://quickjs/app.js"})
+        state (execution/drain-event-loop! after-eval 5)]
+    (is (= "js-wasm" (dom/text-content (:document state))))
+    (is (= true (get @(:storage state) "ran")))
+    (is (= [{:capability :dom/mutate :request/id nil :ok? true :result 3 :error nil}
+            {:capability :dom/mutate :request/id nil :ok? true :result 3 :error nil}
+            {:capability :timer/schedule :request/id nil :ok? true :result {:callback/id "cb"}}]
+           (:capability/results after-eval)))
+    (is (= [{:capability :storage/put :request/id nil :ok? true :result true}]
+           (:capability/results state)))
+    (is (= [:js/evaluate :js/job-drain]
+           (mapv :js/call (get-in state [:binding :quickjs/requests]))))))
+
+(deftest quickjs-engine-can-cancel-scheduled-timers
+  (let [adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :engine (fn [{:quickjs/keys [call]}]
+                          (case call
+                            :js/evaluate
+                            {:result :ok
+                             :requests [{:capability :timer/schedule
+                                         :callback/id "cb"
+                                         :delay-ms 0}
+                                        {:capability :timer/cancel
+                                         :callback/id "cb"}]}
+                            :js/job
+                            {:result :unexpected
+                             :requests [{:capability :storage/put
+                                         :storage/key "ran"
+                                         :storage/value true}]}
+                            {:result :noop}))})
+        after-eval (execution/evaluate! state {:source "setTimeout(fn, 0); clearTimeout(id);"})
+        drained (execution/drain-event-loop! after-eval 0)]
+    (is (= [{:capability :timer/schedule :request/id nil :ok? true :result {:callback/id "cb"}}
+            {:capability :timer/cancel :request/id nil :ok? true :result {:callback/id "cb"
+                                                                          :cancelled? true}}]
+           (:capability/results after-eval)))
+    (is (nil? (get @(:storage drained) "ran")))
+    (is (= [:js/evaluate]
+           (mapv :js/call (get-in drained [:binding :quickjs/requests]))))
+    (is (empty? (-> drained :binding :quickjs/results last :job-drain/tasks)))))
+
+(deftest quickjs-engine-can-cancel-animation-frame-timers
+  (let [adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :engine (fn [{:quickjs/keys [call]}]
+                          (case call
+                            :js/evaluate
+                            {:result :ok
+                             :requests [{:capability :timer/schedule
+                                         :timer/kind :animation-frame
+                                         :callback/id "frame"
+                                         :delay-ms 0}
+                                        {:capability :timer/cancel
+                                         :timer/kind :animation-frame
+                                         :callback/id "frame"}]}
+                            :js/job
+                            {:result :unexpected
+                             :requests [{:capability :storage/put
+                                         :storage/key "frame-ran"
+                                         :storage/value true}]}
+                            {:result :noop}))})
+        after-eval (execution/evaluate! state {:source "requestAnimationFrame(fn); cancelAnimationFrame(id);"})
+        drained (execution/drain-event-loop! after-eval 0)]
+    (is (= [{:capability :timer/schedule :request/id nil :ok? true :result {:callback/id "frame"}}
+            {:capability :timer/cancel :request/id nil :ok? true :result {:callback/id "frame"
+                                                                          :cancelled? true}}]
+           (:capability/results after-eval)))
+    (is (nil? (get @(:storage drained) "frame-ran")))
+    (is (empty? (-> drained :binding :quickjs/results last :job-drain/tasks)))))
+
+(deftest quickjs-clipboard-capability-uses-sandboxed-store
+  (let [clipboard (atom {:text "before"})
+        adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :clipboard clipboard
+                :engine (fn [_]
+                          {:result :clipboard
+                           :requests [{:request/id "read-before"
+                                       :capability :clipboard/read
+                                       :clipboard/format :text}
+                                      {:request/id "write-after"
+                                       :capability :clipboard/write
+                                       :clipboard/format :text
+                                       :text "after"}]})})
+        state (execution/evaluate! state {:source "navigator.clipboard.writeText('after')"})]
+    (is (= {:text "after"} @clipboard))
+    (is (= [{:capability :clipboard/read
+             :request/id "read-before"
+             :ok? true
+             :result {:text "before"}}
+            {:capability :clipboard/write
+             :request/id "write-after"
+             :ok? true
+            :result true}]
+           (:capability/results state)))))
+
+(deftest quickjs-window-open-records-context-request
+  (let [adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :engine (fn [_]
+                          {:result :window-open
+                           :requests [{:request/id "open-report"
+                                       :capability :window/open
+                                       :url "https://app.example/report"
+                                       :target "report"
+                                       :window/features "noopener,width=400"}]})})
+        state (execution/evaluate! state {:source "window.open('/report', 'report')"})]
+    (is (= [{:capability :window/open
+             :url "https://app.example/report"
+             :target "report"
+             :opener? false
+             :window/features "noopener,width=400"}]
+           (:context/requests state)))
+    (is (= [{:capability :window/open
+             :request/id "open-report"
+             :ok? true
+             :result {:url "https://app.example/report"
+                      :target "report"
+                      :opener? false
+                      :window/features "noopener,width=400"}}]
+           (:capability/results state)))))
+
+(deftest quickjs-permissions-query-uses-profile-grants
+  (let [profile (-> (profile/new-profile {:id "work"})
+                    (profile/grant-permission "https://app.example" :clipboard/read))
+        adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :net-context {:profile profile
+                              :page-url "https://app.example/page"}
+                :engine (fn [_]
+                          {:result :permissions
+                           :requests [{:request/id "clipboard"
+                                       :capability :permissions/query
+                                       :permission/name "clipboard-read"}
+                                      {:request/id "geo"
+                                       :capability :permissions/query
+                                       :permission/name "geolocation"}]})})
+        state (execution/evaluate! state {:source "navigator.permissions.query({name:'clipboard-read'})"})]
+    (is (= [{:capability :permissions/query
+             :request/id "clipboard"
+             :ok? true
+             :result {:name "clipboard-read"
+                      :capability :clipboard/read
+                      :origin "https://app.example"
+                      :state "granted"
+                      :permission/decision {:permission/decision :allow
+                                            :origin "https://app.example"
+                                            :capability :clipboard/read
+                                            :profile/id "work"}}}
+            {:capability :permissions/query
+             :request/id "geo"
+             :ok? true
+             :result {:name "geolocation"
+                      :capability :geolocation/read
+                      :origin "https://app.example"
+                      :state "denied"
+                      :permission/decision {:permission/decision :deny
+                                            :origin "https://app.example"
+                                            :capability :geolocation/read
+                                            :profile/id "work"
+                                            :reason :permission/not-granted}}}]
+           (:capability/results state)))))
+
+(deftest quickjs-geolocation-read-requires-profile-grant
+  (let [profile (-> (profile/new-profile {:id "work"})
+                    (profile/grant-permission "https://app.example" :geolocation/read))
+        adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        position (atom {:latitude 35.6812
+                        :longitude 139.7671
+                        :accuracy 12.5
+                        :timestamp 42})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :net-context {:profile profile
+                              :page-url "https://app.example/map"}
+                :geolocation position
+                :engine (fn [_]
+                          {:result :geo
+                           :requests [{:request/id "geo"
+                                       :capability :geolocation/read
+                                       :geolocation/op :current-position}]})})
+        state (execution/evaluate! state {:source "navigator.geolocation.getCurrentPosition(ok)"})]
+    (is (= [{:capability :geolocation/read
+             :request/id "geo"
+             :ok? true
+             :result {:coords {:latitude 35.6812
+                               :longitude 139.7671
+                               :accuracy 12.5}
+                      :timestamp 42}
+             :permission/decision {:permission/decision :allow
+                                   :origin "https://app.example"
+                                   :capability :geolocation/read
+                                   :profile/id "work"}}]
+           (:capability/results state)))))
+
+(deftest quickjs-geolocation-read-denies-without-profile-grant
+  (let [profile (profile/new-profile {:id "work"})
+        adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        position (atom {:latitude 35.6812
+                        :longitude 139.7671
+                        :accuracy 12.5})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :net-context {:profile profile
+                              :page-url "https://app.example/map"}
+                :geolocation position
+                :engine (fn [_]
+                          {:result :geo
+                           :requests [{:request/id "geo"
+                                       :capability :geolocation/read
+                                       :geolocation/op :current-position}]})})
+        state (execution/evaluate! state {:source "navigator.geolocation.getCurrentPosition(ok)"})]
+    (is (= [{:capability :geolocation/read
+             :request/id "geo"
+             :ok? false
+             :result nil
+             :error :permission/not-granted
+             :permission/decision {:permission/decision :deny
+                                   :origin "https://app.example"
+                                   :capability :geolocation/read
+                                   :profile/id "work"
+                                   :reason :permission/not-granted}}]
+           (:capability/results state)))
+    (is (= :permission/not-granted (:last-error state)))))
+
+(deftest quickjs-notification-permission-and-show-use-profile-grant
+  (let [profile (-> (profile/new-profile {:id "work"})
+                    (profile/grant-permission "https://app.example" :notification/show))
+        adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :net-context {:profile profile
+                              :page-url "https://app.example/app"}
+                :engine (fn [_]
+                          {:result :notifications
+                           :requests [{:request/id "permission"
+                                       :capability :notification/request-permission
+                                       :notification/op :request-permission}
+                                      {:request/id "show"
+                                       :capability :notification/show
+                                       :title "Ready"
+                                       :notification/options {:body "Done"}}]})})
+        state (execution/evaluate! state {:source "Notification.requestPermission(); new Notification('Ready')"})]
+    (is (= [{:title "Ready"
+             :notification/options {:body "Done"}}]
+           (:notification/requests state)))
+    (is (= [{:capability :notification/request-permission
+             :request/id "permission"
+             :ok? true
+             :result {:state "granted"
+                      :permission/decision {:permission/decision :allow
+                                            :origin "https://app.example"
+                                            :capability :notification/show
+                                            :profile/id "work"}}}
+            {:capability :notification/show
+             :request/id "show"
+             :ok? true
+             :result {:title "Ready"
+                      :notification/options {:body "Done"}}
+             :permission/decision {:permission/decision :allow
+                                   :origin "https://app.example"
+                                   :capability :notification/show
+                                   :profile/id "work"}}]
+           (:capability/results state)))))
+
+(deftest quickjs-notification-show-denies-without-profile-grant
+  (let [profile (profile/new-profile {:id "work"})
+        adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :net-context {:profile profile
+                              :page-url "https://app.example/app"}
+                :engine (fn [_]
+                          {:result :notifications
+                           :requests [{:request/id "show"
+                                       :capability :notification/show
+                                       :title "Ready"}]})})
+        state (execution/evaluate! state {:source "new Notification('Ready')"})]
+    (is (empty? (:notification/requests state)))
+    (is (= [{:capability :notification/show
+             :request/id "show"
+             :ok? false
+             :result nil
+             :error :permission/not-granted
+             :permission/decision {:permission/decision :deny
+                                   :origin "https://app.example"
+                                   :capability :notification/show
+                                   :profile/id "work"
+                                   :reason :permission/not-granted}}]
+           (:capability/results state)))
+    (is (= :permission/not-granted (:last-error state)))))
+
+(deftest quickjs-fullscreen-request-records-context-request-with-profile-grant
+  (let [page (browser/load-html {:url "https://app.example/app"
+                                 :html "<main id=\"app\">Fullscreen</main>"})
+        document (:browser/document page)
+        app (bridge/query-selector document "#app")
+        profile (-> (profile/new-profile {:id "work"})
+                    (profile/grant-permission "https://app.example" :fullscreen/request))
+        adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :document document
+                :net-context {:profile profile
+                              :page-url "https://app.example/app"}
+                :engine (fn [_]
+                          {:result :fullscreen
+                           :requests [{:request/id "fullscreen"
+                                       :capability :fullscreen/request
+                                       :node/id app
+                                       :fullscreen/options {:navigationUI "hide"}}
+                                      {:request/id "exit"
+                                       :capability :fullscreen/exit
+                                       :fullscreen/op :exit}]})})
+        state (execution/evaluate! state {:source "document.getElementById('app').requestFullscreen()"})]
+    (is (nil? (:fullscreen/element state)))
+    (is (= [{:node/id app
+             :fullscreen/options {:navigationUI "hide"}
+             :capability :fullscreen/request}
+            {:exited? true
+             :previous-node/id app
+             :capability :fullscreen/exit}]
+           (:context/requests state)))
+    (is (= [{:capability :fullscreen/request
+             :request/id "fullscreen"
+             :ok? true
+             :result {:node/id app
+                      :fullscreen/options {:navigationUI "hide"}}
+             :permission/decision {:permission/decision :allow
+                                   :origin "https://app.example"
+                                   :capability :fullscreen/request
+                                   :profile/id "work"}}
+            {:capability :fullscreen/exit
+             :request/id "exit"
+             :ok? true
+             :result {:exited? true
+                      :previous-node/id app}}]
+           (:capability/results state)))))
+
+(deftest quickjs-fullscreen-request-denies-without-profile-grant
+  (let [page (browser/load-html {:url "https://app.example/app"
+                                 :html "<main id=\"app\">Fullscreen</main>"})
+        document (:browser/document page)
+        app (bridge/query-selector document "#app")
+        profile (profile/new-profile {:id "work"})
+        adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :document document
+                :net-context {:profile profile
+                              :page-url "https://app.example/app"}
+                :engine (fn [_]
+                          {:result :fullscreen
+                           :requests [{:request/id "fullscreen"
+                                       :capability :fullscreen/request
+                                       :node/id app}]})})
+        state (execution/evaluate! state {:source "document.getElementById('app').requestFullscreen()"})]
+    (is (nil? (:fullscreen/element state)))
+    (is (empty? (:context/requests state)))
+    (is (= [{:capability :fullscreen/request
+             :request/id "fullscreen"
+             :ok? false
+             :result nil
+             :error :permission/not-granted
+             :permission/decision {:permission/decision :deny
+                                   :origin "https://app.example"
+                                   :capability :fullscreen/request
+                                   :profile/id "work"
+                                   :reason :permission/not-granted}}]
+           (:capability/results state)))))
+
+(deftest quickjs-media-capture-requires-camera-and-microphone-grants
+  (let [profile (-> (profile/new-profile {:id "work"})
+                    (profile/grant-permission "https://app.example" :media/camera)
+                    (profile/grant-permission "https://app.example" :media/microphone))
+        adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :net-context {:profile profile
+                              :page-url "https://app.example/call"}
+                :engine (fn [_]
+                          {:result :media
+                           :requests [{:request/id "media"
+                                       :capability :media/capture
+                                       :media/op :get-user-media
+                                       :media/constraints {:video true
+                                                           :audio {:echoCancellation true}}}]})})
+        state (execution/evaluate! state {:source "navigator.mediaDevices.getUserMedia({video:true,audio:true})"})]
+    (is (= [{:stream/id "media-stream-1"
+             :tracks [{:kind :video
+                       :capability :media/camera
+                       :constraints true}
+                      {:kind :audio
+                       :capability :media/microphone
+                       :constraints {:echoCancellation true}}]}]
+           (:media/streams state)))
+    (is (= [{:stream/id "media-stream-1"
+             :tracks [{:kind :video
+                       :capability :media/camera
+                       :constraints true}
+                      {:kind :audio
+                       :capability :media/microphone
+                       :constraints {:echoCancellation true}}]
+             :capability :media/capture}]
+           (:context/requests state)))
+    (is (= true (-> state :capability/results first :ok?)))
+    (is (= [:allow :allow]
+           (mapv :permission/decision
+                 (-> state :capability/results first :permission/decisions))))))
+
+(deftest quickjs-media-capture-denies-missing-microphone-grant
+  (let [profile (-> (profile/new-profile {:id "work"})
+                    (profile/grant-permission "https://app.example" :media/camera))
+        adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :net-context {:profile profile
+                              :page-url "https://app.example/call"}
+                :engine (fn [_]
+                          {:result :media
+                           :requests [{:request/id "media"
+                                       :capability :media/capture
+                                       :media/op :get-user-media
+                                       :media/constraints {:video true
+                                                           :audio true}}]})})
+        state (execution/evaluate! state {:source "navigator.mediaDevices.getUserMedia({video:true,audio:true})"})]
+    (is (empty? (:media/streams state)))
+    (is (empty? (:context/requests state)))
+    (is (= [{:capability :media/capture
+             :request/id "media"
+             :ok? false
+             :result nil
+             :error :permission/not-granted
+             :permission/decisions [{:permission/decision :allow
+                                     :origin "https://app.example"
+                                     :capability :media/camera
+                                     :profile/id "work"}
+                                    {:permission/decision :deny
+                                     :origin "https://app.example"
+                                     :capability :media/microphone
+                                     :profile/id "work"
+                                     :reason :permission/not-granted}]}]
+           (:capability/results state)))
+    (is (= :permission/not-granted (:last-error state)))))
+
+(deftest quickjs-websocket-connect-send-close-records-sandboxed-connection
+  (let [profile (-> (profile/new-profile {:id "work"})
+                    (profile/grant-permission "wss://socket.example" :websocket/connect))
+        adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :net-context {:profile profile
+                              :page-url "https://app.example/chat"}
+                :engine (fn [_]
+                          {:result :websocket
+                           :requests [{:request/id "connect"
+                                       :capability :websocket/connect
+                                       :websocket/id "websocket-1"
+                                       :url "wss://socket.example/chat"
+                                       :websocket/protocols ["chat"]}
+                                      {:request/id "send"
+                                       :capability :websocket/send
+                                       :websocket/id "websocket-1"
+                                       :data "hello"}
+                                      {:request/id "close"
+                                       :capability :websocket/close
+                                       :websocket/id "websocket-1"
+                                       :code 1000
+                                       :reason "done"}]})})
+        state (execution/evaluate! state {:source "const ws = new WebSocket('wss://socket.example/chat')"})]
+    (is (= :closed (get-in state [:websocket/connections "websocket-1" :ready-state])))
+    (is (= [{:websocket/id "websocket-1" :data "hello"}]
+           (:websocket/messages state)))
+    (is (= [{:websocket/id "websocket-1"
+             :url "wss://socket.example/chat"
+             :ready-state :open
+             :websocket/protocols ["chat"]
+             :capability :websocket/connect}
+            {:websocket/id "websocket-1"
+             :closed? true
+             :code 1000
+             :reason "done"
+             :capability :websocket/close}]
+           (:context/requests state)))
+    (is (= [true true true]
+           (mapv :ok? (:capability/results state))))))
+
+(deftest quickjs-websocket-connect-denies-without-target-origin-grant
+  (let [profile (profile/new-profile {:id "work"})
+        adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :net-context {:profile profile
+                              :page-url "https://app.example/chat"}
+                :engine (fn [_]
+                          {:result :websocket
+                           :requests [{:request/id "connect"
+                                       :capability :websocket/connect
+                                       :websocket/id "websocket-1"
+                                       :url "wss://socket.example/chat"}]})})
+        state (execution/evaluate! state {:source "new WebSocket('wss://socket.example/chat')"})]
+    (is (empty? (:websocket/connections state)))
+    (is (empty? (:context/requests state)))
+    (is (= [{:capability :websocket/connect
+             :request/id "connect"
+             :ok? false
+             :result nil
+             :error :permission/not-granted
+             :permission/decision {:permission/decision :deny
+                                   :origin "wss://socket.example"
+                                   :capability :websocket/connect
+                                   :profile/id "work"
+                                   :reason :permission/not-granted}}]
+           (:capability/results state)))))
+
+(deftest quickjs-crypto-random-uses-sandboxed-provider
+  (let [adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :crypto-random-bytes [1 2 3 4 5]
+                :crypto-random-uuids ["11111111-1111-4111-8111-111111111111"]
+                :engine (fn [_]
+                          {:result :crypto
+                           :requests [{:request/id "bytes"
+                                       :capability :crypto/random-values
+                                       :crypto/op :random-values
+                                       :length 4}
+                                      {:request/id "uuid"
+                                       :capability :crypto/random-uuid
+                                       :crypto/op :random-uuid}]})})
+        state (execution/evaluate! state {:source "crypto.getRandomValues(new Uint8Array(4)); crypto.randomUUID()"})]
+    (is (= [5] (:crypto/random-bytes state)))
+    (is (empty? (:crypto/random-uuids state)))
+    (is (= [{:capability :crypto/random-values
+             :request/id "bytes"
+             :ok? true
+             :result {:bytes [1 2 3 4]}}
+            {:capability :crypto/random-uuid
+             :request/id "uuid"
+             :ok? true
+             :result {:uuid "11111111-1111-4111-8111-111111111111"}}]
+           (:capability/results state)))))
+
+(deftest quickjs-crypto-random-defaults-are-deterministic-without-provider
+  (let [adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :engine (fn [_]
+                          {:result :crypto
+                           :requests [{:request/id "bytes"
+                                       :capability :crypto/random-values
+                                       :crypto/op :random-values
+                                       :length 3}
+                                      {:request/id "uuid"
+                                       :capability :crypto/random-uuid
+                                       :crypto/op :random-uuid}]})})
+        state (execution/evaluate! state {:source "crypto.getRandomValues(new Uint8Array(3)); crypto.randomUUID()"})]
+    (is (= [{:capability :crypto/random-values
+             :request/id "bytes"
+             :ok? true
+             :result {:bytes [0 0 0]}}
+            {:capability :crypto/random-uuid
+             :request/id "uuid"
+             :ok? true
+             :result {:uuid "00000000-0000-4000-8000-000000000000"}}]
+           (:capability/results state)))))
+
+(deftest quickjs-worker-create-message-terminate-records-sandboxed-worker
+  (let [profile (-> (profile/new-profile {:id "work"})
+                    (profile/grant-permission "https://app.example" :worker/create))
+        adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :net-context {:profile profile
+                              :page-url "https://app.example/app"}
+                :engine (fn [_]
+                          {:result :worker
+                           :requests [{:request/id "create"
+                                       :capability :worker/create
+                                       :worker/id "worker-1"
+                                       :url "https://app.example/worker.js"
+                                       :worker/options {:type "module"}}
+                                      {:request/id "message"
+                                       :capability :worker/post-message
+                                       :worker/id "worker-1"
+                                       :message {:hello "world"}}
+                                      {:request/id "terminate"
+                                       :capability :worker/terminate
+                                       :worker/id "worker-1"}]})})
+        state (execution/evaluate! state {:source "const w = new Worker('/worker.js')"})]
+    (is (= :terminated (get-in state [:worker/instances "worker-1" :state])))
+    (is (= [{:worker/id "worker-1"
+             :message {:hello "world"}}]
+           (:worker/messages state)))
+    (is (= [{:worker/id "worker-1"
+             :url "https://app.example/worker.js"
+             :state :running
+             :worker/options {:type "module"}
+             :capability :worker/create}
+            {:worker/id "worker-1"
+             :terminated? true
+             :capability :worker/terminate}]
+           (:context/requests state)))
+    (is (= [true true true]
+           (mapv :ok? (:capability/results state))))))
+
+(deftest quickjs-worker-create-denies-without-script-origin-grant
+  (let [profile (profile/new-profile {:id "work"})
+        adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :net-context {:profile profile
+                              :page-url "https://app.example/app"}
+                :engine (fn [_]
+                          {:result :worker
+                           :requests [{:request/id "create"
+                                       :capability :worker/create
+                                       :worker/id "worker-1"
+                                       :url "https://app.example/worker.js"}]})})
+        state (execution/evaluate! state {:source "new Worker('/worker.js')"})]
+    (is (empty? (:worker/instances state)))
+    (is (empty? (:context/requests state)))
+    (is (= [{:capability :worker/create
+             :request/id "create"
+             :ok? false
+             :result nil
+             :error :permission/not-granted
+             :permission/decision {:permission/decision :deny
+                                   :origin "https://app.example"
+                                   :capability :worker/create
+                                   :profile/id "work"
+                                   :reason :permission/not-granted}}]
+           (:capability/results state)))))
+
+(deftest quickjs-broadcast-channel-records-sandboxed-messages
+  (let [adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :engine (fn [_]
+                          {:result :broadcast
+                           :requests [{:request/id "open"
+                                       :capability :broadcast/open
+                                       :broadcast/id "broadcast-1"
+                                       :broadcast/name "updates"}
+                                      {:request/id "message"
+                                       :capability :broadcast/post-message
+                                       :broadcast/id "broadcast-1"
+                                       :message {:ping true}}
+                                      {:request/id "close"
+                                       :capability :broadcast/close
+                                       :broadcast/id "broadcast-1"}]})})
+        state (execution/evaluate! state {:source "const ch = new BroadcastChannel('updates')"})]
+    (is (= :closed (get-in state [:broadcast/channels "broadcast-1" :state])))
+    (is (= [{:broadcast/id "broadcast-1"
+             :message {:ping true}}]
+           (:broadcast/messages state)))
+    (is (= [{:broadcast/id "broadcast-1"
+             :broadcast/name "updates"
+             :state :open
+             :capability :broadcast/open}
+            {:broadcast/id "broadcast-1"
+             :closed? true
+             :capability :broadcast/close}]
+           (:context/requests state)))
+    (is (= [true true true]
+           (mapv :ok? (:capability/results state))))))
+
+(deftest quickjs-broadcast-message-denies-when-channel-is-not-open
+  (let [adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :engine (fn [_]
+                          {:result :broadcast
+                           :requests [{:request/id "message"
+                                       :capability :broadcast/post-message
+                                       :broadcast/id "missing"
+                                       :message "hello"}]})})
+        state (execution/evaluate! state {:source "ch.postMessage('hello')"})]
+    (is (empty? (:broadcast/messages state)))
+    (is (= [{:capability :broadcast/post-message
+             :request/id "message"
+             :ok? false
+             :result nil
+             :error :broadcast/not-open}]
+           (:capability/results state)))
+    (is (= :broadcast/not-open (:last-error state)))))
+
+(deftest quickjs-beacon-send-records-sandboxed-request-with-profile-grant
+  (let [profile (-> (profile/new-profile {:id "work"})
+                    (profile/grant-permission "https://metrics.example" :beacon/send))
+        adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :net-context {:profile profile
+                              :page-url "https://app.example/app"}
+                :engine (fn [_]
+                          {:result :beacon
+                           :requests [{:request/id "beacon"
+                                       :capability :beacon/send
+                                       :url "https://metrics.example/hit"
+                                       :data "payload"}]})})
+        state (execution/evaluate! state {:source "navigator.sendBeacon('https://metrics.example/hit', 'payload')"})]
+    (is (= [{:url "https://metrics.example/hit"
+             :data "payload"}]
+           (:beacon/requests state)))
+    (is (= [{:url "https://metrics.example/hit"
+             :data "payload"
+             :capability :beacon/send}]
+           (:context/requests state)))
+    (is (= [{:capability :beacon/send
+             :request/id "beacon"
+             :ok? true
+             :result {:url "https://metrics.example/hit"
+                      :data "payload"}
+             :permission/decision {:permission/decision :allow
+                                   :origin "https://metrics.example"
+                                   :capability :beacon/send
+                                   :profile/id "work"}}]
+           (:capability/results state)))))
+
+(deftest quickjs-beacon-send-denies-without-target-origin-grant
+  (let [profile (profile/new-profile {:id "work"})
+        adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :net-context {:profile profile
+                              :page-url "https://app.example/app"}
+                :engine (fn [_]
+                          {:result :beacon
+                           :requests [{:request/id "beacon"
+                                       :capability :beacon/send
+                                       :url "https://metrics.example/hit"}]})})
+        state (execution/evaluate! state {:source "navigator.sendBeacon('https://metrics.example/hit')"})]
+    (is (empty? (:beacon/requests state)))
+    (is (= [{:capability :beacon/send
+             :request/id "beacon"
+             :ok? false
+             :result nil
+             :error :permission/not-granted
+             :permission/decision {:permission/decision :deny
+                                   :origin "https://metrics.example"
+                                   :capability :beacon/send
+                                   :profile/id "work"
+                                   :reason :permission/not-granted}}]
+           (:capability/results state)))))
+
+(deftest quickjs-location-records-sandboxed-navigation-intent
+  (let [adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :net-context {:page-url "https://app.example/start"}
+                :engine (fn [_]
+                          {:result :location
+                           :requests [{:request/id "assign"
+                                       :capability :location/assign
+                                       :url "https://app.example/next"}
+                                      {:request/id "replace"
+                                       :capability :location/replace
+                                       :url "https://app.example/replacement"}
+                                      {:request/id "reload"
+                                       :capability :location/reload
+                                       :location/op :reload}]})})
+        state (execution/evaluate! state {:source "location.assign('/next')"})]
+    (is (= "https://app.example/replacement" (:location/url state)))
+    (is (= [{:capability :location/assign
+             :request/id "assign"
+             :ok? true
+             :result {:url "https://app.example/next"
+                      :previous-url "https://app.example/start"
+                      :location/kind :assign}}
+            {:capability :location/replace
+             :request/id "replace"
+             :ok? true
+             :result {:url "https://app.example/replacement"
+                      :previous-url "https://app.example/next"
+                      :location/kind :replace}}
+            {:capability :location/reload
+             :request/id "reload"
+             :ok? true
+             :result {:url "https://app.example/replacement"
+                      :location/kind :reload}}]
+           (:capability/results state)))
+    (is (= [:location/assign :location/replace :location/reload]
+           (mapv :capability (:context/requests state))))))
+
+(deftest quickjs-console-records-sandboxed-log-messages
+  (let [adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :engine (fn [_]
+                          {:result :console
+                           :requests [{:request/id "log"
+                                       :capability :console/log
+                                       :console/level :log
+                                       :args ["ready" 1]}
+                                      {:request/id "warn"
+                                       :capability :console/log
+                                       :console/level :warn
+                                       :args ["slow"]}]})})
+        state (execution/evaluate! state {:source "console.log('ready', 1)"})]
+    (is (= [{:console/level :log :args ["ready" 1]}
+            {:console/level :warn :args ["slow"]}]
+           (:console/messages state)))
+    (is (= [{:capability :console/log
+             :request/id "log"
+             :ok? true
+             :result {:console/level :log
+                      :args ["ready" 1]}}
+            {:capability :console/log
+             :request/id "warn"
+             :ok? true
+             :result {:console/level :warn
+                      :args ["slow"]}}]
+           (:capability/results state)))))
+
+(deftest quickjs-history-state-records-sandboxed-entries
+  (let [adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :engine (fn [_]
+                          {:result :history
+                           :requests [{:request/id "push-one"
+                                       :capability :history/push-state
+                                       :state {:page 1}
+                                       :title "One"
+                                       :url "/one"}
+                                      {:request/id "push-two"
+                                       :capability :history/push-state
+                                       :state {:page 2}
+                                       :title "Two"
+                                       :url "/two"}
+                                      {:request/id "replace-two"
+                                       :capability :history/replace-state
+                                       :state {:page 2 :edited true}
+                                       :title "Two edited"
+                                       :url "/two#edited"}
+                                      {:request/id "back"
+                                       :capability :history/traverse
+                                       :delta -1}]})})
+        state (execution/evaluate! state {:source "history.pushState(...)"})]
+    (is (= [{:url "/one" :title "One" :state {:page 1}}
+            {:url "/two#edited" :title "Two edited" :state {:page 2 :edited true}}]
+           (:history/entries state)))
+    (is (= 0 (:history/index state)))
+    (is (= [{:entry {:url "/one" :title "One" :state {:page 1}}
+             :index 0
+             :length 1}
+            {:entry {:url "/two" :title "Two" :state {:page 2}}
+             :index 1
+             :length 2}
+            {:entry {:url "/two#edited" :title "Two edited" :state {:page 2 :edited true}}
+             :index 1
+             :length 2}
+            {:delta -1
+             :traversed? true
+             :index 0
+             :length 2
+             :entry {:url "/one" :title "One" :state {:page 1}}}]
+           (mapv :result (:capability/results state))))
+    (is (= [:history/push-state :history/push-state :history/replace-state :history/traverse]
+           (mapv :capability (:context/requests state))))))
+
+(deftest quickjs-history-traverse-bounds-without-ambient-navigation
+  (let [adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :engine (fn [_]
+                          {:result :history
+                           :requests [{:request/id "back"
+                                       :capability :history/traverse
+                                       :delta -1}]})})
+        state (execution/evaluate! state {:source "history.back()"})]
+    (is (= [] (:history/entries state)))
+    (is (= -1 (:history/index state)))
+    (is (= [{:capability :history/traverse
+             :request/id "back"
+             :ok? true
+             :result {:delta -1
+                      :traversed? false
+                      :index -1
+                      :length 0}}]
+           (:capability/results state)))
+    (is (= [{:delta -1
+             :traversed? false
+             :index -1
+             :length 0
+             :capability :history/traverse}]
+           (:context/requests state)))))
+
+(deftest quickjs-engine-queues-microtasks-before-timers
+  (let [seen (atom [])
+        adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :engine (fn [{:quickjs/keys [call] :keys [task]}]
+                          (case call
+                            :js/evaluate
+                            {:result :ok
+                             :requests [{:capability :timer/schedule
+                                         :callback/id "timer"
+                                         :delay-ms 0}
+                                        {:capability :timer/microtask
+                                         :callback/id "micro"}]}
+                            :js/job
+                            (do
+                              (swap! seen conj (:callback/id task))
+                              {:result :drained :requests []})
+                            {:result :noop}))})
+        after-eval (execution/evaluate! state {:source "setTimeout(fn, 0); queueMicrotask(fn);"})
+        drained (execution/drain-event-loop! after-eval 0)]
+    (is (= [{:capability :timer/schedule :request/id nil :ok? true :result {:callback/id "timer"}}
+            {:capability :timer/microtask :request/id nil :ok? true :result {:callback/id "micro"
+                                                                             :queued? true}}]
+           (:capability/results after-eval)))
+    (is (= ["micro" "timer"] @seen))
+    (is (= [:microtask :timer]
+           (mapv :task/kind (-> drained :binding :quickjs/results last :job-drain/tasks))))))
+
+(deftest quickjs-dom-mutations-resolve-client-node-ids
+  (let [page (browser/load-html {:url "kotoba://quickjs"
+                                 :html "<main id=\"root\"></main>"})
+        adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :document (:browser/document page)
+                :engine (fn [{:quickjs/keys [call]}]
+                          (case call
+                            :js/evaluate
+                            {:result :ok
+                             :requests [{:capability :dom/mutate
+                                          :dom/op :create-element
+                                          :client/id "p1"
+                                          :tag "p"}
+                                         {:capability :dom/mutate
+                                          :dom/op :set-attribute
+                                          :node/client-id "p1"
+                                          :attr "class"
+                                          :value "note"}
+                                         {:capability :dom/mutate
+                                          :dom/op :create-text
+                                          :client/id "t1"
+                                          :text "Created"}
+                                         {:capability :dom/mutate
+                                          :dom/op :append-child
+                                          :parent/client-id "p1"
+                                          :child/client-id "t1"}
+                                         {:capability :dom/mutate
+                                          :dom/op :append-child
+                                          :parent/selector "#root"
+                                          :child/client-id "p1"}]}
+                            {:result :noop}))})
+        state (execution/evaluate! state {:source "document.createElement('p')"})]
+    (is (= "Created" (dom/text-content (:document state))))
+    (is (= "note"
+           (some (fn [[_ node]]
+                   (when (= :p (:tag node))
+                     (get-in node [:attrs :class])))
+                 (get-in state [:document :nodes]))))
+    (is (= [true true true true true]
+           (mapv :ok? (:capability/results state))))))
+
+(deftest quickjs-create-element-ns-persists-namespace-attribute
+  (let [page (browser/load-html {:url "kotoba://quickjs"
+                                 :html "<main id=\"root\"></main>"})
+        adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :document (:browser/document page)
+                :engine (fn [{:quickjs/keys [call]}]
+                          (case call
+                            :js/evaluate
+                            {:result :ok
+                             :requests [{:capability :dom/mutate
+                                          :dom/op :create-element
+                                          :client/id "svg1"
+                                          :tag "svg"
+                                          :attrs {:namespace-uri "http://www.w3.org/2000/svg"}}
+                                         {:capability :dom/mutate
+                                          :dom/op :append-child
+                                          :parent/selector "#root"
+                                          :child/client-id "svg1"}]}
+                            {:result :noop}))})
+        state (execution/evaluate! state {:source "document.createElementNS('http://www.w3.org/2000/svg', 'svg')"})
+        svg-node (some (fn [[_ node]]
+                         (when (= :svg (:tag node))
+                           node))
+                       (get-in state [:document :nodes]))]
+    (is (= "http://www.w3.org/2000/svg"
+           (get-in svg-node [:attrs :namespace-uri])))
+    (is (= [true true]
+           (mapv :ok? (:capability/results state))))))
+
+(deftest quickjs-style-attribute-mutation-updates-inline-style-model
+  (let [page (browser/load-html {:url "kotoba://quickjs"
+                                 :html "<main><p id=\"note\">Note</p></main>"})
+        note (bridge/query-selector (:browser/document page) "#note")
+        adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :document (:browser/document page)
+                :engine (fn [_]
+                          {:result :ok
+                           :requests [{:capability :dom/mutate
+                                       :dom/op :set-attribute
+                                       :node/selector "#note"
+                                       :attr "style"
+                                       :value "color: red; padding: 4px"}]})})
+        state (execution/evaluate! state {:source "document.querySelector('#note').setAttribute('style', 'color: red')"})]
+    (is (= [true] (mapv :ok? (:capability/results state))))
+    (is (= {:color "red" :padding 4}
+           (get-in state [:document :nodes note :attrs :style-inline])))
+    (is (= "red" (get-in state [:document :nodes note :attrs :style/color])))
+    (is (= 4 (get-in state [:document :nodes note :attrs :style/padding])))))
+
+(deftest quickjs-class-list-mutates-class-attribute-through-dom-bridge
+  (let [page (browser/load-html {:url "kotoba://quickjs"
+                                 :html "<main><p id=\"note\" class=\"old\">Note</p></main>"})
+        note (bridge/query-selector (:browser/document page) "#note")
+        adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :document (:browser/document page)
+                :engine (fn [_]
+                          {:result :ok
+                           :requests [{:capability :dom/mutate
+                                       :dom/op :set-attribute
+                                       :node/selector "#note"
+                                       :attr "class"
+                                       :value "old active"}]})})
+        state (execution/evaluate! state {:source "document.querySelector('#note').classList.add('active')"})]
+    (is (= [true] (mapv :ok? (:capability/results state))))
+    (is (= "old active" (get-in state [:document :nodes note :attrs :class])))
+    (is (= note (bridge/query-selector (:document state) ".active")))))
+
+(deftest quickjs-focus-and-blur-mutations-update-document-focus
+  (let [page (browser/load-html {:url "kotoba://quickjs"
+                                 :html "<main><input id=\"field\"></main>"})
+        field (bridge/query-selector (:browser/document page) "#field")
+        adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :document (:browser/document page)
+                :engine (fn [_]
+                          {:result :ok
+                           :requests [{:capability :dom/mutate
+                                       :dom/op :focus-node
+                                       :node/selector "#field"}
+                                      {:capability :dom/mutate
+                                       :dom/op :blur-node
+                                       :node/selector "#field"}]})})
+        state (execution/evaluate! state {:source "document.querySelector('#field').focus(); document.activeElement.blur()"})]
+    (is (= [true true] (mapv :ok? (:capability/results state))))
+    (is (nil? (get-in state [:document :focus])))
+    (is (= [[:dom/focus field] [:dom/blur field]]
+           (take-last 2 (get-in state [:document :ops]))))))
+
+(deftest quickjs-dom-replace-children-resolves-selector-and-client-ids
+  (let [page (browser/load-html {:url "kotoba://quickjs"
+                                 :html "<main id=\"root\"><p>Old</p></main>"})
+        adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :document (:browser/document page)
+                :engine (fn [_]
+                          {:result :ok
+                           :requests [{:capability :dom/query
+                                       :dom/query :get-element-by-id
+                                       :id "root"}
+                                      {:capability :dom/mutate
+                                       :dom/op :create-element
+                                       :client/id "p1"
+                                       :tag "p"}
+                                      {:capability :dom/mutate
+                                       :dom/op :create-text
+                                       :client/id "t1"
+                                       :text "New"}
+                                      {:capability :dom/mutate
+                                       :dom/op :append-child
+                                       :parent/client-id "p1"
+                                       :child/client-id "t1"}
+                                      {:capability :dom/mutate
+                                       :dom/op :remove-children
+                                       :node/selector "#root"}
+                                      {:capability :dom/mutate
+                                       :dom/op :append-child
+                                       :parent/selector "#root"
+                                       :child/client-id "p1"}]})})
+        state (execution/evaluate! state {:source "document.getElementById('root').replaceChildren(p)"})]
+    (is (= "New" (dom/text-content (:document state))))
+    (is (= [true true true true true true]
+           (mapv :ok? (:capability/results state))))))
+
+(deftest quickjs-dom-remove-child-and-insert-before-resolve-client-ids
+  (let [page (browser/load-html {:url "kotoba://quickjs"
+                                 :html "<main id=\"root\"></main>"})
+        adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :document (:browser/document page)
+                :engine (fn [_]
+                          {:result :ok
+                           :requests [{:capability :dom/mutate
+                                       :dom/op :create-element
+                                       :client/id "a"
+                                       :tag "p"}
+                                      {:capability :dom/mutate
+                                       :dom/op :create-text
+                                       :client/id "ta"
+                                       :text "A"}
+                                      {:capability :dom/mutate
+                                       :dom/op :append-child
+                                       :parent/client-id "a"
+                                       :child/client-id "ta"}
+                                      {:capability :dom/mutate
+                                       :dom/op :create-element
+                                       :client/id "b"
+                                       :tag "p"}
+                                      {:capability :dom/mutate
+                                       :dom/op :create-text
+                                       :client/id "tb"
+                                       :text "B"}
+                                      {:capability :dom/mutate
+                                       :dom/op :append-child
+                                       :parent/client-id "b"
+                                       :child/client-id "tb"}
+                                      {:capability :dom/mutate
+                                       :dom/op :append-child
+                                       :parent/selector "#root"
+                                       :child/client-id "a"}
+                                      {:capability :dom/mutate
+                                       :dom/op :insert-before
+                                       :parent/selector "#root"
+                                       :child/client-id "b"
+                                       :before/client-id "a"}
+                                      {:capability :dom/mutate
+                                       :dom/op :remove-child
+                                       :parent/selector "#root"
+                                       :child/client-id "a"}]})})
+        state (execution/evaluate! state {:source "root.insertBefore(b, a); root.removeChild(a)"})]
+    (is (= "B" (dom/text-content (:document state))))
+    (is (every? true? (mapv :ok? (:capability/results state))))))
+
+(deftest quickjs-document-fragment-append-flattens-children
+  (let [page (browser/load-html {:url "kotoba://quickjs"
+                                 :html "<main id=\"root\"><p id=\"after\">After</p></main>"})
+        after (bridge/query-selector (:browser/document page) "#after")
+        adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :document (:browser/document page)
+                :engine (fn [_]
+                          {:result :ok
+                           :requests [{:capability :dom/mutate
+                                       :dom/op :create-fragment
+                                       :client/id "frag"}
+                                      {:capability :dom/mutate
+                                       :dom/op :create-text
+                                       :client/id "ta"
+                                       :text "A"}
+                                      {:capability :dom/mutate
+                                       :dom/op :create-text
+                                       :client/id "tb"
+                                       :text "B"}
+                                      {:capability :dom/mutate
+                                       :dom/op :append-child
+                                       :parent/client-id "frag"
+                                       :child/client-id "ta"}
+                                      {:capability :dom/mutate
+                                       :dom/op :append-child
+                                       :parent/client-id "frag"
+                                       :child/client-id "tb"}
+                                      {:capability :dom/mutate
+                                       :dom/op :insert-before
+                                       :parent/selector "#root"
+                                       :child/client-id "frag"
+                                       :before/id after}]})})
+        state (execution/evaluate! state {:source "root.insertBefore(fragment, after)"})]
+    (is (= "ABAfter" (dom/text-content (:document state))))
+    (is (every? true? (mapv :ok? (:capability/results state))))))
+
+(deftest quickjs-clone-node-mutates-detached-copy-and-appends-by-client-id
+  (let [page (browser/load-html {:url "kotoba://quickjs"
+                                 :html "<main id=\"root\"><p id=\"note\" class=\"copy\">Hello</p></main>"})
+        note (bridge/query-selector (:browser/document page) "#note")
+        adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :document (:browser/document page)
+                :engine (fn [_]
+                          {:result :ok
+                           :requests [{:capability :dom/mutate
+                                       :dom/op :clone-node
+                                       :source/id note
+                                       :client/id "copy"
+                                       :deep? true}
+                                      {:capability :dom/mutate
+                                       :dom/op :set-attribute
+                                       :node/client-id "copy"
+                                       :attr "id"
+                                       :value "copy"}
+                                      {:capability :dom/mutate
+                                       :dom/op :append-child
+                                       :parent/selector "#root"
+                                       :child/client-id "copy"}]})})
+        state (execution/evaluate! state {:source "document.getElementById('note').cloneNode(true)"})
+        copy (bridge/query-selector (:document state) "#copy")]
+    (is (= "HelloHello" (dom/text-content (:document state))))
+    (is (= "copy" (get-in state [:document :nodes copy :attrs :class])))
+    (is (every? true? (mapv :ok? (:capability/results state))))))
+
+(deftest quickjs-inner-html-mutates-through-host-parser
+  (let [page (browser/load-html {:url "kotoba://quickjs"
+                                 :html "<main id=\"root\"><p>Old</p></main>"})
+        adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :document (:browser/document page)
+                :engine (fn [_]
+                          {:result :ok
+                           :requests [{:capability :dom/mutate
+                                       :dom/op :set-inner-html
+                                       :node/selector "#root"
+                                       :html "<section id=\"new\"><p class=\"note\">Hello</p></section>"}]})})
+        state (execution/evaluate! state {:source "document.getElementById('root').innerHTML = '<section id=\"new\"><p class=\"note\">Hello</p></section>'"})
+        section (bridge/query-selector (:document state) "#new")
+        note (bridge/query-selector (:document state) ".note")]
+    (is (= "Hello" (dom/text-content (:document state))))
+    (is (= :section (get-in state [:document :nodes section :tag])))
+    (is (= "note" (get-in state [:document :nodes note :attrs :class])))
+    (is (every? true? (mapv :ok? (:capability/results state))))))
+
+(deftest quickjs-text-node-data-mutates-through-set-text
+  (let [page (browser/load-html {:url "kotoba://quickjs"
+                                 :html "<main id=\"root\">Old</main>"})
+        root (bridge/query-selector (:browser/document page) "#root")
+        text-id (first (get-in page [:browser/document :nodes root :children]))
+        adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :document (:browser/document page)
+                :engine (fn [_]
+                          {:result :ok
+                           :requests [{:capability :dom/mutate
+                                       :dom/op :set-text
+                                       :node/id text-id
+                                       :text "New"}]})})
+        state (execution/evaluate! state {:source "document.getElementById('root').firstChild.data = 'New'"})]
+    (is (= "New" (dom/text-content (:document state))))
+    (is (= "New" (get-in state [:document :nodes text-id :text])))
+    (is (every? true? (mapv :ok? (:capability/results state))))))
+
+(deftest quickjs-text-node-split-and-normalize-mutate-document
+  (let [page (browser/load-html {:url "kotoba://quickjs"
+                                 :html "<main id=\"root\">Hello</main>"})
+        root (bridge/query-selector (:browser/document page) "#root")
+        text-id (first (get-in page [:browser/document :nodes root :children]))
+        adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :document (:browser/document page)
+                :engine (fn [_]
+                          {:result :ok
+                           :requests [{:capability :dom/mutate
+                                       :dom/op :split-text
+                                       :node/id text-id
+                                       :client/id "tail"
+                                       :offset 2}
+                                      {:capability :dom/mutate
+                                       :dom/op :normalize
+                                       :node/selector "#root"}]})})
+        state (execution/evaluate! state {:source "const t = document.getElementById('root').firstChild; t.splitText(2); t.parentNode.normalize()"})]
+    (is (= "Hello" (dom/text-content (:document state))))
+    (is (= [text-id] (get-in state [:document :nodes root :children])))
+    (is (= "Hello" (get-in state [:document :nodes text-id :text])))
+    (is (every? true? (mapv :ok? (:capability/results state))))))
+
+(deftest quickjs-outer-html-mutates-through-host-parser
+  (let [page (browser/load-html {:url "kotoba://quickjs"
+                                 :html "<main id=\"root\"><p id=\"old\">Old</p><p id=\"after\">After</p></main>"})
+        root (bridge/query-selector (:browser/document page) "#root")
+        old (bridge/query-selector (:browser/document page) "#old")
+        adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :document (:browser/document page)
+                :engine (fn [_]
+                          {:result :ok
+                           :requests [{:capability :dom/mutate
+                                       :dom/op :set-outer-html
+                                       :node/selector "#old"
+                                       :html "<section id=\"new\"><p class=\"note\">Hello</p></section>"}]})})
+        state (execution/evaluate! state {:source "document.getElementById('old').outerHTML = '<section id=\"new\"><p class=\"note\">Hello</p></section>'"})
+        section (bridge/query-selector (:document state) "#new")
+        note (bridge/query-selector (:document state) ".note")]
+    (is (= "HelloAfter" (dom/text-content (:document state))))
+    (is (= :section (get-in state [:document :nodes section :tag])))
+    (is (= "note" (get-in state [:document :nodes note :attrs :class])))
+    (is (not (some #{old} (get-in state [:document :nodes root :children]))))
+    (is (nil? (bridge/query-selector (:document state) "#old")))
+    (is (every? true? (mapv :ok? (:capability/results state))))))
+
+(deftest quickjs-evaluate-passes-document-snapshot-to-engine
+  (let [page (browser/load-html {:url "kotoba://quickjs"
+                                 :html "<head><title>Quick page</title></head><main id=\"root\"><p class=\"note\">Hello</p></main>"})
+        requests (atom [])
+        adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :document (:browser/document page)
+                :engine (fn [request]
+                          (swap! requests conj request)
+                          {:result :ok :requests []})})
+        state (execution/evaluate! state {:source "document.querySelector('.note').textContent"}) 
+        snapshot (:document/snapshot (first @requests))
+        root (bridge/query-selector (:browser/document page) "#root")
+        note (bridge/query-selector (:browser/document page) ".note")]
+    (is (= :ok (:result state)))
+    (is (:root snapshot))
+    (is (= "kotoba://quickjs" (:url snapshot)))
+    (is (= "kotoba://quickjs" (:base-uri snapshot)))
+    (is (= "loading" (:ready-state snapshot)))
+    (is (= "Quick page" (:title snapshot)))
+    (is (= [note] (get-in snapshot [:nodes root :children])))
+    (is (= "Hello" (get-in snapshot [:nodes note :text-content])))))
+
+(deftest quickjs-evaluate-projects-document-base-uri-for-url-property-bindings
+  (let [page (browser/load-html
+              {:url "https://app.example/docs/index.html"
+               :html "<head><base href=\"https://cdn.example/assets/\"></head><main><a id=\"next\" href=\"./next.html\">Next</a><img id=\"logo\" src=\"img/logo.png\"></main>"})
+        link (bridge/query-selector (:browser/document page) "#next")
+        image (bridge/query-selector (:browser/document page) "#logo")
+        requests (atom [])
+        adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :document (:browser/document page)
+                :engine (fn [request]
+                          (swap! requests conj request)
+                          {:result :ok :requests []})})
+        state (execution/evaluate! state {:source "[document.querySelector('#next').href, document.querySelector('#logo').src]"}) 
+        snapshot (:document/snapshot (first @requests))]
+    (is (= :ok (:result state)))
+    (is (= "https://cdn.example/assets/" (:base-uri snapshot)))
+    (is (= "./next.html" (get-in snapshot [:nodes link :attrs :href])))
+    (is (= "img/logo.png" (get-in snapshot [:nodes image :attrs :src])))))
+
+(deftest quickjs-document-title-mutates-through-dom-bridge
+  (let [page (browser/load-html {:url "kotoba://quickjs"
+                                 :html "<main>Hello</main>"})
+        adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :document (:browser/document page)
+                :engine (fn [_]
+                          {:result :ok
+                           :requests [{:capability :dom/mutate
+                                       :dom/op :set-title
+                                       :title "From script"}]})})
+        state (execution/evaluate! state {:source "document.title = 'From script';"})]
+    (is (= "From script" (bridge/document-title (:document state))))
+    (is (= [true] (mapv :ok? (:capability/results state))))))
+
+(deftest quickjs-evaluate-projects-current-script-into-document-snapshot
+  (let [page (browser/load-html {:url "kotoba://quickjs"
+                                 :html "<main><script id=\"boot\" src=\"app.js\"></script></main>"})
+        script-id (bridge/query-selector (:browser/document page) "#boot")
+        requests (atom [])
+        adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :document (:browser/document page)
+                :engine (fn [request]
+                          (swap! requests conj request)
+                          {:result :ok :requests []})})
+        state (execution/evaluate! state {:source "document.currentScript && document.currentScript.id"
+                                          :script/node-id script-id})
+        snapshot (:document/snapshot (first @requests))]
+    (is (= :ok (:result state)))
+    (is (= script-id (:current-script snapshot)))
+    (is (= "boot" (get-in snapshot [:nodes script-id :attrs :id])))))
+
+(deftest quickjs-dom-query-uses-shared-attribute-selector-vocabulary
+  (let [page (browser/load-html {:url "kotoba://quickjs"
+                                 :html "<main><input id=\"field\" required value=\"ready\"><button id=\"save\" data-action=\"save\" class=\"primary action\" lang=\"en-US\">Save</button></main>"})
+        field (bridge/query-selector (:browser/document page) "#field")
+        save (bridge/query-selector (:browser/document page) "#save")
+        adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :document (:browser/document page)
+                :engine (fn [_]
+                          {:result :ok
+                           :requests [{:capability :dom/query
+                                       :dom/query :query-selector
+                                       :selector "input[required]"}
+                                      {:capability :dom/query
+                                       :dom/query :query-selector-all
+                                       :selector "[data-action=\"save\"]"}
+                                      {:capability :dom/query
+                                       :dom/query :query-selector
+                                       :selector "[class~=\"primary\"]"}
+                                      {:capability :dom/query
+                                       :dom/query :query-selector
+                                       :selector "[lang|=\"en\"]"}]})})
+        state (execution/evaluate! state {:source "document.querySelector('input[required]')"})]
+    (is (= :ok (:result state)))
+    (is (= [field [save] save save]
+           (mapv :result (:capability/results state))))
+    (is (= [true true true true] (mapv :ok? (:capability/results state))))))
+
+(deftest quickjs-dom-query-uses-shared-form-state-pseudo-classes
+  (let [page (browser/load-html {:url "kotoba://quickjs"
+                                 :html "<main><input id=\"checked\" type=\"checkbox\" checked><input id=\"disabled\" disabled><input id=\"hidden-required\" type=\"hidden\" required><input id=\"file-required\" type=\"file\" required><input id=\"required\" required><input id=\"readonly\" readonly><input id=\"readonly-required\" required readonly><input id=\"readonly-long\" value=\"abcde\" maxlength=\"4\" readonly><input id=\"invalid\" invalid><input id=\"plain\"><select id=\"select-disabled-selected\" required><option value=\"locked\" selected disabled>Locked</option><option value=\"go\">Go</option></select><select id=\"select-optgroup-disabled\" required><optgroup disabled><option id=\"optgroup-locked\" value=\"locked\" selected>Locked</option></optgroup><option value=\"go\">Go</option></select><select id=\"select-multiple-empty\" multiple required><option value=\"one\">One</option><option value=\"two\">Two</option></select><fieldset disabled><legend><input id=\"legend-enabled\"></legend><input id=\"fieldset-disabled\" required></fieldset></main>"})
+        checked (bridge/query-selector (:browser/document page) "#checked")
+        disabled (bridge/query-selector (:browser/document page) "#disabled")
+        required (bridge/query-selector (:browser/document page) "#required")
+        readonly-required (bridge/query-selector (:browser/document page) "#readonly-required")
+        readonly (bridge/query-selector (:browser/document page) "#readonly")
+        select-disabled-selected (bridge/query-selector (:browser/document page) "#select-disabled-selected")
+        select-optgroup-disabled (bridge/query-selector (:browser/document page) "#select-optgroup-disabled")
+        optgroup-locked (bridge/query-selector (:browser/document page) "#optgroup-locked")
+        select-multiple-empty (bridge/query-selector (:browser/document page) "#select-multiple-empty")
+        fieldset-disabled (bridge/query-selector (:browser/document page) "#fieldset-disabled")
+        legend-enabled (bridge/query-selector (:browser/document page) "#legend-enabled")
+        adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :document (:browser/document page)
+                :engine (fn [_]
+                          {:result :ok
+                           :requests [{:capability :dom/query
+                                       :dom/query :query-selector
+                                       :selector "input:checked"}
+                                      {:capability :dom/query
+                                       :dom/query :query-selector
+                                       :selector "input:disabled"}
+                                      {:capability :dom/query
+                                       :dom/query :query-selector
+                                       :selector "input:enabled"}
+                                      {:capability :dom/query
+                                       :dom/query :query-selector
+                                       :selector "input:required"}
+                                      {:capability :dom/query
+                                       :dom/query :query-selector
+                                       :selector "input:optional"}
+                                      {:capability :dom/query
+                                       :dom/query :query-selector
+                                       :selector "input:read-only"}
+                                      {:capability :dom/query
+                                       :dom/query :query-selector
+                                       :selector "input:read-write"}
+                                      {:capability :dom/query
+                                       :dom/query :query-selector
+                                       :selector "input:invalid"}
+                                      {:capability :dom/query
+                                       :dom/query :query-selector
+                                       :selector "input:valid"}
+                                      {:capability :dom/query
+                                       :dom/query :query-selector
+                                       :selector "#fieldset-disabled:disabled"}
+                                      {:capability :dom/query
+                                       :dom/query :query-selector
+                                       :selector "#legend-enabled:enabled"}
+                                      {:capability :dom/query
+                                       :dom/query :query-selector
+                                       :selector "#hidden-required:read-write"}
+                                      {:capability :dom/query
+                                       :dom/query :query-selector
+                                       :selector "#file-required:required"}
+                                      {:capability :dom/query
+                                       :dom/query :query-selector
+                                       :selector "#file-required:read-write"}
+                                      {:capability :dom/query
+                                       :dom/query :query-selector
+                                       :selector "#readonly-required:required"}
+                                      {:capability :dom/query
+                                       :dom/query :query-selector
+                                       :selector "#readonly-required:invalid"}
+                                      {:capability :dom/query
+                                       :dom/query :query-selector
+                                       :selector "#readonly-required:valid"}
+                                      {:capability :dom/query
+                                       :dom/query :query-selector
+                                       :selector "#readonly-long:invalid"}
+                                      {:capability :dom/query
+                                       :dom/query :query-selector
+                                       :selector "#readonly-long:valid"}
+                                      {:capability :dom/query
+                                       :dom/query :query-selector
+                                       :selector "#select-disabled-selected:invalid"}
+                                      {:capability :dom/query
+                                       :dom/query :query-selector
+                                       :selector "#select-disabled-selected:valid"}
+                                      {:capability :dom/query
+                                       :dom/query :query-selector
+                                       :selector "#optgroup-locked:disabled"}
+                                      {:capability :dom/query
+                                       :dom/query :query-selector
+                                       :selector "#select-optgroup-disabled:invalid"}
+                                      {:capability :dom/query
+                                       :dom/query :query-selector
+                                       :selector "#select-optgroup-disabled:valid"}
+                                      {:capability :dom/query
+                                       :dom/query :query-selector
+                                       :selector "#select-multiple-empty:invalid"}
+                                      {:capability :dom/query
+                                       :dom/query :query-selector
+                                       :selector "#select-multiple-empty:valid"}
+                                      {:capability :dom/query
+                                       :dom/query :query-selector
+                                       :selector "input:hover"}]})})
+        state (execution/evaluate! state {:source "document.querySelector('input:checked')"})]
+    (is (= :ok (:result state)))
+    (is (= [checked disabled checked required checked readonly checked required checked fieldset-disabled legend-enabled nil nil nil readonly-required nil nil nil nil select-disabled-selected nil optgroup-locked select-optgroup-disabled nil select-multiple-empty nil nil]
+           (mapv :result (:capability/results state))))
+    (is (= (repeat 27 true) (mapv :ok? (:capability/results state))))))
+
+(deftest quickjs-dom-query-uses-shared-selector-groups
+  (let [page (browser/load-html {:url "kotoba://quickjs"
+                                 :html "<main><button id=\"first\" class=\"primary\">First</button><input id=\"second\" required><button id=\"third\" class=\"primary\">Third</button><p id=\"comma\" data-label=\"a,b\">Comma</p><p id=\"space\" title=\"hello world\">Space</p></main>"})
+        document (:browser/document page)
+        first (bridge/query-selector document "#first")
+        second (bridge/query-selector document "#second")
+        third (bridge/query-selector document "#third")
+        comma (bridge/query-selector document "#comma")
+        space (bridge/query-selector document "#space")
+        adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :document document
+                :engine (fn [_]
+                          {:result :ok
+                           :requests [{:capability :dom/query
+                                       :dom/query :query-selector
+                                       :selector "input[missing], button.primary"}
+                                      {:capability :dom/query
+                                       :dom/query :query-selector-all
+                                       :selector "button.primary, input:required, button.primary"}
+                                      {:capability :dom/query
+                                       :dom/query :query-selector
+                                       :selector "[data-label=\"a,b\"], input[missing]"}
+                                      {:capability :dom/query
+                                       :dom/query :query-selector
+                                       :selector "main [title=\"hello world\"]"}]})})
+        state (execution/evaluate! state {:source "document.querySelector('input[missing], button.primary')"})]
+    (is (= :ok (:result state)))
+    (is (= [first [first second third] comma space]
+           (mapv :result (:capability/results state))))
+    (is (= [true true true true] (mapv :ok? (:capability/results state))))))
+
+(deftest quickjs-event-listen-and-dispatch-apply-through-dom-bridge
+  (let [page (browser/load-html {:url "kotoba://quickjs"
+                                 :html "<main><button id=\"go\">Go</button></main>"})
+        button (bridge/query-selector (:browser/document page) "#go")
+        adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :document (:browser/document page)
+                :engine (fn [_]
+                          {:result :ok
+                           :requests [{:capability :event/listen
+                                       :node/selector "#go"
+                                       :event/type "click"
+                                       :handler/id "handler-1"}
+                                      {:capability :event/remove
+                                       :node/selector "#go"
+                                       :event/type "click"
+                                       :handler/id "handler-1"}
+                                      {:capability :event/dispatch
+                                       :node/selector "#go"
+                                       :event {:event/type "click"
+                                               :target/id button}}]})})
+        state (execution/evaluate! state {:source "button.click()"})]
+    (is (nil? (get-in state [:document :listeners button :click])))
+    (is (= [true true true] (mapv :ok? (:capability/results state))))
+    (is (= {:node/id button :handler/id "handler-1" :removed? true}
+           (:result (second (:capability/results state)))))
+    (is (= {:node/id button :event/dispatched? false}
+           (:result (nth (:capability/results state) 2))))
+    (is (= [:dom/remove-event-listener button :click "handler-1"]
+           (last (get-in state [:document :ops]))))))
+
+(deftest quickjs-global-event-listeners-record-sandboxed-targets
+  (let [page (browser/load-html {:url "kotoba://quickjs"
+                                 :html "<main></main>"})
+        adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :document (:browser/document page)
+                :engine (fn [_]
+                          {:result :ok
+                           :requests [{:request/id "document-ready"
+                                       :capability :event/listen
+                                       :event/target :document
+                                       :event/type "DOMContentLoaded"
+                                       :handler/id "handler-1"}
+                                      {:request/id "window-load"
+                                       :capability :event/listen
+                                       :event/target :window
+                                       :event/type "load"
+                                       :handler/id "handler-2"}
+                                      {:request/id "window-load-remove"
+                                       :capability :event/remove
+                                       :event/target :window
+                                       :event/type "load"
+                                       :handler/id "handler-2"}
+                                      {:request/id "document-dispatch"
+                                       :capability :event/dispatch
+                                       :event/target :document
+                                       :event {:event/type "DOMContentLoaded"}}]})})
+        state (execution/evaluate! state {:source "document.addEventListener(...)"})]
+    (is (= true (get-in state [:global/listeners :document "DOMContentLoaded" "handler-1"])))
+    (is (nil? (get-in state [:global/listeners :window "load" "handler-2"])))
+    (is (= [{:event/target :document
+             :event/type "DOMContentLoaded"
+             :event/dispatched? true
+             :event {:event/type "DOMContentLoaded"}}]
+           (:global/events state)))
+    (is (= [true true true true] (mapv :ok? (:capability/results state))))
+    (is (= [:document :window :window :document]
+           (mapv #(get-in % [:result :event/target]) (:capability/results state))))))
+
+(deftest quickjs-form-control-state-mutates-document-and-dispatches-input
+  (let [page (browser/load-html {:url "kotoba://quickjs"
+                                 :html "<main><input id=\"field\" value=\"old\"><input id=\"amount\" type=\"number\" value=\"1\"></main>"})
+        field (bridge/query-selector (:browser/document page) "#field")
+        amount (bridge/query-selector (:browser/document page) "#amount")
+        adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :document (:browser/document page)
+                :engine (fn [_]
+                          {:result :ok
+                           :requests [{:capability :event/listen
+                                       :node/selector "#field"
+                                       :event/type "input"
+                                       :handler/id "handler-1"}
+                                      {:capability :dom/mutate
+                                       :dom/op :set-attribute
+                                       :node/selector "#field"
+                                       :attr "value"
+                                       :value "typed"}
+                                      {:capability :dom/mutate
+                                       :dom/op :set-attribute
+                                       :node/selector "#field"
+                                       :attr "checked"
+                                       :value "true"}
+                                      {:capability :dom/mutate
+                                       :dom/op :set-attribute
+                                       :node/selector "#amount"
+                                       :attr "value"
+                                       :value "42"}
+                                      {:capability :event/dispatch
+                                       :node/selector "#field"
+                                       :event {:event/type "input"
+                                               :target/id field
+                                               :value "typed"
+                                               :checked true}}]})})
+        state (execution/evaluate! state {:source "field.value = 'typed'"})]
+    (is (= "typed" (get-in state [:document :nodes field :attrs :value])))
+    (is (= "42" (get-in state [:document :nodes amount :attrs :value])))
+    (is (= "true" (get-in state [:document :nodes field :attrs :checked])))
+    (is (= "handler-1" (get-in state [:document :listeners field :input])))
+    (is (= [true true true true true] (mapv :ok? (:capability/results state))))
+    (is (= [:dom/dispatch-event "handler-1" {:event/type "input"
+                                             :target/id field
+                                             :value "typed"
+                                             :checked true}]
+           (last (get-in state [:document :ops]))))))
+
+(deftest quickjs-mutated-document-commits-through-session
+  (let [h (host/recording-host)
+        session (session/load-html!
+                 (session/new-session {:host h})
+                 {:url "kotoba://quickjs"
+                  :html "<main id=\"root\"></main>"})
+        adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :document (get-in session [:browser.session/page :browser/document])
+                :engine (fn [_]
+                          {:result :ok
+                           :requests [{:capability :dom/mutate
+                                       :dom/op :create-element
+                                       :client/id "p1"
+                                       :tag "p"}
+                                      {:capability :dom/mutate
+                                       :dom/op :create-text
+                                       :client/id "t1"
+                                       :text "Committed"}
+                                      {:capability :dom/mutate
+                                       :dom/op :append-child
+                                       :parent/client-id "p1"
+                                       :child/client-id "t1"}
+                                      {:capability :dom/mutate
+                                       :dom/op :append-child
+                                       :parent/selector "#root"
+                                       :child/client-id "p1"}]})})
+        state (execution/evaluate! state {:source "document.createElement('p')"})
+        session (session/commit-script-state! session state)]
+    (is (= "Committed"
+           (-> session :browser.session/page :browser/document dom/text-content)))
+    (is (= 2 (:present-count (host/recorded h))))
+    (is (= :script/document-state
+           (-> session :browser.session/history last :event)))))
+
+(deftest quickjs-engine-module-fetch-storage-and-unsupported-capabilities
+  (let [page (browser/load-html {:url "kotoba://quickjs"
+                                 :html "<main><p class=\"status\">Ready</p></main>"})
+        adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        storage (atom {"token" "abc"})
+        fetches (atom [])
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :document (:browser/document page)
+                :storage storage
+                :fetch-fn (fn [req]
+                            (swap! fetches conj req)
+                            {:status 200 :body "ok"})
+                :engine (fn [{:quickjs/keys [call]}]
+                          (case call
+                            :js/module-load
+                            {:result :loaded
+                             :requests [{:capability :dom/query
+                                          :dom/query :query-selector
+                                          :selector ".status"}
+                                         {:capability :net/fetch
+                                          :url "kotoba://api"
+                                          :request {:method :post}}
+                                         {:capability :storage/get
+                                          :storage/key "token"}
+                                         {:capability :storage/delete
+                                          :storage/key "token"}
+                                         {:capability :hid/read}]}
+                            {:result :noop}))})
+        state (execution/load-module! state "./mod.js" "kotoba://quickjs/app.js")]
+    (is (= :loaded (:result state)))
+    (is (= [{:url "kotoba://api" :method :post :request {:method :post}}]
+           @fetches))
+    (is (nil? (get @storage "token")))
+    (is (= :quickjs/unsupported-capability (:last-error state)))
+    (is (= [true true true true false]
+           (mapv :ok? (:capability/results state))))
+    (is (= :quickjs/unsupported-capability
+           (-> state :capability/results last :error)))
+    (is (= [:js/module-load]
+           (mapv :js/call (get-in state [:binding :quickjs/requests]))))))
+
+(deftest quickjs-net-fetch-can-use-profile-cache-cookie-and-cors-policy
+  (let [p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "https://api.example" :net/fetch))
+        adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "default"})
+        calls (atom [])
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :document (:browser/document (browser/load-html {:url "https://app.example/page"
+                                                                 :html "<main></main>"}))
+                :net-context {:store (storage/empty-store)
+                              :profile p
+                              :page-url "https://app.example/page"
+                              :credentials :include}
+                :fetch-fn (fn [req]
+                            (swap! calls conj req)
+                            {:status 200
+                             :headers {"access-control-allow-origin" "https://app.example"
+                                       "access-control-allow-credentials" "true"
+                                       "set-cookie" "sid=abc"}
+                             :body "ok"})
+                :engine (fn [_]
+                          {:result :ok
+                           :requests [{:capability :net/fetch
+                                       :url "https://api.example/data"
+                                       :request {:method :get}}]})})
+        first-fetch (execution/evaluate! state {:source "fetch('https://api.example/data')"})
+        second-fetch (execution/evaluate! first-fetch {:source "fetch('https://api.example/data')"})]
+    (is (= true (-> first-fetch :capability/results first :ok?)))
+    (is (= true (-> second-fetch :capability/results first :result :cache/hit?)))
+    (is (= 1 (count @calls)))
+    (is (= {"sid" "abc"}
+           (storage/get-value (get-in second-fetch [:net/context :store])
+                              p
+                              "https://api.example/data"
+                              net/cookie-key)))))
+
+(deftest quickjs-document-cookie-uses-script-readable-profile-cookie-policy
+  (let [p (profile/new-profile {:id "default"})
+        page-url "https://app.example/account/page"
+        initial-store (-> (storage/empty-store)
+                          (net/remember-response-cookies
+                           p
+                           page-url
+                           {:headers {"set-cookie" ["sid=locked; HttpOnly; Path=/"
+                                                     "open=yes; Path=/"]}}))
+        adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :net-context {:store initial-store
+                              :profile p
+                              :page-url page-url}
+                :engine (fn [_]
+                          {:result :cookie
+                           :requests [{:request/id "read-before"
+                                       :capability :cookie/get
+                                       :cookie/op :get}
+                                      {:request/id "write-theme"
+                                       :capability :cookie/set
+                                       :cookie/op :set
+                                       :cookie/value "theme=dark; Path=/"}
+                                      {:request/id "read-after"
+                                       :capability :cookie/get
+                                       :cookie/op :get}]})})
+        state (execution/evaluate! state {:source "document.cookie"})]
+    (is (= ["open=yes"
+            "open=yes; theme=dark"
+            "open=yes; theme=dark"]
+           (mapv #(get-in % [:result :cookie/header])
+                 (:capability/results state))))
+    (is (= [{:cookie/value "theme=dark; Path=/"
+             :cookie/header "open=yes; theme=dark"
+             :capability :cookie/set}]
+           (:context/requests state)))
+    (is (= "open=yes; theme=dark"
+           (net/script-cookie-header (get-in state [:net/context :store])
+                                     p
+                                     page-url)))))
+
+(deftest quickjs-net-fetch-records-cors-block
+  (let [p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "https://api.example" :net/fetch))
+        adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :document (:browser/document (browser/load-html {:url "https://app.example/page"
+                                                                 :html "<main></main>"}))
+                :net-context {:store (storage/empty-store)
+                              :profile p
+                              :page-url "https://app.example/page"}
+                :fetch-fn (fn [_] {:status 200 :headers {} :body "blocked"})
+                :engine (fn [_]
+                          {:result :ok
+                           :requests [{:capability :net/fetch
+                                       :url "https://api.example/data"
+                                       :request {:method :get}}]})})
+        state (execution/evaluate! state {:source "fetch('https://api.example/data')"})]
+    (is (= false (-> state :capability/results first :ok?)))
+    (is (= :cors/blocked (-> state :capability/results first :error)))
+    (is (= :cors/blocked (:last-error state)))))
+
+(deftest quickjs-net-fetch-denied-by-profile-permission-does-not-call-host-fetch
+  (let [p (profile/new-profile {:id "default"})
+        calls (atom [])
+        adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :document (:browser/document (browser/load-html {:url "https://app.example/page"
+                                                                 :html "<main></main>"}))
+                :net-context {:store (storage/empty-store)
+                              :profile p
+                              :page-url "https://app.example/page"}
+                :fetch-fn (fn [req]
+                            (swap! calls conj req)
+                            {:status 200 :headers {} :body "nope"})
+                :engine (fn [_]
+                          {:result :ok
+                           :requests [{:capability :net/fetch
+                                       :url "https://api.example/data"
+                                       :request {:method :get}}]})})
+        state (execution/evaluate! state {:source "fetch('https://api.example/data')"})]
+    (is (empty? @calls))
+    (is (= false (-> state :capability/results first :ok?)))
+    (is (= :permission/not-granted (-> state :capability/results first :error)))
+    (is (= :permission/not-granted (:last-error state)))))
+
+(deftest quickjs-execution-does-not-apply-denied-capability-requests
+  (let [page (browser/load-html {:url "kotoba://quickjs"
+                                 :html "<main>Safe</main>"})
+        adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "locked"
+                                      :capabilities #{:js/call}})
+        storage (atom {})
+        fetches (atom [])
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :document (:browser/document page)
+                :storage storage
+                :fetch-fn (fn [req]
+                            (swap! fetches conj req)
+                            {:status 200})
+                :engine (fn [_]
+                          {:result :denied
+                           :requests [{:compat/request false
+                                       :capability :net/fetch
+                                       :error :capability/not-granted
+                                       :url "kotoba://denied"}
+                                      {:compat/request false
+                                       :capability :storage/put
+                                       :error :capability/not-granted
+                                       :storage/key "x"
+                                       :storage/value 1}]})})
+        state (execution/evaluate! state {:source "fetch('/denied')"})]
+    (is (= :capability/not-granted (:last-error state)))
+    (is (empty? @fetches))
+    (is (empty? @storage))
+    (is (= [{:capability :net/fetch
+             :request/id nil
+             :ok? false
+             :error :capability/not-granted}
+            {:capability :storage/put
+             :request/id nil
+             :ok? false
+             :error :capability/not-granted}]
+           (:capability/results state)))
+    (is (= :storage/put (-> state :last-denied :capability)))))
+
+(deftest quickjs-capability-results-preserve-request-ids
+  (let [adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :storage (atom {"k" "v"})
+                :engine (fn [_]
+                          {:result :ok
+                           :requests [{:request/id "r1"
+                                       :capability :storage/get
+                                       :storage/key "k"}]})})
+        state (execution/evaluate! state {:source "localStorage.getItem('k')"})]
+    (is (= [{:capability :storage/get
+             :request/id "r1"
+             :ok? true
+             :result "v"}]
+           (:capability/results state)))))
+
+(deftest quickjs-passes-pending-capability-results-to-next-invocation
+  (let [adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        invocations (atom [])
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :storage (atom {"k" "v"})
+                :engine (fn [request]
+                          (swap! invocations conj request)
+                          (case (:quickjs/call request)
+                            :js/evaluate
+                            {:result :needs-host
+                             :requests [{:request/id "r1"
+                                         :capability :storage/get
+                                         :storage/key "k"}]}
+                            :js/module-load
+                            {:result (:capability/results request)
+                             :requests []}))})
+        state (execution/evaluate! state {:source "localStorage.getItem('k')"})
+        state (execution/load-module! state "./after-result.js" "kotoba://quickjs/app.js")]
+    (is (= [] (:capability/results state)))
+    (is (= [{:capability :storage/get
+             :request/id "r1"
+             :ok? true
+             :result "v"}]
+           (:result state)))
+    (is (= [{:capability :storage/get
+             :request/id "r1"
+             :ok? true
+             :result "v"}]
+           (:capability/results (second @invocations))))))
+
+(deftest quickjs-engine-response-validation-drops-malformed-requests
+  (let [adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        storage (atom {})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :storage storage
+                :engine (fn [_]
+                          {:result :partial
+                           :requests [{:request/id "missing-capability"}
+                                      "not-a-request"
+                                      {:request/id "ok"
+                                       :capability :storage/put
+                                       :storage/key "safe"
+                                       :storage/value 1}]})})
+        state (execution/evaluate! state {:source "unsafe()"})]
+    (is (= {"safe" 1} @storage))
+    (is (= 2 (count (:response/errors state))))
+    (is (= [:quickjs/invalid-capability-request
+            :quickjs/invalid-capability-request]
+           (mapv :error (:response/errors state))))
+    (is (= [false false true]
+           (mapv :ok? (:capability/results state))))
+    (is (= :quickjs/invalid-capability-request
+           (-> state :capability/results first :error)))
+    (is (= false (-> state :results last :response/valid?)))
+    (is (= [{:request/id "ok"
+             :capability :storage/put
+             :storage/key "safe"
+             :storage/value 1}]
+           (-> state :results last :requests)))))
+
+(deftest quickjs-engine-response-validation-rejects-non-sequential-requests
+  (let [adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        storage (atom {})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :storage storage
+                :engine (fn [_]
+                          {:result :bad-shape
+                           :requests {:capability :storage/put
+                                      :storage/key "unsafe"
+                                      :storage/value true}})})
+        state (execution/evaluate! state {:source "unsafe()"})]
+    (is (empty? @storage))
+    (is (= [{:error :quickjs/requests-not-sequential
+             :requests {:capability :storage/put
+                        :storage/key "unsafe"
+                        :storage/value true}}]
+           (:response/errors state)))
+    (is (= [{:capability :quickjs/response
+             :request/id nil
+             :ok? false
+             :error :quickjs/requests-not-sequential
+             :detail {:error :quickjs/requests-not-sequential
+                      :requests {:capability :storage/put
+                                 :storage/key "unsafe"
+                                 :storage/value true}}}]
+           (:capability/results state)))
+    (is (= false (-> state :results last :response/valid?)))
+    (is (= [] (-> state :results last :requests)))))
+
+(deftest quickjs-engine-response-validation-rejects-non-map-response
+  (let [adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :engine (fn [_] "not-a-response")})
+        state (execution/evaluate! state {:source "bad()"})]
+    (is (= :quickjs/invalid-response (:last-error state)))
+    (is (= [{:error :quickjs/invalid-response
+             :response "not-a-response"}]
+           (:response/errors state)))
+    (is (= [{:capability :quickjs/response
+             :request/id nil
+             :ok? false
+             :error :quickjs/invalid-response
+             :detail {:error :quickjs/invalid-response
+                      :response "not-a-response"}}]
+           (:capability/results state)))
+    (is (= :quickjs/invalid-response (-> state :results last :error)))
+    (is (= false (-> state :results last :response/valid?)))))
+
+(deftest quickjs-engine-invocation-failure-is-recorded-and-audited
+  (let [adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :audit (audit/empty-log)
+                :engine (fn [_]
+                          (throw (ex-info "engine exploded" {:phase :eval})))})
+        state (execution/evaluate! state {:source "thrower()"
+                                          :url "kotoba://quickjs/thrower.js"})]
+    (is (= :quickjs/engine-invoke-failed (:last-error state)))
+    (is (= :quickjs/engine-invoke-failed (-> state :results last :error)))
+    (is (= "engine exploded" (-> state :results last :error/message)))
+    (is (= [] (-> state :results last :requests)))
+    (is (= true (-> state :results last :response/valid?)))
+    (is (empty? (:capability/results state)))
+    (is (some #(= [:db/add "browser.audit/e1" :error :quickjs/engine-invoke-failed] %)
+              (get-in state [:audit :audit/datoms])))))
+
+(deftest quickjs-capability-request-validation-blocks-invalid-known-shapes
+  (let [page (browser/load-html {:url "kotoba://quickjs"
+                                 :html "<main id=\"root\">safe</main>"})
+        adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        storage (atom {})
+        fetches (atom [])
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :document (:browser/document page)
+                :storage storage
+                :fetch-fn (fn [req]
+                            (swap! fetches conj req)
+                            {:status 200})
+                :engine (fn [_]
+                          {:result :invalid-host-requests
+                           :requests [{:request/id "missing-storage-key"
+                                      :capability :storage/put
+                                      :storage/value true}
+                                      {:request/id "bad-console"
+                                       :capability :console/log
+                                       :console/level :trace
+                                       :args "not-vector"}
+                                      {:request/id "bad-cookie-get"
+                                       :capability :cookie/get}
+                                      {:request/id "bad-cookie-set"
+                                       :capability :cookie/set
+                                       :cookie/op :set}
+                                      {:request/id "missing-fetch-url"
+                                       :capability :net/fetch}
+                                      {:request/id "bad-timer"
+                                       :capability :timer/schedule
+                                       :callback/id "cb"
+                                       :delay-ms -1}
+                                      {:request/id "bad-dom"
+                                      :capability :dom/mutate
+                                      :dom/op :append-child
+                                      :parent/id 1}
+                                      {:request/id "bad-event-remove"
+                                       :capability :event/remove
+                                       :event/target :window
+                                       :event/type "load"}
+                                      {:request/id "bad-clipboard"
+                                       :capability :clipboard/write
+                                       :clipboard/format :text}
+                                      {:request/id "bad-window-open"
+                                      :capability :window/open
+                                      :target "_blank"}
+                                      {:request/id "bad-location-assign"
+                                       :capability :location/assign}
+                                      {:request/id "bad-location-reload"
+                                       :capability :location/reload}
+                                      {:request/id "bad-permission-query"
+                                       :capability :permissions/query}
+                                      {:request/id "bad-geolocation"
+                                       :capability :geolocation/read}
+                                      {:request/id "bad-notification-permission"
+                                       :capability :notification/request-permission}
+                                      {:request/id "bad-notification-show"
+                                       :capability :notification/show}
+                                      {:request/id "bad-fullscreen-request"
+                                       :capability :fullscreen/request}
+                                      {:request/id "bad-fullscreen-exit"
+                                       :capability :fullscreen/exit}
+                                      {:request/id "bad-media"
+                                       :capability :media/capture
+                                       :media/op :get-user-media}
+                                      {:request/id "bad-websocket-connect"
+                                       :capability :websocket/connect}
+                                      {:request/id "bad-websocket-send"
+                                       :capability :websocket/send
+                                       :websocket/id "websocket-1"}
+                                      {:request/id "bad-websocket-close"
+                                       :capability :websocket/close}
+                                      {:request/id "bad-random-values"
+                                       :capability :crypto/random-values
+                                       :crypto/op :random-values
+                                       :length -1}
+                                      {:request/id "bad-random-uuid"
+                                       :capability :crypto/random-uuid}
+                                      {:request/id "bad-worker-create"
+                                       :capability :worker/create}
+                                      {:request/id "bad-worker-message"
+                                       :capability :worker/post-message
+                                       :worker/id "worker-1"}
+                                      {:request/id "bad-worker-terminate"
+                                       :capability :worker/terminate}
+                                      {:request/id "bad-broadcast-open"
+                                       :capability :broadcast/open}
+                                      {:request/id "bad-broadcast-message"
+                                       :capability :broadcast/post-message
+                                       :broadcast/id "broadcast-1"}
+                                      {:request/id "bad-broadcast-close"
+                                       :capability :broadcast/close}
+                                      {:request/id "bad-beacon"
+                                      :capability :beacon/send}
+                                      {:request/id "bad-history-push"
+                                       :capability :history/push-state
+                                       :state nil
+                                       :title "Missing URL"}
+                                      {:request/id "bad-history-traverse"
+                                       :capability :history/traverse
+                                       :delta "back"}
+                                      {:request/id "unsupported"
+                                       :capability :hid/read}]})})
+        state (execution/evaluate! state {:source "invalidHostRequests()"})]
+    (is (= "safe" (dom/text-content (:document state))))
+    (is (empty? @storage))
+    (is (empty? @fetches))
+    (is (= (vec (repeat 34 false))
+           (mapv :ok? (:capability/results state))))
+    (is (= (vec (concat (repeat 33 :quickjs/invalid-capability-request)
+                        [:quickjs/unsupported-capability]))
+           (mapv :error (:capability/results state))))
+    (is (= :quickjs/unsupported-capability (:last-error state)))
+    (is (= ["missing-storage-key" "bad-console" "bad-cookie-get" "bad-cookie-set"
+            "missing-fetch-url" "bad-timer" "bad-dom" "bad-event-remove"
+            "bad-clipboard" "bad-window-open" "bad-location-assign"
+            "bad-location-reload" "bad-permission-query"
+            "bad-geolocation" "bad-notification-permission"
+            "bad-notification-show" "bad-fullscreen-request"
+            "bad-fullscreen-exit" "bad-media" "bad-websocket-connect"
+            "bad-websocket-send" "bad-websocket-close" "bad-random-values"
+            "bad-random-uuid" "bad-worker-create" "bad-worker-message"
+            "bad-worker-terminate" "bad-broadcast-open" "bad-broadcast-message"
+            "bad-broadcast-close" "bad-beacon" "bad-history-push"
+            "bad-history-traverse" "unsupported"]
+           (mapv :request/id (:capability/results state))))))
+
+(deftest quickjs-wasm-engine-contract-requires-valid-binary-and-invoke
+  (let [manifest (runtime/component-manifest (runtime/quickjs))
+        engine (execution/wasm-engine
+                {:binary (binary/descriptor {:path "quickjs.wasm"
+                                             :bytes (byte-array [(byte 0) (byte 97) (byte 115) (byte 109)])})
+                 :manifest manifest
+                 :invoke (fn [request]
+                           {:result (:quickjs/call request) :requests []})})
+        invalid (execution/wasm-engine
+                 {:binary (binary/descriptor {:path "bad.bin"
+                                              :bytes (byte-array [1 2 3 4])})
+                  :manifest manifest
+                  :invoke (fn [_] {:result :bad})})]
+    (is (execution/engine-ready? engine))
+    (is (not (execution/engine-ready? invalid)))
+    (is (= :js/evaluate
+           (:result (execution/invoke-engine engine {:quickjs/call :js/evaluate}))))
+    (is (= :quickjs/invalid-wasm-binary
+           (:error (execution/invoke-engine invalid {:quickjs/call :js/evaluate}))))))
+
+(deftest quickjs-wasm-engine-lifecycle-starts-and-disposes
+  (let [manifest (runtime/component-manifest (runtime/quickjs))
+        engine (execution/wasm-engine
+                {:binary (binary/descriptor {:path "quickjs.wasm"
+                                             :bytes (byte-array [(byte 0) (byte 97) (byte 115) (byte 109)])})
+                 :manifest manifest
+                 :invoke (fn [_] {:result :ok :requests []})})
+        started (execution/start-engine engine)
+        disposed (execution/dispose-engine started)
+        invalid-start (execution/start-engine (execution/wasm-engine
+                                               {:binary (binary/descriptor {:path "bad.bin"
+                                                                            :bytes (byte-array [1 2 3 4])})
+                                                :manifest manifest}))]
+    (is (= :ready (:quickjs.engine/status started)))
+    (is (execution/engine-ready? started))
+    (is (= :disposed (:quickjs.engine/status disposed)))
+    (is (not (execution/engine-ready? disposed)))
+    (is (= :error (:quickjs.engine/status invalid-start)))
+    (is (= :quickjs/invalid-wasm-binary (:quickjs.engine/error invalid-start)))))
+
+(deftest quickjs-wasm-engine-dispose-invokes-host-cleanup
+  (let [manifest (runtime/component-manifest (runtime/quickjs))
+        disposed (atom [])
+        engine (execution/wasm-engine
+                {:binary (binary/descriptor {:path "quickjs.wasm"
+                                             :bytes (byte-array [(byte 0) (byte 97) (byte 115) (byte 109)])})
+                 :manifest manifest
+                 :invoke (fn [_] {:result :ok :requests []})
+                 :dispose (fn [engine]
+                            (swap! disposed conj (select-keys engine
+                                                              [:quickjs.engine/status]))
+                            {:host/context :disposed})})
+        started (execution/start-engine engine)
+        disposed-engine (execution/dispose-engine started)]
+    (is (= [{:quickjs.engine/status :ready}] @disposed))
+    (is (= :disposed (:quickjs.engine/status disposed-engine)))
+    (is (nil? (:quickjs.engine/invoke disposed-engine)))
+    (is (nil? (:quickjs.engine/dispose disposed-engine)))
+    (is (= {:host/context :disposed}
+           (:quickjs.engine/dispose-result disposed-engine)))
+    (is (= :quickjs/engine-disposed
+           (:error (execution/invoke-engine disposed-engine
+                                            {:quickjs/call :js/evaluate}))))))
+
+(deftest quickjs-wasm-engine-rejects-invalid-runtime-manifest
+  (let [engine (execution/wasm-engine
+                {:binary (binary/descriptor {:path "quickjs.wasm"
+                                             :bytes (byte-array [(byte 0) (byte 97) (byte 115) (byte 109)])})
+                 :manifest {:component/runtime :native
+                            :component/no-ambient-access false
+                            :component/imports [:ambient/all]
+                            :component/exports [:runtime/eval]
+                            :component/limits {:memory-pages 1 :fuel 1}}
+                 :invoke (fn [_] {:result :unsafe :requests []})})
+        started (execution/start-engine engine)]
+    (is (not (execution/engine-ready? engine)))
+    (is (= false (:quickjs.engine/manifest-valid? engine)))
+    (is (= :error (:quickjs.engine/status started)))
+    (is (= :quickjs/invalid-runtime-manifest (:quickjs.engine/error started)))
+    (is (= :quickjs/invalid-runtime-manifest
+           (:error (execution/invoke-engine engine {:quickjs/call :js/evaluate}))))))
+
+(deftest quickjs-module-loads-are-cached-and-calls-are-audited
+  (let [adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        calls (atom [])
+        engine (execution/wasm-engine
+                {:binary (binary/descriptor {:path "quickjs.wasm"
+                                             :bytes (byte-array [(byte 0) (byte 97) (byte 115) (byte 109)])})
+                 :manifest (runtime/component-manifest (runtime/quickjs))
+                 :invoke (fn [request]
+                           (swap! calls conj (:quickjs/call request))
+                           {:result {:module (:specifier request)}
+                            :requests []})})
+        state (execution/new-state {:binding (binding/empty-binding adapter)
+                                    :engine engine
+                                    :audit (audit/empty-log)})
+        first-load (execution/load-module! state "./cached.js" "kotoba://app.js")
+        second-load (execution/load-module! first-load "./cached.js" "kotoba://app.js")]
+    (is (= [:js/module-load] @calls))
+    (is (= false (:module/cache-hit? first-load)))
+    (is (= true (:module/cache-hit? second-load)))
+    (is (= {:module "./cached.js"} (:result second-load)))
+    (is (= {:quickjs/call 1} (audit/replay-summary (:audit second-load))))))

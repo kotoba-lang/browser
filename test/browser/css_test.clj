@@ -1,0 +1,193 @@
+(ns browser.css-test
+  (:require [browser.core :as browser]
+            [browser.css :as css]
+            [clojure.test :refer [deftest is]]))
+
+(deftest parses-simple-selector-rules
+  (let [rules (css/parse-rules "main.note, #hero { color: red; padding: 8px } .muted { color: gray }")]
+    (is (= 2 (count rules)))
+    (is (= {:color "red" :padding 8}
+           (:rule/declarations (first rules))))
+    (is (= :main (-> rules first :rule/selectors first :selector/parts first :selector/tag)))
+    (is (= ["note"] (-> rules first :rule/selectors first :selector/parts first :selector/classes)))))
+
+(deftest parses-attribute-selectors-and-important-declarations
+  (let [rules (css/parse-rules "input[required], [data-mode=\"edit\"] { border-width: 2px !important; color: red }")]
+    (is (= {:border-width 2 :color "red"}
+           (:rule/declarations (first rules))))
+    (is (= [{:attr/name :required :attr/operator nil :attr/value nil}]
+           (-> rules first :rule/selectors first :selector/parts first :selector/attrs)))
+    (is (= [{:attr/name :data-mode :attr/operator "=" :attr/value "edit"}]
+           (-> rules first :rule/selectors second :selector/parts first :selector/attrs)))
+    (is (= true (get-in (first rules) [:rule/declaration-meta :border-width :important?])))))
+
+(deftest parses-attribute-selector-operators
+  (let [rules (css/parse-rules "[class~=\"primary\"] { color: red }
+                                [lang|=\"en\"] { font-size: 12px }
+                                [href^=\"https://\"] { padding: 1px }
+                                [href$=\".pdf\"] { margin: 2px }
+                                [data-route*=\"admin\"] { border-width: 3px }")]
+    (is (= ["~=" "|=" "^=" "$=" "*="]
+           (mapv #(-> % :rule/selectors first :selector/parts first :selector/attrs first :attr/operator)
+                 rules)))))
+
+(deftest selector-list-split-ignores-commas-inside-attribute-values
+  (let [selectors (css/split-selector-list "[data-label=\"a,b\"], input:required, [title='x,y']")
+        rules (css/parse-rules "[data-label=\"a,b\"], input:required { color: red }")]
+    (is (= ["[data-label=\"a,b\"]" "input:required" "[title='x,y']"] selectors))
+    (is (= 2 (count (:rule/selectors (first rules)))))
+    (is (= "a,b" (-> rules first :rule/selectors first :selector/parts first :selector/attrs first :attr/value)))))
+
+(deftest selector-tokenization-ignores-whitespace-inside-attribute-values
+  (let [tokens (css/selector-tokens "main [title=\"hello world\"] > a[href*='report pdf']")
+        selector (css/parse-selector "main [title=\"hello world\"] > a[href*='report pdf']")]
+    (is (= ["main" "[title=\"hello world\"]" ">" "a[href*='report pdf']"] tokens))
+    (is (= "hello world"
+           (-> selector :selector/parts second :selector/attrs first :attr/value)))
+    (is (= "report pdf"
+           (-> selector :selector/parts (nth 2) :selector/attrs first :attr/value)))))
+
+(deftest parses-form-state-pseudo-classes
+  (let [rules (css/parse-rules "input:disabled, input:enabled, input:checked, input:required, input:optional, input:read-only, input:read-write, input:invalid, input:valid, input:focus { color: red }")
+        pseudos (mapv #(-> % :selector/parts first :selector/pseudos first)
+                      (-> rules first :rule/selectors))]
+    (is (= [:disabled :enabled :checked :required :optional :read-only :read-write :invalid :valid :focus] pseudos))
+    (is (= [0 1 1] (css/specificity (-> rules first :rule/selectors first))))))
+
+(deftest cascade-applies-tag-id-class-and-inline-precedence
+  (let [page (browser/load-html
+              {:url "kotoba://css"
+               :html "<main id=\"hero\" class=\"note\"><p class=\"muted\" style=\"color: blue\">Hi</p></main>"
+               :css "main { padding: 10px } #hero { background: white } .muted { color: gray; padding: 4px }"})
+        nodes (tree-seq map? :children (:browser/tree page))
+        main (first (filter #(= (:tag %) :main) nodes))
+        p (first (filter #(= (:tag %) :p) nodes))]
+    (is (= 10 (get-in main [:attrs :style/padding])))
+    (is (= "white" (get-in main [:attrs :style/background])))
+    (is (= "blue" (get-in p [:attrs :style/color])) "inline style wins")
+    (is (= 4 (get-in p [:attrs :style/padding])))))
+
+(deftest cascade-applies-descendant-child-and-specificity
+  (let [page (browser/load-html
+              {:url "kotoba://css"
+               :html "<main id=\"app\"><section><p id=\"lead\" class=\"note featured\">Lead</p></section><p class=\"note\">Loose</p></main>"
+               :css "p { color: gray; padding: 1px }
+                     .note { color: blue }
+                     main .note { color: green; margin: 2px }
+                     main > .note { border: loose }
+                     #lead { color: red }"})
+        nodes (tree-seq map? :children (:browser/tree page))
+        lead (first (filter #(= "lead" (get-in % [:attrs :id])) nodes))
+        loose (first (filter #(= "Loose" (first (:children %))) nodes))]
+    (is (= "red" (get-in lead [:attrs :style/color])) "id specificity wins over descendant class")
+    (is (= 1 (get-in lead [:attrs :style/padding])))
+    (is (= 2 (get-in lead [:attrs :style/margin])))
+    (is (nil? (get-in lead [:attrs :style/border])) "child combinator should not match nested p")
+    (is (= "loose" (get-in loose [:attrs :style/border])))))
+
+(deftest cascade-applies-attribute-selectors-and-important-precedence
+  (let [page (browser/load-html
+              {:url "kotoba://css"
+               :html "<main><input id=\"field\" required value=\"Name\"><p id=\"msg\" class=\"warning\" data-mode=\"edit\">Message</p></main>"
+               :css "input[required] { border-width: 3px }
+                     [data-mode=\"edit\"] { padding: 6px }
+                     .warning { color: red !important }
+                     #msg { color: blue }"})
+        nodes (tree-seq map? :children (:browser/tree page))
+        field (first (filter #(= "field" (get-in % [:attrs :id])) nodes))
+        msg (first (filter #(= "msg" (get-in % [:attrs :id])) nodes))]
+    (is (= 3 (get-in field [:attrs :style/border-width])))
+    (is (= 6 (get-in msg [:attrs :style/padding])))
+    (is (= "red" (get-in msg [:attrs :style/color])) "!important wins over later higher-specificity normal rule")))
+
+(deftest cascade-important-rule-overrides-inline-normal-style
+  (let [page (browser/load-html
+              {:url "kotoba://css"
+               :html "<main><p id=\"msg\" class=\"warning\" style=\"color: blue; padding: 2px\">Message</p></main>"
+               :css ".warning { color: red !important; margin: 4px }
+                     #msg { color: green; padding: 8px }"})
+        nodes (tree-seq map? :children (:browser/tree page))
+        msg (first (filter #(= "msg" (get-in % [:attrs :id])) nodes))]
+    (is (= "red" (get-in msg [:attrs :style/color])) "author !important beats inline normal")
+    (is (= 2 (get-in msg [:attrs :style/padding])) "inline normal beats author normal")
+    (is (= 4 (get-in msg [:attrs :style/margin])))))
+
+(deftest cascade-applies-attribute-selector-operators
+  (let [page (browser/load-html
+              {:url "kotoba://css"
+               :html "<main><a id=\"doc\" class=\"primary link\" lang=\"en-US\" href=\"https://example.com/admin/report.pdf\" data-route=\"reports/admin\">Doc</a></main>"
+               :css "[class~=\"primary\"] { color: red }
+                     [lang|=\"en\"] { font-size: 13px }
+                     [href^=\"https://\"] { padding: 1px }
+                     [href$=\".pdf\"] { margin: 2px }
+                     [data-route*=\"admin\"] { border-width: 3px }"})
+        nodes (tree-seq map? :children (:browser/tree page))
+        doc (first (filter #(= "doc" (get-in % [:attrs :id])) nodes))]
+    (is (= "red" (get-in doc [:attrs :style/color])))
+    (is (= 13 (get-in doc [:attrs :style/font-size])))
+    (is (= 1 (get-in doc [:attrs :style/padding])))
+    (is (= 2 (get-in doc [:attrs :style/margin])))
+    (is (= 3 (get-in doc [:attrs :style/border-width])))))
+
+(deftest cascade-applies-form-state-pseudo-classes
+  (let [page (browser/load-html
+              {:url "kotoba://css"
+               :html "<main><input id=\"disabled\" disabled><input id=\"checked\" type=\"checkbox\" checked><input id=\"hidden-required\" type=\"hidden\" required><input id=\"file-required\" type=\"file\" required value=\"/secret/path.txt\"><input id=\"required\" required><input id=\"readonly-required\" required readonly><input id=\"readonly-long\" value=\"abcde\" maxlength=\"4\" readonly><input id=\"plain\"><input id=\"readonly\" readonly><input id=\"readonly-number\" type=\"number\" readonly value=\"7\"><input id=\"invalid\" invalid><input id=\"checkbox-required\" type=\"checkbox\" required><input id=\"radio-required\" type=\"radio\" name=\"choice\" required><input id=\"radio-checked\" type=\"radio\" name=\"choice\" checked><select id=\"select-required\" required><option value=\"\">Choose</option><option value=\"go\">Go</option></select><select id=\"select-disabled-selected\" required><option value=\"locked\" selected disabled>Locked</option><option value=\"go\">Go</option></select><select id=\"select-optgroup-disabled\" required><optgroup disabled><option id=\"optgroup-locked\" value=\"locked\" selected>Locked</option></optgroup><option value=\"go\">Go</option></select><select id=\"select-multiple-empty\" multiple required><option value=\"one\">One</option><option value=\"two\">Two</option></select><select id=\"select-valid\" required><option value=\"\">Choose</option><option value=\"go\" selected>Go</option></select><fieldset disabled><legend><input id=\"legend-enabled\" value=\"ok\"></legend><input id=\"fieldset-disabled\" required></fieldset></main>"
+               :css "input { color: black }
+                     input:disabled { color: gray }
+                     option:disabled { color: silver }
+                     input:enabled { font-size: 15px }
+                     input:checked { border-width: 2px }
+                     input:required { padding: 4px }
+                     input:optional { margin: 3px }
+                     input:read-only { background: #eeeeee }
+                     input:read-write { width: 120px }
+                     input:invalid, select:invalid { border-color: red }
+                     input:valid, select:valid { height: 24px }
+                     input:hover { margin: 9px }"})
+        nodes (tree-seq map? :children (:browser/tree page))
+        attrs (fn [id]
+                (:attrs (first (filter #(= id (get-in % [:attrs :id])) nodes))))]
+    (is (= "gray" (get-in (attrs "disabled") [:style/color])))
+    (is (= "gray" (get-in (attrs "fieldset-disabled") [:style/color])))
+    (is (= 15 (get-in (attrs "legend-enabled") [:style/font-size])))
+    (is (= 15 (get-in (attrs "plain") [:style/font-size])))
+    (is (= 2 (get-in (attrs "checked") [:style/border-width])))
+    (is (= 4 (get-in (attrs "required") [:style/padding])))
+    (is (= 3 (get-in (attrs "plain") [:style/margin])))
+    (is (= "#eeeeee" (get-in (attrs "readonly") [:style/background])))
+    (is (= "#eeeeee" (get-in (attrs "readonly-number") [:style/background])))
+    (is (= "#eeeeee" (get-in (attrs "readonly-required") [:style/background])))
+    (is (= 4 (get-in (attrs "readonly-required") [:style/padding])))
+    (is (= 120 (get-in (attrs "plain") [:style/width])))
+    (is (= "red" (get-in (attrs "required") [:style/border-color])))
+    (is (= "red" (get-in (attrs "invalid") [:style/border-color])))
+    (is (= "red" (get-in (attrs "checkbox-required") [:style/border-color])))
+    (is (= "red" (get-in (attrs "select-required") [:style/border-color])))
+    (is (= "red" (get-in (attrs "select-disabled-selected") [:style/border-color])))
+    (is (= "red" (get-in (attrs "select-optgroup-disabled") [:style/border-color])))
+    (is (= "red" (get-in (attrs "select-multiple-empty") [:style/border-color])))
+    (is (= "silver" (get-in (attrs "optgroup-locked") [:style/color])))
+    (is (nil? (get-in (attrs "hidden-required") [:style/padding])))
+    (is (nil? (get-in (attrs "hidden-required") [:style/border-color])))
+    (is (nil? (get-in (attrs "hidden-required") [:style/height])))
+    (is (nil? (get-in (attrs "hidden-required") [:style/width])))
+    (is (nil? (get-in (attrs "file-required") [:style/padding])))
+    (is (nil? (get-in (attrs "file-required") [:style/border-color])))
+    (is (nil? (get-in (attrs "file-required") [:style/height])))
+    (is (nil? (get-in (attrs "file-required") [:style/width])))
+    (is (nil? (get-in (attrs "readonly-required") [:style/border-color])))
+    (is (nil? (get-in (attrs "readonly-required") [:style/height])))
+    (is (nil? (get-in (attrs "readonly-long") [:style/border-color])))
+    (is (nil? (get-in (attrs "readonly-long") [:style/height])))
+    (is (nil? (get-in (attrs "fieldset-disabled") [:style/border-color])))
+    (is (nil? (get-in (attrs "radio-required") [:style/border-color]))
+        "a checked radio in the same group satisfies required")
+    (is (= 24 (get-in (attrs "plain") [:style/height])))
+    (is (= 24 (get-in (attrs "radio-required") [:style/height])))
+    (is (= 24 (get-in (attrs "select-valid") [:style/height])))
+    (is (nil? (get-in (attrs "select-disabled-selected") [:style/height])))
+    (is (nil? (get-in (attrs "select-optgroup-disabled") [:style/height])))
+    (is (nil? (get-in (attrs "select-multiple-empty") [:style/height])))
+    (is (= "black" (get-in (attrs "plain") [:style/color])))
+    (is (not= 9 (get-in (attrs "plain") [:style/margin])) "unsupported pseudo-class must not degrade to tag-only match")))

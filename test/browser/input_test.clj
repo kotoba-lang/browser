@@ -1,0 +1,181 @@
+(ns browser.input-test
+  (:require [browser.input :as input]
+            [browser.surface :as surface]
+            [clojure.test :refer [deftest is]]))
+
+(defn- window
+  [surface window-id]
+  (first (filter #(= (:window/id %) window-id) (:surface/windows surface))))
+
+(deftest pointer-click-focuses-topmost-window
+  (let [s (-> (surface/empty-surface)
+              (surface/open-window {:app-id "a" :title "A" :rect [0 0 100 100]})
+              (surface/open-window {:app-id "b" :title "B" :rect [20 20 100 100]}))
+        first-id (-> s :surface/windows first :window/id)
+        result (input/reduce-event s (input/empty-state)
+                                   {:event/type :pointer/click :x 10 :y 10})]
+    (is (= first-id (get-in result [:surface :surface/focus])))
+    (is (= [{:action :window/focus :window-id first-id}]
+           (:actions result)))))
+
+(deftest pointer-drag-moves-window-by-titlebar
+  (let [s (-> (surface/empty-surface)
+              (surface/open-window {:app-id "notes"
+                                    :title "Notes"
+                                    :rect [40 50 420 300]}))
+        window-id (:surface/focus s)
+        result (input/reduce-events
+                s
+                [{:event/type :pointer/down :x 60 :y 60}
+                 {:event/type :pointer/move :x 100 :y 120}
+                 {:event/type :pointer/up :x 100 :y 120}])]
+    (is (= [80 110 420 300]
+           (:window/rect (window (:surface result) window-id))))
+    (is (= [:window/focus :window/move]
+           (mapv :action (:actions result))))))
+
+(deftest pointer-drag-resizes-window-from-corner
+  (let [s (-> (surface/empty-surface)
+              (surface/open-window {:app-id "term"
+                                    :title "Terminal"
+                                    :rect [10 10 200 120]}))
+        window-id (:surface/focus s)
+        result (input/reduce-events
+                s
+                [{:event/type :pointer/down :x 205 :y 125}
+                 {:event/type :pointer/move :x 245 :y 165}
+                 {:event/type :pointer/up :x 245 :y 165}])]
+    (is (= [10 10 240 160]
+           (:window/rect (window (:surface result) window-id))))
+    (is (= [:window/focus :window/resize]
+           (mapv :action (:actions result))))))
+
+(deftest keyboard-and-text-input-target-focused-window
+  (let [s (-> (surface/empty-surface)
+              (surface/open-window {:app-id "editor" :title "Editor"}))
+        window-id (:surface/focus s)
+        result (input/reduce-events
+                s
+                [{:capability "keyboard/key" :key "Enter"}
+                 {:capability "keyboard/type" :text "hello"}])
+        focused (window (:surface result) window-id)]
+    (is (= "hello" (:window/text-buffer focused)))
+    (is (= [{:event :keyboard/key :window-id window-id :key "Enter"}
+            {:event :text/input :window-id window-id :text "hello"}]
+           (get-in result [:surface :surface/input-log])))))
+
+(deftest pointer-wheel-scrolls-window-under-pointer
+  (let [s (-> (surface/empty-surface)
+              (surface/open-window {:app-id "a" :title "A" :rect [0 0 100 100]})
+              (surface/open-window {:app-id "b" :title "B" :rect [120 0 100 100]}))
+        first-id (-> s :surface/windows first :window/id)
+        second-id (-> s :surface/windows second :window/id)
+        result (input/reduce-events
+                s
+                [{:capability "pointer/wheel" :x 10 :y 10 :delta-y 24}
+                 {:event/type :pointer/wheel :x 125 :y 5 :delta-x 3 :delta-y 7}])]
+    (is (= [0 24] (:window/scroll (window (:surface result) first-id))))
+    (is (= [3 7] (:window/scroll (window (:surface result) second-id))))
+    (is (= [{:action :window/scroll :window-id first-id :delta-x 0 :delta-y 24 :x 10 :y 10}
+            {:action :window/scroll :window-id second-id :delta-x 3 :delta-y 7 :x 125 :y 5}]
+           (:actions result)))
+    (is (= [{:event :window/scroll :window-id first-id :delta-x 0 :delta-y 24}
+            {:event :window/scroll :window-id second-id :delta-x 3 :delta-y 7}]
+           (get-in result [:surface :surface/input-log])))))
+
+(deftest keyboard-editing-keys-drive-focused-text-model
+  (let [s (-> (surface/empty-surface)
+              (surface/open-window {:app-id "editor" :title "Editor"}))
+        window-id (:surface/focus s)
+        result (input/reduce-events
+                s
+                [{:capability "keyboard/type" :text "abc"}
+                 {:capability "keyboard/key" :key "ArrowLeft"}
+                 {:capability "keyboard/key" :key "Backspace"}
+                 {:capability "keyboard/type" :text "Z"}])
+        focused (window (:surface result) window-id)]
+    (is (= "aZc" (:window/text-buffer focused)))
+    (is (= 2 (get-in focused [:window/text :text/caret])))
+    (is (= [:text/input :keyboard/key :text/edit :keyboard/key :text/edit :text/input]
+           (mapv :action (:actions result))))))
+
+(deftest keyboard-selection-delete-home-end-and-select-all-drive-focused-text-model
+  (let [s (-> (surface/empty-surface)
+              (surface/open-window {:app-id "editor" :title "Editor"}))
+        window-id (:surface/focus s)
+        result (input/reduce-events
+                s
+                [{:capability "keyboard/type" :text "abcdef"}
+                 {:capability "keyboard/key" :key "Home"}
+                 {:capability "keyboard/key" :key "ArrowRight" :shift? true}
+                 {:capability "keyboard/key" :key "ArrowRight" :shift? true}
+                 {:capability "keyboard/key" :key "Delete"}
+                 {:capability "keyboard/key" :key "End" :shift? true}
+                 {:capability "keyboard/type" :text "Z"}
+                 {:capability "keyboard/key" :key "a" :ctrl? true}
+                 {:capability "keyboard/type" :text "done"}])
+        focused (window (:surface result) window-id)]
+    (is (= "done" (:window/text-buffer focused)))
+    (is (= [4 4] (get-in focused [:window/text :text/selection])))
+    (is (some #(and (= :text/edit (:action %))
+                    (= :select-all (:text/op %)))
+              (:actions result)))))
+
+(deftest dom-and-aiueos-events-normalize-to-same-vocabulary
+  (is (= {:event/type :pointer/click :x 4 :y 5}
+         (input/normalize-event {:event/type :dom/click :x 4 :y 5})))
+  (is (= {:event/type :text/input :text "aiueos"}
+         (input/normalize-event {:event/type :dom/input :value "aiueos"})))
+  (is (= {:event/type :pointer/move :x 7 :y 8}
+         (input/normalize-event {:aiueos/capability "pointer/move" :x 7 :y 8})))
+  (is (= {:event/type :pointer/down
+          :x 7
+          :y 8
+          :button 1
+          :pointerId 9
+          :pointerType "pen"
+          :isPrimary true
+          :pressure 0.5}
+         (input/normalize-event {:aiueos/capability "pointer/down"
+                                 :x 7
+                                 :y 8
+                                 :button 1
+                                 :pointerId 9
+                                 :pointerType "pen"
+                                 :isPrimary true
+                                 :pressure 0.5})))
+  (is (= {:event/type :pointer/up
+          :x 7
+          :y 8
+          :button 0
+          :pointer-id 3
+          :pointer-type "touch"
+          :is-primary? false}
+         (input/normalize-event {:capability "pointer/up"
+                                 :x 7
+                                 :y 8
+                                 :pointer-id 3
+                                 :pointer-type "touch"
+                                 :is-primary? false})))
+  (is (= {:event/type :pointer/cancel
+          :x 9
+          :y 10
+          :pointerId 12
+          :pointerType "touch"
+          :isPrimary true}
+         (input/normalize-event {:capability "pointer/cancel"
+                                 :x 9
+                                 :y 10
+                                 :pointerId 12
+                                 :pointerType "touch"
+                                 :isPrimary true})))
+  (is (= {:event/type :pointer/wheel :x 7 :y 8 :delta-x 0 :delta-y 12}
+         (input/normalize-event {:aiueos/capability "pointer/wheel"
+                                 :x 7
+                                 :y 8
+                                 :delta-y 12})))
+  (is (= {:event/type :key/down :key "ArrowRight" :shift? true :ctrl? true}
+         (input/normalize-event {:capability "keyboard/key"
+                                 :key "ArrowRight"
+                                 :shift? true
+                                 :ctrl? true}))))
