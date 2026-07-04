@@ -9,6 +9,17 @@
   `quickjs_worker_smoke_test.cljs`/`quickjs_fetch_smoke_test.cljs` already
   verify each capability in isolation.
 
+  `browser-demo-real-generated-content-proof-test` below additionally
+  drives the SAME real `sample-html` (plus `demo/generated-content-css`,
+  the real CSS text `init!` now also passes as `session/load-html!`'s
+  `:css` argument -- see that fn's own docstring for why) through the
+  same real pipeline, proving `sample-html`'s real `<style>` block's
+  `::before`/`::after` generated content (`content: attr(...)` on
+  `#status-badge`, `content: counter(...)` numbering `#step-counter`'s
+  four real sibling `<li>`s) is genuinely resolved by the real
+  `cssom.core/apply-cascade` this repo depends on, and genuinely painted
+  into the real draw-ops the WebGL canvas renders from.
+
   ## What this proves, and what it deliberately does NOT
 
   `browser.demo/init!` itself cannot run under Node -- it calls
@@ -265,6 +276,47 @@
            (dom-bridge/node-snapshot document)
            :text-content))
 
+(defn- node-attr
+  [document id k]
+  (some->> (dom-bridge/get-element-by-id document id)
+           (dom-bridge/node-snapshot document)
+           :attrs
+           k))
+
+(defn- pseudo-content
+  "Mirrors `browser.demo`'s own (private) `pseudo-content` helper: a
+   pseudo-element's generated content is never a DOM node/mutation (see
+   that namespace's docstring), so there is no `:text-content` to read --
+   `cssom.core/apply-cascade` instead decorates the real element's own
+   `:attrs` with a synthetic `:pseudo/before` style map holding the
+   resolved `content` string, read here via the SAME
+   `browser.dom-bridge/get-element-by-id`+`node-snapshot` `element-text`
+   above uses, just its `:attrs` key instead of `:text-content`."
+  [document id]
+  (:content (node-attr document id :pseudo/before)))
+
+(defn- index-of-text
+  [texts marker]
+  (first (keep-indexed (fn [i x] (when (= x marker) i)) texts)))
+
+(defn- text-draw-ops
+  [page]
+  (mapv :text (filter #(= :text (:draw/op %)) (:browser/draw-ops page))))
+
+(defn- text-immediately-before
+  "The :text draw-op string immediately preceding the first draw-op whose
+   :text is exactly `marker` in `texts` (the page's full, real, ordered
+   `:draw/op :text` sequence -- what the WebGL canvas actually paints) --
+   proves a ::before generated-content box was really painted right before
+   its real sibling's own real text, in real document order. Mirrors
+   cssom.layout-test's own adjacency checks (e.g. `(mapv :text text-ops)`
+   compared against an exact expected ordered list), scoped to a known
+   anchor instead of the whole page's exact list so this test stays
+   robust to unrelated content elsewhere on the page."
+  [texts marker]
+  (when-let [idx (index-of-text texts marker)]
+    (when (pos? idx) (nth texts (dec idx)))))
+
 (deftest browser-demo-real-websocket-worker-fetch-proofs-test
   (async done
     (let [server-atom (atom nil)
@@ -369,5 +421,104 @@
                      (is (= "WebSocket proof: real echo round-trip -> \"hello from the real kotoba-lang/browser demo\""
                             ws-proof)
                          "expected the real server's real echoed text in #ws-proof"))))
+          (.catch fail!)
+          (.finally cleanup!)))))
+
+;; ---------------------------------------------------------------------
+;; Real ::before/::after generated content: content: attr(...) and
+;; content: counter(...), added to cssom.core/apply-cascade in a later
+;; session on kotoba-lang/cssom and wired into this demo's own
+;; sample-html/generated-content-css. Reuses the same real local server +
+;; session-building helpers as the WS/Worker/fetch proof test above (this
+;; demo's sample-html always includes its own real Worker/fetch <script>
+;; tags, needing the same real server behind it), but does not need the
+;; WebSocket round trip's real wall-clock wait at all -- generated content
+;; is fully resolved synchronously as part of the real cascade
+;; `session/load-html!` runs.
+;; ---------------------------------------------------------------------
+
+(deftest browser-demo-real-generated-content-proof-test
+  (async done
+    (let [server-atom (atom nil)
+          session-atom (atom nil)
+          fail! (fn [err]
+                  (is false (str "browser.demo real generated-content smoke test failed: "
+                                 (or (.-message err) err))))
+          cleanup! (fn []
+                     (dispose-engine! @session-atom)
+                     (when-let [server @server-atom] (stop-demo-server! server))
+                     (done))]
+      (-> (start-demo-server!)
+          (.then (fn [server]
+                   (reset! server-atom server)
+                   (let [{:keys [http-origin]} server
+                         worker-url (str http-origin "/worker.js")
+                         fetch-url (str http-origin "/api/fetch-data")]
+                     (js/Promise.all #js [(real-http-get! worker-url)
+                                          (real-http-get! fetch-url)]))))
+          (.then (fn [results]
+                   (let [worker-response (aget results 0)
+                         fetch-response (aget results 1)
+                         {:keys [http-origin]} @server-atom
+                         worker-url (str http-origin "/worker.js")
+                         fetch-url (str http-origin "/api/fetch-data")
+                         ws-url (str (str/replace http-origin #"^http" "ws") "/ws-echo")
+                         prefetched {worker-url worker-response fetch-url fetch-response}
+                         demo-profile (demo/grant-demo-permissions worker-url fetch-url ws-url)
+                         h (host/recording-host)
+                         base-session (session/new-session
+                                       (quickjs-runner/quickjs-session-opts
+                                        {:host h
+                                         :profile demo-profile
+                                         :fetch-fn (demo/synchronous-fetch-fn prefetched)
+                                         :websocket-fn (ws/websocket-fn)}))]
+                     {:worker-url worker-url :fetch-url fetch-url
+                      :ready (session/ensure-script-engine! base-session)})))
+          (.then (fn [{:keys [worker-url fetch-url ready]}]
+                   (-> ready
+                       (.then (fn [ready-session]
+                                (reset! session-atom ready-session)
+                                {:worker-url worker-url :fetch-url fetch-url
+                                 :ready-session ready-session})))))
+          (.then (fn [{:keys [worker-url fetch-url ready-session]}]
+                   ;; The EXACT real sample-html AND the EXACT real CSS text
+                   ;; browser.demo/init! passes as :css -- imported directly,
+                   ;; not a re-typed copy. See browser.session/load-html!'s
+                   ;; own docstring for why :css must be passed explicitly
+                   ;; here: this pipeline does not auto-extract a real
+                   ;; <style> tag's own text back out of parsed HTML.
+                   (let [after (session/load-html!
+                               ready-session
+                               {:url "kotoba://browser-demo/index"
+                                :html (demo/sample-html worker-url fetch-url)
+                                :css demo/generated-content-css})
+                         page (:browser.session/page after)
+                         doc (:browser/document page)
+                         texts (text-draw-ops page)
+                         step-ids ["step-1" "step-2" "step-3" "step-4"]
+                         step-texts ["Real HTML parsed into a real kotoba.wasm.dom document"
+                                     "Real cssom cascade resolves ::before/::after generated content"
+                                     "Real box-model layout produces real draw-ops"
+                                     "Real WebGL rasterization paints the canvas"]]
+                     (reset! session-atom after)
+                     (println "browser.demo smoke: real ::before attr() proof -- #status-badge ->"
+                              (pr-str (pseudo-content doc "status-badge")))
+                     (println "browser.demo smoke: real ::before counter() proof -- #step-counter lis ->"
+                              (pr-str (mapv #(pseudo-content doc %) step-ids)))
+                     (is (= "live" (node-attr doc "status-badge" :data-status))
+                         "expected the real, served data-status=\"live\" HTML attribute")
+                     (is (= "live: " (pseudo-content doc "status-badge"))
+                         "content: attr(data-status) \": \" must resolve to the real element's own real attribute value")
+                     (is (= "Kotoba engine" (element-text doc "status-badge"))
+                         "the real child text itself must be untouched by the ::before rule")
+                     (is (= ["1. " "2. " "3. " "4. "] (mapv #(pseudo-content doc %) step-ids))
+                         "four real sibling <li>s must be numbered sequentially purely by CSS counters")
+                     (is (= step-texts (mapv #(element-text doc %) step-ids))
+                         "each real <li>'s own real text must be untouched by its ::before rule")
+                     (is (= "live: " (text-immediately-before texts "Kotoba engine"))
+                         "the real painted draw-ops (what the WebGL canvas actually renders) must carry the resolved ::before text immediately before the real element's own real text")
+                     (doseq [[expected-number step-text] (map vector ["1. " "2. " "3. " "4. "] step-texts)]
+                       (is (= expected-number (text-immediately-before texts step-text))
+                           (str "expected " (pr-str expected-number) " painted immediately before " (pr-str step-text)))))))
           (.catch fail!)
           (.finally cleanup!)))))
