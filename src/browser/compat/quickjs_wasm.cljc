@@ -127,6 +127,7 @@
         return id;
       }
       globalThis.__kotobaSnapshot = globalThis.__kotobaSnapshot || { root: null, nodes: {} };
+      globalThis.__kotobaWebSockets = globalThis.__kotobaWebSockets || {};
       globalThis.__kotobaClientNodes = {};
       globalThis.__kotobaElementCache = {};
       globalThis.__kotobaMutationObservers = [];
@@ -2694,6 +2695,11 @@
         this.__kotobaWebSocketId = socketId;
         this.url = String(url);
         this.readyState = 1;
+        this.onopen = null;
+        this.onmessage = null;
+        this.onclose = null;
+        this.onerror = null;
+        globalThis.__kotobaWebSockets[socketId] = this;
         var request = {
           capability: 'websocket/connect',
           'websocket/id': socketId,
@@ -2702,7 +2708,9 @@
         if (protocols != null) request['websocket/protocols'] = protocols;
         globalThis.__kotobaRequests.push(request);
       };
+      globalThis.WebSocket.CONNECTING = 0;
       globalThis.WebSocket.OPEN = 1;
+      globalThis.WebSocket.CLOSING = 2;
       globalThis.WebSocket.CLOSED = 3;
       globalThis.WebSocket.prototype.send = function(data) {
         globalThis.__kotobaRequests.push({
@@ -2852,7 +2860,33 @@
       };
       globalThis.queueMicrotask = function(callback) {
         __kotobaScheduleMicrotask(callback, null);
-      };")
+      };
+      (function() {
+        var __kotobaWsSnapshot = globalThis.__kotobaWebsocketSnapshot || {};
+        var __kotobaWsRegistry = globalThis.__kotobaWebSockets || {};
+        var __kotobaWsIds = Object.keys(__kotobaWsSnapshot);
+        for (var __kwi = 0; __kwi < __kotobaWsIds.length; __kwi++) {
+          var __kwId = __kotobaWsIds[__kwi];
+          var __kwEntry = __kotobaWsSnapshot[__kwId];
+          var __kwSocket = __kotobaWsRegistry[__kwId];
+          if (!__kwSocket || !__kwEntry) continue;
+          var __kwMessages = __kwEntry.messages || [];
+          for (var __kwj = 0; __kwj < __kwMessages.length; __kwj++) {
+            if (typeof __kwSocket.onmessage === 'function') {
+              __kwSocket.onmessage({ data: __kwMessages[__kwj] });
+            }
+          }
+          if (__kwEntry.closed) {
+            __kwSocket.readyState = globalThis.WebSocket.CLOSED;
+            if (typeof __kwSocket.onclose === 'function') {
+              __kwSocket.onclose({
+                code: __kwEntry['close-code'] || 1000,
+                reason: __kwEntry['close-reason'] || ''
+              });
+            }
+          }
+        }
+      })();")
 
 #?(:cljs
    (defn- request-keyword [k]
@@ -3019,18 +3053,42 @@
           ";")))
 
 #?(:cljs
+   (defn- websocket-snapshot-source
+     "JS source that installs the real, current per-WebSocket-connection
+     inbound-message snapshot (`quickjs-execution/websocket-snapshot`,
+     computed host-side by draining each open connection's REAL socket --
+     see `browser.compat.quickjs-runner`'s `persistent-execution-keys`) as
+     `globalThis.__kotobaWebsocketSnapshot`, keyed by WebSocket id. Unlike
+     `snapshot-source`/`storage-snapshot-source`/`clipboard-snapshot-source`/
+     `geolocation-snapshot-source`, installing this snapshot is not enough
+     on its own: the webapi shim below also has to actively DELIVER it (see
+     the bottom of `webapi-shim-source`) -- for each id present here with a
+     still-registered live `WebSocket` instance
+     (`globalThis.__kotobaWebSockets`, itself persisted across script tags
+     within a page the same way `globalThis.__kotobaSnapshot` already is),
+     it invokes that instance's `onmessage` SYNCHRONOUSLY once per buffered
+     message, in arrival order, before the script's own source runs --
+     this is what makes a message a PREVIOUS `<script>` tag's `ws.onmessage`
+     registered genuinely observable by a LATER one."
+     [websocket-snapshot]
+     (str "globalThis.__kotobaWebsocketSnapshot = "
+          (js/JSON.stringify (clj->js (jsonable (or websocket-snapshot {}))))
+          ";")))
+
+#?(:cljs
    (defn- dump-result
      ([module source url modules]
-      (dump-result module source url modules nil false nil nil nil nil))
+      (dump-result module source url modules nil false nil nil nil nil nil))
      ([module source url modules module-provider module?]
-      (dump-result module source url modules module-provider module? nil nil nil nil))
-     ([module source url modules module-provider module? document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot]
+      (dump-result module source url modules module-provider module? nil nil nil nil nil))
+     ([module source url modules module-provider module? document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot]
       (let [^js runtime (.newRuntime ^js module #js {:moduleLoader (module-loader modules module-provider)})
             ^js vm (.newContext runtime)
             _ (eval-dispose! vm (snapshot-source document-snapshot) "kotoba://quickjs/document-snapshot.js")
             _ (eval-dispose! vm (storage-snapshot-source storage-snapshot) "kotoba://quickjs/storage-snapshot.js")
             _ (eval-dispose! vm (clipboard-snapshot-source clipboard-snapshot) "kotoba://quickjs/clipboard-snapshot.js")
             _ (eval-dispose! vm (geolocation-snapshot-source geolocation-snapshot) "kotoba://quickjs/geolocation-snapshot.js")
+            _ (eval-dispose! vm (websocket-snapshot-source websocket-snapshot) "kotoba://quickjs/websocket-snapshot.js")
             _ (eval-dispose! vm webapi-shim-source "kotoba://quickjs/webapi-shim.js")
             response (eval-result vm source url module?)
             requests (dump-requests vm)]
@@ -3057,17 +3115,18 @@
            context))))
 
 #?(:cljs
-   (defn- install-document-shim! [vm document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot]
+   (defn- install-document-shim! [vm document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot]
      (eval-dispose! vm (snapshot-source document-snapshot) "kotoba://quickjs/document-snapshot.js")
      (eval-dispose! vm (storage-snapshot-source storage-snapshot) "kotoba://quickjs/storage-snapshot.js")
      (eval-dispose! vm (clipboard-snapshot-source clipboard-snapshot) "kotoba://quickjs/clipboard-snapshot.js")
      (eval-dispose! vm (geolocation-snapshot-source geolocation-snapshot) "kotoba://quickjs/geolocation-snapshot.js")
+     (eval-dispose! vm (websocket-snapshot-source websocket-snapshot) "kotoba://quickjs/websocket-snapshot.js")
      (eval-dispose! vm webapi-shim-source "kotoba://quickjs/webapi-shim.js")))
 
 #?(:cljs
-   (defn- context-eval-result [context source url module? document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot]
+   (defn- context-eval-result [context source url module? document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot]
      (let [vm (:vm context)
-           _ (install-document-shim! vm document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot)
+           _ (install-document-shim! vm document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot)
            response (eval-result vm source url module?)
            requests (dump-requests vm)]
        (assoc response :requests requests))))
@@ -3150,7 +3209,8 @@
                                                           (:document/snapshot request)
                                                           (:storage/snapshot request)
                                                           (:clipboard/snapshot request)
-                                                          (:geolocation/snapshot request))
+                                                          (:geolocation/snapshot request)
+                                                          (:websocket/snapshot request))
 
                                      :js/module-load
                                      (if-let [source (resolve-module-source modules module-provider (:specifier request))]
@@ -3161,7 +3221,8 @@
                                                             (:document/snapshot request)
                                                             (:storage/snapshot request)
                                                             (:clipboard/snapshot request)
-                                                            (:geolocation/snapshot request))
+                                                            (:geolocation/snapshot request)
+                                                            (:websocket/snapshot request))
                                        {:error :quickjs/module-not-found
                                         :specifier (:specifier request)
                                         :requests []})

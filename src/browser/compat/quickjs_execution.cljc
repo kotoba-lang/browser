@@ -25,17 +25,23 @@
   "Build an `invocation` carrying the real document snapshot plus the real,
   current `:storage` and `:clipboard` snapshots (deref'd from the
   page-lifetime `quickjs-execution` atoms -- see
-  `browser.compat.quickjs-runner`'s `persistent-execution-keys`), and the
-  real, current geolocation permission-decision + position snapshot (already
+  `browser.compat.quickjs-runner`'s `persistent-execution-keys`), the real,
+  current geolocation permission-decision + position snapshot (already
   computed host-side by `geolocation-snapshot`, since unlike storage/
-  clipboard it needs more than a bare deref -- see that fn), so
-  `quickjs-wasm`'s webapi shim can install all of them as VM globals before
-  running `payload`'s script (`:document/snapshot`, `:storage/snapshot`,
-  `:clipboard/snapshot`, `:geolocation/snapshot` respectively) and answer
+  clipboard it needs more than a bare deref -- see that fn), and the real,
+  current per-WebSocket-connection inbound message snapshot (computed
+  host-side by `websocket-snapshot`, by draining each open connection's
+  REAL socket -- see that fn), so `quickjs-wasm`'s webapi shim can install
+  all of them as VM globals before running `payload`'s script
+  (`:document/snapshot`, `:storage/snapshot`, `:clipboard/snapshot`,
+  `:geolocation/snapshot`, `:websocket/snapshot` respectively) and answer
   reads like `localStorage.getItem` / `navigator.clipboard.readText` /
   `navigator.geolocation.getCurrentPosition` synchronously from real host
-  state instead of always returning `null`/`''`/never calling back."
-  [call payload capability-results document storage clipboard geolocation-snapshot]
+  state instead of always returning `null`/`''`/never calling back, and
+  deliver any real WebSocket messages that genuinely arrived since the
+  script that opened the connection ran (see `websocket-snapshot`) to that
+  connection's `onmessage` before this script's own source runs."
+  [call payload capability-results document storage clipboard geolocation-snapshot websocket-snapshot]
   (let [snapshot (cond-> (dom-bridge/document-snapshot document)
                    (:script/node-id payload)
                    (assoc :current-script (:script/node-id payload)))]
@@ -44,7 +50,8 @@
                        :document/snapshot snapshot
                        :storage/snapshot (some-> storage deref)
                        :clipboard/snapshot (some-> clipboard deref)
-                       :geolocation/snapshot geolocation-snapshot)
+                       :geolocation/snapshot geolocation-snapshot
+                       :websocket/snapshot websocket-snapshot)
                 capability-results)))
 
 (defn- take-capability-results
@@ -356,6 +363,58 @@
                    (:timestamp position)
                    (assoc :timestamp (:timestamp position)))})))
 
+(defn- websocket-connection-snapshot
+  [websocket-fn handle]
+  (let [drained (websocket-fn {:op :drain :handle handle})]
+    (cond-> {:messages (vec (:messages drained))
+             :closed? (boolean (:closed? drained))}
+      (:close-info drained)
+      (assoc :close-code (:code (:close-info drained))
+             :close-reason (:reason (:close-info drained))))))
+
+(defn- websocket-snapshot
+  "Compute the REAL, current per-connection inbound-message snapshot from
+  `state`'s persisted `:websocket/connections` + `:websocket/handles` (see
+  `browser.compat.quickjs-runner`'s `persistent-execution-keys`) and the
+  injected `:websocket-fn`, host-side, BEFORE the script runs -- the
+  WebSocket analogue of `geolocation-snapshot`.
+
+  For every open connection that has a real handle (i.e. a real
+  `:websocket-fn` was injected AND `:websocket/connect` actually opened it
+  for real -- see `websocket-connect-result`), calls `:drain` on it (see
+  `browser.net.websocket/drain-messages!`): this genuinely pops whatever
+  real text has arrived on that real socket since the last time anything
+  drained it, waiting a bounded amount of time first if nothing has
+  arrived yet (`:clj`) or just peeking at whatever has already been
+  buffered by a real `onmessage` callback (`:cljs` -- see that namespace's
+  docstring for why it cannot also bound-wait). This is why the JS-visible
+  round trip this enables is provable only ACROSS `<script>` tags, never
+  within one: a message that left the wire while script 1 was still
+  running is, at best, sitting in the real queue by the time script 2's
+  snapshot is computed -- there is no way for it to already be there
+  mid-script-1.
+
+  Without a `:websocket-fn` (the default), returns `{}` immediately --
+  no connections ever have a real handle in that mode, so there is nothing
+  to drain, and the webapi shim's delivery step (see
+  `quickjs-wasm/websocket-snapshot-source`) is a no-op against an empty
+  map, keeping every pre-existing fabricated-mode caller/test unaffected.
+
+  Returns a JSON-safe map keyed by WebSocket id string: `{<id>
+  {:messages [...] :closed? bool :close-code <int> :close-reason
+  <string>}}` (`:close-code`/`:close-reason` only present once the real
+  peer has actually closed)."
+  [state]
+  (if-let [websocket-fn (:websocket-fn state)]
+    (reduce-kv
+     (fn [snapshot id _connection]
+       (if-let [handle (get (:websocket/handles state) id)]
+         (assoc snapshot id (websocket-connection-snapshot websocket-fn handle))
+         snapshot))
+     {}
+     (:websocket/connections state))
+    {}))
+
 (defn- notification-permission-result
   [state request]
   (let [decision (permission-decision-for state request :notification/show)
@@ -462,19 +521,55 @@
        :profile/id nil
        :reason :permission/no-profile})))
 
+(defn- websocket-connection-result
+  [request id]
+  (cond-> {:websocket/id id
+           :url (:url request)
+           :ready-state :open}
+    (:websocket/protocols request)
+    (assoc :websocket/protocols (:websocket/protocols request))))
+
 (defn- websocket-connect-result
+  "Decide + (if a real `:websocket-fn` is injected -- see `new-state`) open
+  a REAL WebSocket connection for a `:websocket/connect` request.
+
+  Without a `:websocket-fn` (the default -- e.g. every existing test that
+  never injects one), behaves exactly as before this change: a bare, host-
+  side-only fabrication, `:ready-state :open` from the moment the request
+  is applied, no real socket. This keeps every pre-existing caller and test
+  byte-for-byte unaffected -- the real path below is opt-in.
+
+  With a real `:websocket-fn` injected, calls it with `{:op :connect ...}`
+  (see `browser.net.websocket/websocket-fn` for the real, JVM/Node-backed
+  implementations). On success, the PUBLIC result map handed back to
+  `apply-capability` is identical in shape to the fabricated path (so
+  `:context/requests`/`:capability/results` -- the audit-visible log --
+  never has to know or care whether the connection behind it is real); the
+  real, opaque connection handle is returned separately as `:handle`, for
+  `apply-capability` to stash under `:websocket/handles` (kept OUT of the
+  audit-visible result map on purpose -- a live socket/Listener object has
+  no business in a JSON-safe, printable event log)."
   [state request]
   (let [decision (websocket-permission-decision state request)]
     (if (= :allow (:permission/decision decision))
-      (let [connection (cond-> {:websocket/id (or (:websocket/id request)
-                                                  (str "websocket-" (inc (count (:websocket/connections state)))))
-                                :url (:url request)
-                                :ready-state :open}
-                         (:websocket/protocols request)
-                         (assoc :websocket/protocols (:websocket/protocols request)))]
-        {:ok? true
-         :result connection
-         :permission/decision decision})
+      (let [id (or (:websocket/id request)
+                   (str "websocket-" (inc (count (:websocket/connections state)))))
+            websocket-fn (:websocket-fn state)]
+        (if websocket-fn
+          (let [real (websocket-fn {:op :connect
+                                     :url (:url request)
+                                     :protocols (:websocket/protocols request)})]
+            (if (:ok? real)
+              {:ok? true
+               :result (websocket-connection-result request id)
+               :handle (:handle real)
+               :permission/decision decision}
+              {:ok? false
+               :error (or (:error real) :websocket/connect-failed)
+               :permission/decision decision}))
+          {:ok? true
+           :result (websocket-connection-result request id)
+           :permission/decision decision}))
       {:ok? false
        :error (:reason decision)
        :permission/decision decision})))
@@ -1162,10 +1257,12 @@
     (let [connect-result (websocket-connect-result state request)
           ok? (:ok? connect-result)
           result (:result connect-result)
+          handle (:handle connect-result)
           error (:error connect-result)
           decision (:permission/decision connect-result)]
       (cond-> state
         result (assoc-in [:websocket/connections (:websocket/id result)] result)
+        (and result handle) (assoc-in [:websocket/handles (:websocket/id result)] handle)
         result (update :context/requests conj (assoc result :capability :websocket/connect))
         true (assoc :last-result result)
         error (assoc :last-error error)
@@ -1177,13 +1274,28 @@
 
     :websocket/send
     (let [connection (get-in state [:websocket/connections (:websocket/id request)])
+          handle (get-in state [:websocket/handles (:websocket/id request)])
+          websocket-fn (:websocket-fn state)
           result {:websocket/id (:websocket/id request)
                   :data (:data request)}]
       (if connection
-        (-> state
-            (update :websocket/messages conj result)
-            (assoc :last-result result)
-            (record-result {:ok? true :result result}))
+        ;; A real handle only exists in real (:websocket-fn-injected) mode
+        ;; -- see websocket-connect-result. In fabricated mode (the
+        ;; default), this send-result is always {:ok? true}, exactly the
+        ;; pre-existing behavior.
+        (let [send-result (if (and websocket-fn handle)
+                            (websocket-fn {:op :send :handle handle :data (:data request)})
+                            {:ok? true})]
+          (if (:ok? send-result)
+            (-> state
+                (update :websocket/messages conj result)
+                (assoc :last-result result)
+                (record-result {:ok? true :result result}))
+            (-> state
+                (assoc :last-error (or (:error send-result) :websocket/send-failed))
+                (record-result {:ok? false
+                                :result nil
+                                :error (or (:error send-result) :websocket/send-failed)}))))
         (-> state
             (assoc :last-error :websocket/not-connected)
             (record-result {:ok? false
@@ -1192,16 +1304,22 @@
 
     :websocket/close
     (let [connection (get-in state [:websocket/connections (:websocket/id request)])
+          handle (get-in state [:websocket/handles (:websocket/id request)])
+          websocket-fn (:websocket-fn state)
           result (cond-> {:websocket/id (:websocket/id request)
                           :closed? true}
                    (:code request) (assoc :code (:code request))
                    (:reason request) (assoc :reason (:reason request)))]
       (if connection
-        (-> state
-            (assoc-in [:websocket/connections (:websocket/id request) :ready-state] :closed)
-            (update :context/requests conj (assoc result :capability :websocket/close))
-            (assoc :last-result result)
-            (record-result {:ok? true :result result}))
+        (do
+          (when (and websocket-fn handle)
+            (websocket-fn {:op :close :handle handle
+                           :code (:code request) :reason (:reason request)}))
+          (-> state
+              (assoc-in [:websocket/connections (:websocket/id request) :ready-state] :closed)
+              (update :context/requests conj (assoc result :capability :websocket/close))
+              (assoc :last-result result)
+              (record-result {:ok? true :result result})))
         (-> state
             (assoc :last-error :websocket/not-connected)
             (record-result {:ok? false
@@ -1400,7 +1518,8 @@
                                                             (:document state)
                                                             (:storage state)
                                                             (:clipboard state)
-                                                            (geolocation-snapshot state))))
+                                                            (geolocation-snapshot state)
+                                                            (websocket-snapshot state))))
         state (record-response-errors state response)
         state (apply-requests state (:requests response))]
     (-> state
@@ -1426,7 +1545,8 @@
                                                               (:document state)
                                                               (:storage state)
                                                               (:clipboard state)
-                                                              (geolocation-snapshot state))))
+                                                              (geolocation-snapshot state)
+                                                              (websocket-snapshot state))))
           state (record-response-errors state response)
           state (apply-requests state (:requests response))]
       (-> state
@@ -1454,12 +1574,13 @@
             tasks)))
 
 (defn new-state
-  [{:keys [binding document engine fetch-fn storage clipboard geolocation
+  [{:keys [binding document engine fetch-fn websocket-fn storage clipboard geolocation
            crypto-random-bytes crypto-random-uuids audit net-context]}]
   {:binding binding
    :document document
    :engine engine
    :fetch-fn fetch-fn
+   :websocket-fn websocket-fn
    :storage (or storage (atom {}))
    :clipboard (or clipboard (atom {:text ""}))
    :geolocation (or geolocation (atom {:latitude 0.0
@@ -1469,6 +1590,7 @@
    :fullscreen/element nil
    :media/streams []
    :websocket/connections {}
+   :websocket/handles {}
    :websocket/messages []
    :crypto/random-bytes (vec (or crypto-random-bytes []))
    :crypto/random-uuids (vec (or crypto-random-uuids []))

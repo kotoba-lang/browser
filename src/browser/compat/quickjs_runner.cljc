@@ -110,6 +110,41 @@
   denied or no real position was ever injected -- see
   `quickjs-execution/geolocation-snapshot`.
 
+  ## Real WebSocket I/O (opt-in via `:browser.session/websocket-fn`)
+
+  `:websocket/connect|send|close` are fabricated (host-side-only, no real
+  socket) UNLESS the session was built with a real `:websocket-fn` (see
+  `browser.net.websocket/websocket-fn` -- a real `java.net.http.HttpClient`-
+  backed client on the JVM, a real host-runtime-global-`WebSocket`-backed
+  client in ClojureScript). When one is supplied, `run-script!` threads it
+  into every `quickjs-execution/new-state` call, and `apply-capability`
+  opens a REAL connection, sends REAL bytes, and (via
+  `quickjs-execution/websocket-snapshot`, the WebSocket analogue of
+  `geolocation-snapshot` -- computed the same way, before each script runs)
+  drains whatever real text has genuinely arrived on that real socket.
+
+  The one thing this CANNOT do is deliver a real inbound message to a
+  script's `ws.onmessage` mid-script, for the same reason
+  `getCurrentPosition`'s callback can't be deferred: this engine evaluates a
+  whole script synchronously in one pass, and a real message arriving on a
+  real socket at some future wall-clock moment cannot interrupt that pass.
+  What IS genuinely provable, proven end to end in
+  `test-cljs/browser/compat/quickjs_websocket_smoke_test.cljs`: the SAME
+  QuickJS `vm`/context object is reused across every script tag on a page
+  (see `quickjs-wasm/ensure-context!`), so a `WebSocket` instance -- and its
+  `.onmessage` property -- that a `<script>` tag created really is still
+  the same live JS object a LATER `<script>` tag can see (via a small
+  persisted registry, `globalThis.__kotobaWebSockets`, that survives across
+  evals the same way `globalThis.__kotobaSnapshot` already did). So: script
+  1 opens a connection, registers `ws.onmessage`, and sends real data;
+  real wall-clock time then has to pass (a real `<script>` tag boundary, or
+  in the smoke test's case a real `await`/`setTimeout` between two
+  evaluations); script 2's snapshot install drains whatever really echoed
+  back by then and invokes that SAME, still-registered `onmessage`
+  SYNCHRONOUSLY, before script 2's own source runs -- a real round trip
+  provable ACROSS two `<script>` tags, never claimed to be same-tick async
+  delivery the way a real browser's event loop would do it.
+
   ## Known limitations of this first pass
 
   - The QuickJS engine must already be started and `:ready`
@@ -157,11 +192,16 @@
   geolocation capabilities, plus the host-side capability registries a script
   can build up over a page load (open DOM client-id mappings, WebSocket/
   Worker/BroadcastChannel handles, the session-history navigation stack, and
-  registered global event listeners). `:document` is deliberately excluded --
-  it has its own, already-working threading path (re-read from
-  `:browser.session/page` on every call)."
+  registered global event listeners). `:websocket/handles` carries the REAL,
+  opaque per-connection objects a real `:websocket-fn` (see
+  `browser.net.websocket`) hands back from `:websocket/connect` -- kept
+  separate from the JSON-safe, audit-visible `:websocket/connections` map so
+  a later script's `websocket-snapshot` (`quickjs-execution`) can still
+  drain a connection a PREVIOUS script tag opened. `:document` is
+  deliberately excluded -- it has its own, already-working threading path
+  (re-read from `:browser.session/page` on every call)."
   [:storage :clipboard :geolocation
-   :dom/client-ids :websocket/connections :worker/instances
+   :dom/client-ids :websocket/connections :websocket/handles :worker/instances
    :broadcast/channels :history/entries :history/index
    :global/listeners])
 
@@ -227,7 +267,8 @@
                            :document document
                            :engine engine
                            :audit (:browser.session/audit session)
-                           :net-context (session/net-context session)})
+                           :net-context (session/net-context session)
+                           :websocket-fn (:browser.session/websocket-fn session)})
                          persisted)
             result (execution/evaluate! state (script-payload script))]
         (-> session
