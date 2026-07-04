@@ -413,7 +413,18 @@ proves and does not prove).
 Crypto random APIs consume injected random byte/UUID queues, falling back to
 deterministic zero values instead of ambient host RNG.
 Worker construction/postMessage/terminate records sandboxed worker descriptors
-and messages instead of spawning ambient threads.
+and messages by default; a session running on a real `:cljs` QuickJS engine
+with a real `:fetch-fn` (no separate opt-in flag needed -- see
+`browser.compat.quickjs-runner`'s namespace docstring) instead REALLY fetches
+the worker's script and REALLY evaluates it in a brand-new, real, independent
+QuickJS context (`browser.compat.quickjs-wasm/create-worker-context`, its own
+`self`/`postMessage`/`onmessage` global scope, not the page's own context),
+with `postMessage` from the main thread delivered into the worker's context
+synchronously and a host-computed, per-eval `:worker/snapshot` delivering the
+worker's real replies back to a script's `w.onmessage` (see
+`browser.compat.quickjs-execution/worker-snapshot`). There is no real OS-thread
+parallelism, `importScripts`/module workers, or mid-script delivery -- see that
+namespace's docstring for exactly what is and is not real.
 BroadcastChannel open/postMessage/close records sandboxed channel descriptors
 and messages instead of joining ambient browser channels.
 navigator.sendBeacon records permission-gated sandboxed beacon payloads instead

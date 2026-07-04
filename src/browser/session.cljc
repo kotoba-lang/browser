@@ -49,7 +49,7 @@
     opts))
 
 (defn new-session
-  [{:keys [host viewport theme fetch-fn websocket-fn surface account profile input audit
+  [{:keys [host viewport theme fetch-fn websocket-fn worker-fn surface account profile input audit
            persistence-provider store chrome navigation history page script-runner
            script-engine engine-factory dispose-engine-fn] :as opts}]
   (let [{:keys [profile store audit chrome surface navigation history page] :as opts} (restore opts)]
@@ -58,6 +58,7 @@
    :browser.session/theme theme
    :browser.session/fetch-fn fetch-fn
    :browser.session/websocket-fn websocket-fn
+   :browser.session/worker-fn worker-fn
    :browser.session/script-runner script-runner
    :browser.session/script-engine (or script-engine
                                       (script-engine/empty-manager
