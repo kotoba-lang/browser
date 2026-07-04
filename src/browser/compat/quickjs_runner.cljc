@@ -71,19 +71,36 @@
   threading path (each call re-reads `:browser.session/page :browser/document`,
   which already reflects every prior script's committed mutations).
 
-  Note this only threads the *host-side* (`quickjs-execution`) view of that
-  state. It does not change what's JS-visible inside the QuickJS VM itself:
-  as of this writing `browser.compat.quickjs-wasm`'s webapi shim never feeds
-  capability *answers* back into the VM (e.g. `localStorage.getItem` always
-  returns `null` to JS, regardless of what's stored host-side) -- only
-  `document.*` reads are wired to see real state, via the document snapshot
-  reinstalled before each script. Real, observable proof of the host-side
-  threading therefore has to inspect the session's committed
-  `:capability/results` (now included on the `:script/quickjs-run` history
-  event) rather than a JS-visible return value; see
-  `test-cljs/browser/compat/quickjs_runtime_state_threading_smoke_test.cljs`.
-  Making capability answers round-trip back into the VM is separate,
-  follow-up work in `quickjs-wasm`/its webapi shim, not this namespace.
+  As of this writing, `:storage` and `:clipboard` reads also round-trip back
+  into the VM itself, not just the host-side view: `evaluate!`/`load-module!`
+  (`browser.compat.quickjs-execution`) pass the current `:storage`/
+  `:clipboard` snapshots alongside the document snapshot into every
+  `quickjs-wasm` invocation (`:document/snapshot`, `:storage/snapshot`,
+  `:clipboard/snapshot` on the request map), and `quickjs-wasm` installs all
+  three as VM globals (`globalThis.__kotobaSnapshot` /
+  `globalThis.__kotobaStorageSnapshot` / `globalThis.__kotobaClipboardSnapshot`)
+  before each eval, the same way it already did for `document.*`. So
+  `localStorage.getItem` and `navigator.clipboard.readText` genuinely return
+  the real, current value synchronously -- a script that calls
+  `localStorage.setItem('probe', 'x')` in one `<script>` tag makes a LATER
+  `<script>` tag's `localStorage.getItem('probe')` observably return `x`
+  to JS (proven via `document.title` in
+  `test-cljs/browser/compat/quickjs_runtime_state_threading_smoke_test.cljs`,
+  not just a host-side `:capability/results` log entry). The snapshot is
+  frozen at eval start, so a script that does
+  `setItem('x', 'y'); getItem('x')` within the SAME `<script>` tag still
+  will not see its own write -- `setItem` only queues a `storage/put`
+  request that the host applies via `apply-capability` *after* the script
+  finishes, and the next fresh snapshot isn't installed until the next
+  `<script>` tag's `eval-dispose!`. `setItem`/`removeItem`/`writeText` and
+  the `storage/get`/`clipboard/read` requests `getItem`/`readText` still
+  queue alongside the synchronous snapshot read are otherwise unchanged from
+  before -- they keep landing in `:capability/results` for the audit trail.
+  `geolocation` reads are NOT (yet) wired the same way -- `getCurrentPosition`
+  is callback-based and permission-gated (see
+  `quickjs-execution/geolocation-result`), which is a meaningfully different,
+  riskier shape than a plain synchronous return value, so it remains
+  host-side-only, left as follow-up work.
 
   ## Known limitations of this first pass
 
@@ -182,9 +199,10 @@
   (`persistent-execution-keys`) left behind by the previous script/lifecycle
   invocation at the same page generation, and persists the (possibly
   updated) slice back via `remember-runtime-state!` so the *next* invocation
-  sees it too -- see the namespace docstring for the full picture and its
-  documented gap (JS-visible capability answers still don't round-trip into
-  the QuickJS VM itself).
+  sees it too -- see the namespace docstring for the full picture, including
+  which capability answers (`:storage`, `:clipboard`) now round-trip back
+  into the QuickJS VM itself as real, synchronous JS return values, and
+  which (`:geolocation`) remain a documented follow-up gap.
 
   Returns `session` unchanged (plus a `:script/skipped` history entry) if the
   engine isn't ready yet -- see the namespace docstring."

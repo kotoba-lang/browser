@@ -13,18 +13,26 @@
   second, separate real `load-html!` proving that survival does NOT leak
   across a real navigation/reload.
 
-  As documented on `browser.compat.quickjs-runner`, `localStorage.getItem`'s
-  JS-VISIBLE return value is not (yet) wired to round-trip real capability
-  answers back into the QuickJS VM itself -- it always returns `null` to JS,
-  by design of the current `quickjs-wasm` webapi shim (checked directly in
-  its source before writing this test, rather than assumed). So the proof
-  here inspects the REAL, host-side capability answer that
+  `quickjs-runtime-state-threads-across-scripts-and-resets-on-navigation-test`
+  below inspects the REAL, host-side capability answer that
   `browser.compat.quickjs-execution/apply-capability` computed for the real
   `:storage/get` request the second script's real JS emits, via the
   `:capability/results` this change adds to the session's committed
-  `:script/quickjs-run` history events. The engine, the JS execution, the
-  capability requests, and their host-side answers are all real -- nothing
-  here is mocked or inlined."
+  `:script/quickjs-run` history events -- that host-side threading proof
+  predates, and is unaffected by, the JS-visible round-trip below.
+
+  `quickjs-storage-getitem-round-trips-into-vm-test` closes the gap that
+  test's original docstring used to document: `localStorage.getItem`'s
+  JS-VISIBLE return value now genuinely reflects real host `:storage` state,
+  via a `:storage/snapshot` (`browser.compat.quickjs-execution`'s
+  `invocation-with-snapshots`) installed as a VM global
+  (`globalThis.__kotobaStorageSnapshot`, `browser.compat.quickjs-wasm`'s
+  `storage-snapshot-source`/`install-document-shim!`) before each script
+  evaluates -- proven by asserting the real, committed `document.title` a
+  later `<script>` tag sets from `localStorage.getItem(...)`, not just a
+  host-side log entry. The engine, the JS execution, the capability
+  requests, and their host-side/VM answers are all real -- nothing here is
+  mocked or inlined."
   (:require [cljs.test :refer [deftest is async]]
             [browser.compat.quickjs-runner :as quickjs-runner]
             [browser.session :as session]
@@ -132,6 +140,71 @@
                        (str "after a REAL navigation to a new page, the same storage key must "
                             "really read back nil from the host -- page 1's runtime state must "
                             "not leak into page 2, got: " (pr-str get-results-2)))))
+               (finally
+                 (dispose-engine! ready-session)
+                 (done)))))
+          (.catch (fn [err]
+                    (is false (str "QuickJS WASM engine initialization / page load failed: "
+                                   (or (.-message err) err)))
+                    (dispose-engine! base-session)
+                    (done)))))))
+
+(deftest quickjs-storage-getitem-round-trips-into-vm-test
+  (async done
+    (let [h (host/recording-host)
+          base-session (session/new-session
+                        (quickjs-runner/quickjs-session-opts {:host h}))]
+      (-> (session/ensure-script-engine! base-session)
+          (.then
+           (fn [ready-session]
+             (is (= :ready (get-in ready-session [:browser.session/script-engine
+                                                   :script-engine/status]))
+                 "engine should be ready before running page scripts")
+             (try
+               ;; Page 1: the FIRST real <script> tag writes via
+               ;; localStorage.setItem; the SECOND real <script> tag reads it
+               ;; back via localStorage.getItem and assigns the result to
+               ;; document.title. document.title only ends up
+               ;; "set-by-script-one" if the real value genuinely round-trips
+               ;; back into the running QuickJS VM as getItem's JS-visible
+               ;; return value -- not just recorded in a host-side log.
+               (let [html-1 (str "<main>"
+                                  "<script>localStorage.setItem('probe', 'set-by-script-one');</script>"
+                                  "<script>document.title = localStorage.getItem('probe');</script>"
+                                  "</main>")
+                     after-1 (session/load-html!
+                              ready-session
+                              {:url "kotoba://quickjs-runner/capability-read-round-trip/page-one"
+                               :html html-1})
+                     title-1 (get-in after-1 [:browser.session/page :browser/title])]
+                 (println "capability read round-trip: real document.title after"
+                          "`document.title = localStorage.getItem('probe')` ->" (pr-str title-1))
+                 (is (= "set-by-script-one" title-1)
+                     (str "expected the SECOND real <script> tag's localStorage.getItem('probe') "
+                          "to synchronously return the value the FIRST real <script> tag wrote via "
+                          "setItem, genuinely round-tripped back into the running QuickJS VM (not "
+                          "just recorded host-side) and visible to the rest of that script's real "
+                          "JS execution -- got document.title = " (pr-str title-1)))
+
+                 ;; Page 2: a real, separate navigation. Its single real
+                 ;; <script> tag reads a key that was never set on this new
+                 ;; page and must genuinely get null back -- page 1's real
+                 ;; storage must not leak forward across generations.
+                 (let [html-2 (str "<main><script>"
+                                   "document.title = String(localStorage.getItem('probe'));"
+                                   "</script></main>")
+                       after-2 (session/load-html!
+                                after-1
+                                {:url "kotoba://quickjs-runner/capability-read-round-trip/page-two"
+                                 :html html-2})
+                       title-2 (get-in after-2 [:browser.session/page :browser/title])]
+                   (println "capability read round-trip: fresh navigation's real"
+                            "localStorage.getItem('probe') on an unset key ->" (pr-str title-2))
+                   (is (= "null" title-2)
+                       (str "a fresh navigation must not leak page 1's real storage forward -- "
+                            "localStorage.getItem on a key unset on the new page must genuinely "
+                            "return null to JS (String(null) === \"null\"), got document.title = "
+                            (pr-str title-2)))))
                (finally
                  (dispose-engine! ready-session)
                  (done)))))

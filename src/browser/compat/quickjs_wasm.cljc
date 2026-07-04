@@ -2547,11 +2547,13 @@
       };
       globalThis.localStorage = {
         getItem: function(key) {
+          var k = String(key);
           globalThis.__kotobaRequests.push({
             capability: 'storage/get',
-            'storage/key': String(key)
+            'storage/key': k
           });
-          return null;
+          var snapshot = globalThis.__kotobaStorageSnapshot || {};
+          return Object.prototype.hasOwnProperty.call(snapshot, k) ? String(snapshot[k]) : null;
         },
         setItem: function(key, value) {
           globalThis.__kotobaRequests.push({
@@ -2629,7 +2631,8 @@
             capability: 'clipboard/read',
             'clipboard/format': 'text'
           });
-          return '';
+          var snapshot = globalThis.__kotobaClipboardSnapshot || {};
+          return snapshot.text != null ? String(snapshot.text) : '';
         },
         writeText: function(text) {
           globalThis.__kotobaRequests.push({
@@ -2957,15 +2960,44 @@
           ";")))
 
 #?(:cljs
+   (defn- storage-snapshot-source
+     "JS source that installs the real, current `:storage` key/value map (from
+     the persisted `quickjs-execution` runtime state -- see
+     `browser.compat.quickjs-runner`'s `persistent-execution-keys`) as
+     `globalThis.__kotobaStorageSnapshot`, so the webapi shim's
+     `localStorage.getItem` can read it synchronously instead of always
+     returning `null`. Mirrors `snapshot-source`'s treatment of the document
+     snapshot."
+     [storage]
+     (str "globalThis.__kotobaStorageSnapshot = "
+          (js/JSON.stringify (clj->js (jsonable (or storage {}))))
+          ";")))
+
+#?(:cljs
+   (defn- clipboard-snapshot-source
+     "JS source that installs the real, current `:clipboard` snapshot (from
+     the persisted `quickjs-execution` runtime state -- see
+     `browser.compat.quickjs-runner`'s `persistent-execution-keys`) as
+     `globalThis.__kotobaClipboardSnapshot`, so the webapi shim's
+     `navigator.clipboard.readText` can read it synchronously instead of
+     always returning `''`. Mirrors `snapshot-source`/`storage-snapshot-source`."
+     [clipboard]
+     (str "globalThis.__kotobaClipboardSnapshot = "
+          (js/JSON.stringify (clj->js (jsonable (or clipboard {:text ""}))))
+          ";")))
+
+#?(:cljs
    (defn- dump-result
      ([module source url modules]
-      (dump-result module source url modules nil false nil))
+      (dump-result module source url modules nil false nil nil nil))
      ([module source url modules module-provider module?]
-      (dump-result module source url modules module-provider module? nil))
-     ([module source url modules module-provider module? document-snapshot]
+      (dump-result module source url modules module-provider module? nil nil nil))
+     ([module source url modules module-provider module? document-snapshot storage-snapshot clipboard-snapshot]
       (let [^js runtime (.newRuntime ^js module #js {:moduleLoader (module-loader modules module-provider)})
             ^js vm (.newContext runtime)
             _ (eval-dispose! vm (snapshot-source document-snapshot) "kotoba://quickjs/document-snapshot.js")
+            _ (eval-dispose! vm (storage-snapshot-source storage-snapshot) "kotoba://quickjs/storage-snapshot.js")
+            _ (eval-dispose! vm (clipboard-snapshot-source clipboard-snapshot) "kotoba://quickjs/clipboard-snapshot.js")
             _ (eval-dispose! vm webapi-shim-source "kotoba://quickjs/webapi-shim.js")
             response (eval-result vm source url module?)
             requests (dump-requests vm)]
@@ -2992,14 +3024,16 @@
            context))))
 
 #?(:cljs
-   (defn- install-document-shim! [vm document-snapshot]
+   (defn- install-document-shim! [vm document-snapshot storage-snapshot clipboard-snapshot]
      (eval-dispose! vm (snapshot-source document-snapshot) "kotoba://quickjs/document-snapshot.js")
+     (eval-dispose! vm (storage-snapshot-source storage-snapshot) "kotoba://quickjs/storage-snapshot.js")
+     (eval-dispose! vm (clipboard-snapshot-source clipboard-snapshot) "kotoba://quickjs/clipboard-snapshot.js")
      (eval-dispose! vm webapi-shim-source "kotoba://quickjs/webapi-shim.js")))
 
 #?(:cljs
-   (defn- context-eval-result [context source url module? document-snapshot]
+   (defn- context-eval-result [context source url module? document-snapshot storage-snapshot clipboard-snapshot]
      (let [vm (:vm context)
-           _ (install-document-shim! vm document-snapshot)
+           _ (install-document-shim! vm document-snapshot storage-snapshot clipboard-snapshot)
            response (eval-result vm source url module?)
            requests (dump-requests vm)]
        (assoc response :requests requests))))
@@ -3079,7 +3113,9 @@
                                                           (:url request)
                                                           (or (= :module (:type request))
                                                               (= :module (:script/type request)))
-                                                          (:document/snapshot request))
+                                                          (:document/snapshot request)
+                                                          (:storage/snapshot request)
+                                                          (:clipboard/snapshot request))
 
                                      :js/module-load
                                      (if-let [source (resolve-module-source modules module-provider (:specifier request))]
@@ -3087,7 +3123,9 @@
                                                             source
                                                             (:specifier request)
                                                             true
-                                                            (:document/snapshot request))
+                                                            (:document/snapshot request)
+                                                            (:storage/snapshot request)
+                                                            (:clipboard/snapshot request))
                                        {:error :quickjs/module-not-found
                                         :specifier (:specifier request)
                                         :requests []})
