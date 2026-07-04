@@ -2,7 +2,6 @@
   (:require [browser.audit :as audit]
             [browser.compat.quickjs :as quickjs]
             [browser.compat.quickjs-binding :as binding]
-            [browser.compat.quickjs-binary :as binary]
             [browser.compat.quickjs-execution :as execution]
             [browser.core :as browser]
             [browser.dom-bridge :as bridge]
@@ -13,6 +12,7 @@
             [browser.storage :as storage]
             [clojure.test :refer [deftest is]]
             [kotoba.wasm.dom :as dom]
+            [quickjs.binary :as binary]
             [kotoba.wasm.host :as host]))
 
 (deftest quickjs-engine-eval-applies-capability-imports

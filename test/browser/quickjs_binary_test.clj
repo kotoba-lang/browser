@@ -1,8 +1,8 @@
 (ns browser.quickjs-binary-test
   (:require [browser.compat.quickjs :as quickjs]
             [browser.compat.quickjs-binding :as binding]
-            [browser.compat.quickjs-binary :as binary]
-            [clojure.test :refer [deftest is]]))
+            [clojure.test :refer [deftest is]]
+            [quickjs.binary :as binary]))
 
 (deftest quickjs-binary-loader-accepts-wasm-magic
   (let [tmp (java.io.File/createTempFile "quickjs" ".wasm")

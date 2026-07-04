@@ -1,7 +1,7 @@
 (ns browser.dom-bridge
   "DOM query/mutation bridge used by compat runtimes."
-  (:require [browser.css :as css]
-            [browser.html :as html]
+  (:require [cssom.core :as css]
+            [htmldom.core :as html]
             [kotoba.wasm.dom :as dom]))
 
 (defn element-nodes
