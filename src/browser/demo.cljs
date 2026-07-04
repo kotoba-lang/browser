@@ -156,7 +156,7 @@
 (defonce demo-state (atom nil))
 
 (def viewport-width 760)
-(def viewport-height 460)
+(def viewport-height 1250)
 
 (def generated-content-css
   "The real CSS text embedded, verbatim, in `sample-html`'s real `<style>`
