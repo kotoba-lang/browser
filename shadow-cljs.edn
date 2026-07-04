@@ -1,0 +1,8 @@
+{:deps  {:aliases [:cljs]}
+ :nrepl {:port 9633}
+ :builds
+ {:node-test
+  {:target     :node-test
+   :output-to  "target/node-tests.js"
+   :ns-regexp  "-smoke-test$"
+   :autorun    true}}}
