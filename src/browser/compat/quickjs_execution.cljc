@@ -21,13 +21,25 @@
      (seq capability-results)
      (assoc :capability/results (vec capability-results)))))
 
-(defn- invocation-with-document
-  [call payload capability-results document]
+(defn- invocation-with-snapshots
+  "Build an `invocation` carrying the real document snapshot plus the real,
+  current `:storage` and `:clipboard` snapshots (deref'd from the
+  page-lifetime `quickjs-execution` atoms -- see
+  `browser.compat.quickjs-runner`'s `persistent-execution-keys`), so
+  `quickjs-wasm`'s webapi shim can install all of them as VM globals before
+  running `payload`'s script (`:document/snapshot`, `:storage/snapshot`,
+  `:clipboard/snapshot` respectively) and answer reads like
+  `localStorage.getItem` / `navigator.clipboard.readText` synchronously from
+  real host state instead of always returning `null`/`''`."
+  [call payload capability-results document storage clipboard]
   (let [snapshot (cond-> (dom-bridge/document-snapshot document)
                    (:script/node-id payload)
                    (assoc :current-script (:script/node-id payload)))]
     (invocation call
-                (assoc payload :document/snapshot snapshot)
+                (assoc payload
+                       :document/snapshot snapshot
+                       :storage/snapshot (some-> storage deref)
+                       :clipboard/snapshot (some-> clipboard deref))
                 capability-results)))
 
 (defn- take-capability-results
@@ -1318,10 +1330,12 @@
         state (update state :binding binding/evaluate! script)
         response (normalize-response
                   (invoke-engine (:engine state)
-                                 (invocation-with-document :js/evaluate
-                                                           script
-                                                           capability-results
-                                                           (:document state))))
+                                 (invocation-with-snapshots :js/evaluate
+                                                            script
+                                                            capability-results
+                                                            (:document state)
+                                                            (:storage state)
+                                                            (:clipboard state))))
         state (record-response-errors state response)
         state (apply-requests state (:requests response))]
     (-> state
@@ -1341,10 +1355,12 @@
           state (update state :binding binding/module-load! specifier referrer)
           response (normalize-response
                     (invoke-engine (:engine state)
-                                   (invocation-with-document :js/module-load
-                                                             payload
-                                                             capability-results
-                                                             (:document state))))
+                                   (invocation-with-snapshots :js/module-load
+                                                              payload
+                                                              capability-results
+                                                              (:document state)
+                                                              (:storage state)
+                                                              (:clipboard state))))
           state (record-response-errors state response)
           state (apply-requests state (:requests response))]
       (-> state
