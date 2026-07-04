@@ -2650,6 +2650,14 @@
           };
           if (options != null) request['geolocation/options'] = options;
           globalThis.__kotobaRequests.push(request);
+          var snapshot = globalThis.__kotobaGeolocationSnapshot ||
+            { granted: false, error: { code: 2, message: 'Position unavailable' } };
+          if (snapshot.granted && snapshot.position) {
+            if (typeof success === 'function') success(snapshot.position);
+          } else {
+            var err = snapshot.error || { code: 2, message: 'Position unavailable' };
+            if (typeof error === 'function') error(err);
+          }
         }
       };
       globalThis.navigator.mediaDevices = {
@@ -2987,17 +2995,42 @@
           ";")))
 
 #?(:cljs
+   (defn- geolocation-snapshot-source
+     "JS source that installs the real, current geolocation permission
+     decision + position (`quickjs-execution/geolocation-snapshot`, computed
+     host-side from the persisted `:geolocation` atom -- see
+     `browser.compat.quickjs-runner`'s `persistent-execution-keys` -- and the
+     SAME `permission-decision-for` gate `apply-capability`'s
+     `:geolocation/read` case uses) as `globalThis.__kotobaGeolocationSnapshot`,
+     so the webapi shim's `navigator.geolocation.getCurrentPosition` can
+     synchronously call `success`/`error` with the REAL injected position
+     instead of never calling either. Mirrors `snapshot-source`/
+     `storage-snapshot-source`/`clipboard-snapshot-source`, but the shape is
+     necessarily a bit richer than storage's/clipboard's raw value: geolocation
+     is permission-gated, so this is ONE coherent map carrying both the
+     permission decision and the position/error together, not a bolted-on
+     second snapshot."
+     [geolocation]
+     (str "globalThis.__kotobaGeolocationSnapshot = "
+          (js/JSON.stringify (clj->js (jsonable (or geolocation
+                                                     {:granted false
+                                                      :error {:code 2
+                                                              :message "Position unavailable"}}))))
+          ";")))
+
+#?(:cljs
    (defn- dump-result
      ([module source url modules]
-      (dump-result module source url modules nil false nil nil nil))
+      (dump-result module source url modules nil false nil nil nil nil))
      ([module source url modules module-provider module?]
-      (dump-result module source url modules module-provider module? nil nil nil))
-     ([module source url modules module-provider module? document-snapshot storage-snapshot clipboard-snapshot]
+      (dump-result module source url modules module-provider module? nil nil nil nil))
+     ([module source url modules module-provider module? document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot]
       (let [^js runtime (.newRuntime ^js module #js {:moduleLoader (module-loader modules module-provider)})
             ^js vm (.newContext runtime)
             _ (eval-dispose! vm (snapshot-source document-snapshot) "kotoba://quickjs/document-snapshot.js")
             _ (eval-dispose! vm (storage-snapshot-source storage-snapshot) "kotoba://quickjs/storage-snapshot.js")
             _ (eval-dispose! vm (clipboard-snapshot-source clipboard-snapshot) "kotoba://quickjs/clipboard-snapshot.js")
+            _ (eval-dispose! vm (geolocation-snapshot-source geolocation-snapshot) "kotoba://quickjs/geolocation-snapshot.js")
             _ (eval-dispose! vm webapi-shim-source "kotoba://quickjs/webapi-shim.js")
             response (eval-result vm source url module?)
             requests (dump-requests vm)]
@@ -3024,16 +3057,17 @@
            context))))
 
 #?(:cljs
-   (defn- install-document-shim! [vm document-snapshot storage-snapshot clipboard-snapshot]
+   (defn- install-document-shim! [vm document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot]
      (eval-dispose! vm (snapshot-source document-snapshot) "kotoba://quickjs/document-snapshot.js")
      (eval-dispose! vm (storage-snapshot-source storage-snapshot) "kotoba://quickjs/storage-snapshot.js")
      (eval-dispose! vm (clipboard-snapshot-source clipboard-snapshot) "kotoba://quickjs/clipboard-snapshot.js")
+     (eval-dispose! vm (geolocation-snapshot-source geolocation-snapshot) "kotoba://quickjs/geolocation-snapshot.js")
      (eval-dispose! vm webapi-shim-source "kotoba://quickjs/webapi-shim.js")))
 
 #?(:cljs
-   (defn- context-eval-result [context source url module? document-snapshot storage-snapshot clipboard-snapshot]
+   (defn- context-eval-result [context source url module? document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot]
      (let [vm (:vm context)
-           _ (install-document-shim! vm document-snapshot storage-snapshot clipboard-snapshot)
+           _ (install-document-shim! vm document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot)
            response (eval-result vm source url module?)
            requests (dump-requests vm)]
        (assoc response :requests requests))))
@@ -3115,7 +3149,8 @@
                                                               (= :module (:script/type request)))
                                                           (:document/snapshot request)
                                                           (:storage/snapshot request)
-                                                          (:clipboard/snapshot request))
+                                                          (:clipboard/snapshot request)
+                                                          (:geolocation/snapshot request))
 
                                      :js/module-load
                                      (if-let [source (resolve-module-source modules module-provider (:specifier request))]
@@ -3125,7 +3160,8 @@
                                                             true
                                                             (:document/snapshot request)
                                                             (:storage/snapshot request)
-                                                            (:clipboard/snapshot request))
+                                                            (:clipboard/snapshot request)
+                                                            (:geolocation/snapshot request))
                                        {:error :quickjs/module-not-found
                                         :specifier (:specifier request)
                                         :requests []})
