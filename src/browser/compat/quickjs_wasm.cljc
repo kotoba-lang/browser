@@ -4,11 +4,11 @@
   The JVM side can describe the engine boundary, but actual JavaScript source
   evaluation is provided by the ClojureScript host through quickjs-emscripten's
   singlefile WASM variant."
-  (:require [browser.compat.quickjs-binary :as binary]
-            [browser.compat.quickjs-execution :as execution]
+  (:require [browser.compat.quickjs-execution :as execution]
             [browser.runtime :as runtime]
             [browser.storage :as storage]
             [clojure.string :as str]
+            [quickjs.binary :as binary]
             #?(:cljs ["quickjs-emscripten-core" :refer [newQuickJSWASMModuleFromVariant]])
             #?(:cljs ["@jitl/quickjs-singlefile-cjs-release-sync" :default quickjs-variant])))
 

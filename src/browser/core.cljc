@@ -1,11 +1,11 @@
 (ns browser.core
   "Kotoba-only browser R0 orchestration over the existing kotoba UI substrate."
-  (:require [browser.css :as css]
-            [browser.dom-bridge :as dom-bridge]
-            [browser.html :as html]
+  (:require [browser.dom-bridge :as dom-bridge]
             [browser.page-script :as page-script]
-            [kotoba.wasm.dom :as dom]
-            [kotoba.wasm.layout :as layout]))
+            [cssom.core :as css]
+            [cssom.layout :as layout]
+            [htmldom.core :as html]
+            [kotoba.wasm.dom :as dom]))
 
 (defn render-document
   [{:keys [document css-rules viewport theme] :or {viewport [800 600]}}]

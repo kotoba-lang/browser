@@ -5,8 +5,8 @@
    still just kotoba DOM data and host ABI ops: windows, panels, and launchers
    are document nodes, not native widgets."
   (:require [browser.text-edit :as text-edit]
-            [kotoba.wasm.dom :as dom]
-            [kotoba.wasm.layout :as layout]))
+            [cssom.layout :as layout]
+            [kotoba.wasm.dom :as dom]))
 
 (def default-theme
   {:font-size 14
