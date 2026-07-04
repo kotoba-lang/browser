@@ -399,8 +399,17 @@ current QuickJS WASM guest covers direct eval plus minimal `document`,
 `fetch`, `localStorage`, `navigator.clipboard`, `window.open`, and
 `navigator.permissions.query`/`navigator.geolocation.getCurrentPosition` plus
 `Notification`, fullscreen, and media capture shims that emit host capability
-requests. WebSocket construction/send/close also emit capability requests and
-record sandboxed connection descriptors instead of opening ambient sockets.
+requests. WebSocket construction/send/close also emit capability requests and,
+by default, record sandboxed connection descriptors instead of opening ambient
+sockets; a session can opt in to a REAL, RFC6455 socket instead by injecting
+`:websocket-fn` (`browser.net.websocket/websocket-fn` -- a real
+`java.net.http.HttpClient`-backed client on the JVM, a real host-runtime-
+global-`WebSocket`-backed client in ClojureScript), in which case connect/
+send/close move real bytes and a host-computed, per-eval snapshot delivers
+real inbound messages to a script's `ws.onmessage` (see
+`browser.compat.quickjs-execution/websocket-snapshot` and
+`browser.compat.quickjs-runner`'s namespace docstring for exactly what that
+proves and does not prove).
 Crypto random APIs consume injected random byte/UUID queues, falling back to
 deterministic zero values instead of ambient host RNG.
 Worker construction/postMessage/terminate records sandboxed worker descriptors
