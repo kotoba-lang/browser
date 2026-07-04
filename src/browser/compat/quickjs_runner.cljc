@@ -71,17 +71,21 @@
   threading path (each call re-reads `:browser.session/page :browser/document`,
   which already reflects every prior script's committed mutations).
 
-  As of this writing, `:storage` and `:clipboard` reads also round-trip back
-  into the VM itself, not just the host-side view: `evaluate!`/`load-module!`
-  (`browser.compat.quickjs-execution`) pass the current `:storage`/
-  `:clipboard` snapshots alongside the document snapshot into every
-  `quickjs-wasm` invocation (`:document/snapshot`, `:storage/snapshot`,
-  `:clipboard/snapshot` on the request map), and `quickjs-wasm` installs all
-  three as VM globals (`globalThis.__kotobaSnapshot` /
-  `globalThis.__kotobaStorageSnapshot` / `globalThis.__kotobaClipboardSnapshot`)
+  As of this writing, `:storage`, `:clipboard`, AND `:geolocation` reads also
+  round-trip back into the VM itself, not just the host-side view:
+  `evaluate!`/`load-module!` (`browser.compat.quickjs-execution`) pass the
+  current `:storage`/`:clipboard` snapshots, plus a host-computed
+  `:geolocation` permission-decision + position snapshot
+  (`quickjs-execution/geolocation-snapshot`), alongside the document snapshot
+  into every `quickjs-wasm` invocation (`:document/snapshot`,
+  `:storage/snapshot`, `:clipboard/snapshot`, `:geolocation/snapshot` on the
+  request map), and `quickjs-wasm` installs all four as VM globals
+  (`globalThis.__kotobaSnapshot` / `globalThis.__kotobaStorageSnapshot` /
+  `globalThis.__kotobaClipboardSnapshot` / `globalThis.__kotobaGeolocationSnapshot`)
   before each eval, the same way it already did for `document.*`. So
-  `localStorage.getItem` and `navigator.clipboard.readText` genuinely return
-  the real, current value synchronously -- a script that calls
+  `localStorage.getItem`, `navigator.clipboard.readText`, AND
+  `navigator.geolocation.getCurrentPosition` genuinely return/callback the
+  real, current value synchronously -- a script that calls
   `localStorage.setItem('probe', 'x')` in one `<script>` tag makes a LATER
   `<script>` tag's `localStorage.getItem('probe')` observably return `x`
   to JS (proven via `document.title` in
@@ -93,14 +97,18 @@
   request that the host applies via `apply-capability` *after* the script
   finishes, and the next fresh snapshot isn't installed until the next
   `<script>` tag's `eval-dispose!`. `setItem`/`removeItem`/`writeText` and
-  the `storage/get`/`clipboard/read` requests `getItem`/`readText` still
-  queue alongside the synchronous snapshot read are otherwise unchanged from
-  before -- they keep landing in `:capability/results` for the audit trail.
-  `geolocation` reads are NOT (yet) wired the same way -- `getCurrentPosition`
-  is callback-based and permission-gated (see
-  `quickjs-execution/geolocation-result`), which is a meaningfully different,
-  riskier shape than a plain synchronous return value, so it remains
-  host-side-only, left as follow-up work.
+  the `storage/get`/`clipboard/read`/`geolocation/read` requests
+  `getItem`/`readText`/`getCurrentPosition` still queue alongside the
+  synchronous snapshot read are otherwise unchanged from before -- they keep
+  landing in `:capability/results` for the audit trail.
+  `getCurrentPosition`'s `success`/`error` callback is invoked SYNCHRONOUSLY
+  (this engine evaluates a whole script synchronously in one pass, so there
+  is no realistic way to defer it the way a real, async/permission-prompted
+  browser would): `success` fires with the real position if permission is
+  granted and the host ever injected one, `error` fires (with a
+  `GeolocationPositionError`-shaped `{code, message}`) if permission is
+  denied or no real position was ever injected -- see
+  `quickjs-execution/geolocation-snapshot`.
 
   ## Known limitations of this first pass
 
@@ -200,9 +208,9 @@
   invocation at the same page generation, and persists the (possibly
   updated) slice back via `remember-runtime-state!` so the *next* invocation
   sees it too -- see the namespace docstring for the full picture, including
-  which capability answers (`:storage`, `:clipboard`) now round-trip back
-  into the QuickJS VM itself as real, synchronous JS return values, and
-  which (`:geolocation`) remain a documented follow-up gap.
+  which capability answers (`:storage`, `:clipboard`, `:geolocation`) now
+  round-trip back into the QuickJS VM itself as real JS return values /
+  callback invocations.
 
   Returns `session` unchanged (plus a `:script/skipped` history entry) if the
   engine isn't ready yet -- see the namespace docstring."

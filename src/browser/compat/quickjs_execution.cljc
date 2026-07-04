@@ -25,13 +25,17 @@
   "Build an `invocation` carrying the real document snapshot plus the real,
   current `:storage` and `:clipboard` snapshots (deref'd from the
   page-lifetime `quickjs-execution` atoms -- see
-  `browser.compat.quickjs-runner`'s `persistent-execution-keys`), so
+  `browser.compat.quickjs-runner`'s `persistent-execution-keys`), and the
+  real, current geolocation permission-decision + position snapshot (already
+  computed host-side by `geolocation-snapshot`, since unlike storage/
+  clipboard it needs more than a bare deref -- see that fn), so
   `quickjs-wasm`'s webapi shim can install all of them as VM globals before
   running `payload`'s script (`:document/snapshot`, `:storage/snapshot`,
-  `:clipboard/snapshot` respectively) and answer reads like
-  `localStorage.getItem` / `navigator.clipboard.readText` synchronously from
-  real host state instead of always returning `null`/`''`."
-  [call payload capability-results document storage clipboard]
+  `:clipboard/snapshot`, `:geolocation/snapshot` respectively) and answer
+  reads like `localStorage.getItem` / `navigator.clipboard.readText` /
+  `navigator.geolocation.getCurrentPosition` synchronously from real host
+  state instead of always returning `null`/`''`/never calling back."
+  [call payload capability-results document storage clipboard geolocation-snapshot]
   (let [snapshot (cond-> (dom-bridge/document-snapshot document)
                    (:script/node-id payload)
                    (assoc :current-script (:script/node-id payload)))]
@@ -39,7 +43,8 @@
                 (assoc payload
                        :document/snapshot snapshot
                        :storage/snapshot (some-> storage deref)
-                       :clipboard/snapshot (some-> clipboard deref))
+                       :clipboard/snapshot (some-> clipboard deref)
+                       :geolocation/snapshot geolocation-snapshot)
                 capability-results)))
 
 (defn- take-capability-results
@@ -291,6 +296,65 @@
       {:ok? false
        :error (:reason decision)
        :permission/decision decision})))
+
+(defn- geolocation-snapshot
+  "Compute the REAL, current geolocation permission decision and position
+  from `state`'s persisted `:geolocation` atom and the active profile's
+  permission grants, host-side, BEFORE the script runs -- so
+  `invocation-with-snapshots` can hand it to `quickjs-wasm` as
+  `:geolocation/snapshot` and the webapi shim's real
+  `navigator.geolocation.getCurrentPosition` can synchronously call
+  `success`/`error` with it (this engine evaluates a whole script
+  synchronously in one pass, so there is no realistic way to defer the
+  callback the way a real, async/permission-prompted browser would -- see
+  `quickjs-wasm/geolocation-snapshot-source`).
+
+  Uses the SAME `permission-decision-for` gate `apply-capability`'s
+  `:geolocation/read` case applies (via `geolocation-result`) when it
+  processes the queued `geolocation/read` capability request AFTER the
+  script runs for the audit trail -- with an empty `request` map, since the
+  real `navigator.geolocation` JS shim never sets a custom `:origin` on that
+  request either, so the two decisions always agree.
+
+  Returns a single, JSON-safe (plain string/number/boolean/nil, no
+  keywords -- ready for `jsonable`/`clj->js`) map shaped one of two ways:
+  - denied, or no real position was ever injected by the host (i.e. the
+    `:geolocation` atom holds no `:latitude`/`:longitude` -- the
+    `:geolocation` state key always defaults to a zeroed position via
+    `new-state`, so this is really \"a test/host explicitly cleared it\"):
+    `{:granted false :error {:code <1|2> :message \"...\"}}`
+    (`1`/`\"PERMISSION_DENIED\"` mirrors the real
+    `GeolocationPositionError.PERMISSION_DENIED`, `2` mirrors
+    `POSITION_UNAVAILABLE`).
+  - granted with a real position: `{:granted true :position {:coords {...}
+    :timestamp ...}}`, mirroring `geolocation-result`'s own
+    `{:coords {...} :timestamp ...}` result shape."
+  [state]
+  (let [decision (permission-decision-for state {} :geolocation/read)
+        granted? (= :allow (:permission/decision decision))
+        position (some-> (:geolocation state) deref)
+        has-position? (and (map? position)
+                           (contains? position :latitude)
+                           (contains? position :longitude))]
+    (cond
+      (not granted?)
+      {:granted false
+       :error {:code 1
+               :message (str "User denied Geolocation ("
+                             (subs (str (or (:reason decision) :permission/not-granted)) 1)
+                             ")")}}
+
+      (not has-position?)
+      {:granted true
+       :error {:code 2
+               :message "Position unavailable"}}
+
+      :else
+      {:granted true
+       :position (cond-> {:coords (select-keys position [:latitude :longitude :accuracy :altitude
+                                                          :altitudeAccuracy :heading :speed])}
+                   (:timestamp position)
+                   (assoc :timestamp (:timestamp position)))})))
 
 (defn- notification-permission-result
   [state request]
@@ -1335,7 +1399,8 @@
                                                             capability-results
                                                             (:document state)
                                                             (:storage state)
-                                                            (:clipboard state))))
+                                                            (:clipboard state)
+                                                            (geolocation-snapshot state))))
         state (record-response-errors state response)
         state (apply-requests state (:requests response))]
     (-> state
@@ -1360,7 +1425,8 @@
                                                               capability-results
                                                               (:document state)
                                                               (:storage state)
-                                                              (:clipboard state))))
+                                                              (:clipboard state)
+                                                              (geolocation-snapshot state))))
           state (record-response-errors state response)
           state (apply-requests state (:requests response))]
       (-> state
