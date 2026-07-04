@@ -241,6 +241,7 @@
                    (.then (fn [text]
                             {:status (.-status resp)
                              :headers (into {}
+                                            (map (fn [pair] [(aget pair 0) (aget pair 1)]))
                                             (es6-iterator-seq (.entries (.-headers resp))))
                              :body text})))))))
 
