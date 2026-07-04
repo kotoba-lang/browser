@@ -113,6 +113,7 @@
       globalThis.__kotobaNextWebSocketId = 1;
       globalThis.__kotobaNextWorkerId = 1;
       globalThis.__kotobaNextBroadcastId = 1;
+      globalThis.__kotobaNextFetchId = 1;
       globalThis.__kotobaListeners = {};
       globalThis.__kotobaListenerIds = {};
       globalThis.__kotobaTimers = {};
@@ -146,6 +147,7 @@
       globalThis.__kotobaSnapshot = globalThis.__kotobaSnapshot || { root: null, nodes: {} };
       globalThis.__kotobaWebSockets = globalThis.__kotobaWebSockets || {};
       globalThis.__kotobaWorkers = globalThis.__kotobaWorkers || {};
+      globalThis.__kotobaFetchPending = globalThis.__kotobaFetchPending || {};
       globalThis.__kotobaClientNodes = {};
       globalThis.__kotobaElementCache = {};
       globalThis.__kotobaMutationObservers = [];
@@ -181,6 +183,77 @@
           'callback/id': callbackId
         });
         return callbackId;
+      }
+      /* __kotobaMakeDeferred: a minimal, hand-rolled thenable -- NOT the
+         engine's native Promise. QuickJS's native Promise queues .then()
+         reactions as VM jobs that only run once the host calls
+         runtime.executePendingJobs(), which this repo's eval-result/
+         dump-requests never do (see quickjs_wasm.cljc). A native
+         Promise.resolve()d from outside a running script eval (the whole
+         point of fetch() delivery -- see webapi-shim-source's fetch
+         delivery IIFE below) would therefore silently never invoke any
+         .then() callback. This deferred settles its reactions
+         SYNCHRONOUSLY instead, the moment resolve()/reject() is called --
+         honest for this engine's already-synchronous-per-script-tag
+         architecture (mirrors __kotobaScheduleMicrotask's host-mediated,
+         not real-microtask-queued, callback delivery), not spec-compliant
+         microtask timing. */
+      function __kotobaMakeDeferred() {
+        var state = 'pending';
+        var value;
+        var reactions = [];
+        function run(reaction) {
+          var handler = state === 'fulfilled' ? reaction.onFulfilled : reaction.onRejected;
+          if (typeof handler !== 'function') {
+            if (state === 'fulfilled') reaction.resolve(value);
+            else reaction.reject(value);
+            return;
+          }
+          try {
+            reaction.resolve(handler(value));
+          } catch (err) {
+            reaction.reject(err);
+          }
+        }
+        function settle(nextState, nextValue) {
+          if (state !== 'pending') return;
+          if (nextState === 'fulfilled' && nextValue && typeof nextValue.then === 'function') {
+            nextValue.then(
+              function(v) { settle('fulfilled', v); },
+              function(e) { settle('rejected', e); }
+            );
+            return;
+          }
+          state = nextState;
+          value = nextValue;
+          var pending = reactions;
+          reactions = [];
+          for (var i = 0; i < pending.length; i++) run(pending[i]);
+        }
+        var deferred = {};
+        deferred.resolve = function(v) { settle('fulfilled', v); };
+        deferred.reject = function(e) { settle('rejected', e); };
+        deferred.promise = {
+          then: function(onFulfilled, onRejected) {
+            var next = __kotobaMakeDeferred();
+            var reaction = {
+              onFulfilled: onFulfilled,
+              onRejected: onRejected,
+              resolve: next.resolve,
+              reject: next.reject
+            };
+            if (state === 'pending') {
+              reactions.push(reaction);
+            } else {
+              run(reaction);
+            }
+            return next.promise;
+          }
+        };
+        deferred.promise.catch = function(onRejected) {
+          return deferred.promise.then(undefined, onRejected);
+        };
+        return deferred;
       }
       function __kotobaNodeRef(nodeId) {
         return nodeId == null ? null : __kotobaElement({ nodeId: nodeId });
@@ -2395,13 +2468,68 @@
       globalThis.console.warn = function() { __kotobaConsoleLog('warn', arguments); };
       globalThis.console.error = function() { __kotobaConsoleLog('error', arguments); };
       globalThis.console.debug = function() { __kotobaConsoleLog('debug', arguments); };
+      function __kotobaFetchResponse(entry) {
+        var status = (entry && entry.status != null) ? Number(entry.status) : 0;
+        var body = (entry && entry.body != null) ? String(entry.body) : '';
+        var headers = (entry && entry.headers) || {};
+        var response = {
+          ok: status >= 200 && status <= 299,
+          status: status,
+          statusText: (entry && entry.statusText) || '',
+          url: (entry && entry.url) || ''
+        };
+        response.text = function() {
+          var d = __kotobaMakeDeferred();
+          d.resolve(body);
+          return d.promise;
+        };
+        response.json = function() {
+          return response.text().then(function(text) { return JSON.parse(text); });
+        };
+        response.headers = {
+          get: function(name) {
+            var key = String(name).toLowerCase();
+            var keys = Object.keys(headers);
+            for (var i = 0; i < keys.length; i++) {
+              if (String(keys[i]).toLowerCase() === key) {
+                var value = headers[keys[i]];
+                return Array.isArray(value) ? value.join(', ') : String(value);
+              }
+            }
+            return null;
+          }
+        };
+        return response;
+      }
       globalThis.fetch = function(url, request) {
+        var fetchId = 'fetch-' + globalThis.__kotobaNextFetchId;
+        globalThis.__kotobaNextFetchId = globalThis.__kotobaNextFetchId + 1;
         globalThis.__kotobaRequests.push({
           capability: 'net/fetch',
+          'request/id': fetchId,
           url: String(url),
           request: request || {}
         });
-        return { ok: true, status: 0, capability: 'net/fetch' };
+        var deferred = __kotobaMakeDeferred();
+        globalThis.__kotobaFetchPending[fetchId] = deferred;
+        // Same synchronous, byte-for-byte-unchanged fabricated fields this
+        // always returned before real fetch() delivery existed (a script
+        // reading `.ok`/`.status`/`.capability` synchronously, without ever
+        // calling `.then()`, sees exactly what it always has -- fabricated
+        // mode never populates :net/fetch-responses, so `.then()`/`.catch()`
+        // below simply never settle in that mode, mirroring un-echoed
+        // WebSocket sends and un-replied Worker messages). `.then()`/
+        // `.catch()` are the new, real, opt-in delivery surface -- see the
+        // fetch delivery IIFE at the bottom of this shim and
+        // quickjs-execution/fetch-snapshot.
+        var result = { ok: true, status: 0, capability: 'net/fetch' };
+        result.then = function(onFulfilled, onRejected) {
+          return deferred.promise.then(onFulfilled, onRejected);
+        };
+        result.catch = function(onRejected) {
+          return deferred.promise.then(undefined, onRejected);
+        };
+        return result;
       };
       globalThis.open = function(url, target, features) {
         var request = {
@@ -2925,6 +3053,23 @@
             }
           }
         }
+      })();
+      (function() {
+        var __kotobaFetchSnap = globalThis.__kotobaFetchSnapshot || {};
+        var __kotobaFetchPendingReg = globalThis.__kotobaFetchPending || {};
+        var __kfIds = Object.keys(__kotobaFetchSnap);
+        for (var __kfi = 0; __kfi < __kfIds.length; __kfi++) {
+          var __kfId = __kfIds[__kfi];
+          var __kfEntry = __kotobaFetchSnap[__kfId];
+          var __kfDeferred = __kotobaFetchPendingReg[__kfId];
+          if (!__kfDeferred || !__kfEntry) continue;
+          delete __kotobaFetchPendingReg[__kfId];
+          if (__kfEntry.error) {
+            __kfDeferred.reject(new Error(String(__kfEntry.error)));
+          } else {
+            __kfDeferred.resolve(__kotobaFetchResponse(__kfEntry));
+          }
+        }
       })();")
 
 (def worker-global-scope-source
@@ -3182,12 +3327,32 @@
           ";")))
 
 #?(:cljs
+   (defn- fetch-snapshot-source
+     "JS source that installs the real, current per-fetch-request response
+     snapshot (`quickjs-execution/fetch-snapshot`, computed host-side from a
+     real `:fetch-fn`'s already-completed, synchronous HTTP call -- see that
+     fn) as `globalThis.__kotobaFetchSnapshot`, keyed by the fetch call's
+     own request id. Mirrors `worker-snapshot-source`: installing this
+     snapshot is not enough on its own, the webapi shim below also actively
+     DELIVERS it (see the fetch delivery IIFE at the bottom of
+     `webapi-shim-source`) -- for each id present here with a still-pending
+     entry in `globalThis.__kotobaFetchPending` (persisted across script
+     tags within a page the same way `globalThis.__kotobaWebSockets`/
+     `globalThis.__kotobaWorkers` already are), it resolves (or, for a
+     genuine network-level failure, rejects) that `fetch()` call's pending
+     `.then()` chain SYNCHRONOUSLY, before the script's own source runs."
+     [fetch-snapshot]
+     (str "globalThis.__kotobaFetchSnapshot = "
+          (js/JSON.stringify (clj->js (jsonable (or fetch-snapshot {}))))
+          ";")))
+
+#?(:cljs
    (defn- dump-result
      ([module source url modules]
-      (dump-result module source url modules nil false nil nil nil nil nil nil))
+      (dump-result module source url modules nil false nil nil nil nil nil nil nil))
      ([module source url modules module-provider module?]
-      (dump-result module source url modules module-provider module? nil nil nil nil nil nil))
-     ([module source url modules module-provider module? document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot]
+      (dump-result module source url modules module-provider module? nil nil nil nil nil nil nil))
+     ([module source url modules module-provider module? document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot]
       (let [^js runtime (.newRuntime ^js module #js {:moduleLoader (module-loader modules module-provider)})
             ^js vm (.newContext runtime)
             _ (eval-dispose! vm (snapshot-source document-snapshot) "kotoba://quickjs/document-snapshot.js")
@@ -3196,6 +3361,7 @@
             _ (eval-dispose! vm (geolocation-snapshot-source geolocation-snapshot) "kotoba://quickjs/geolocation-snapshot.js")
             _ (eval-dispose! vm (websocket-snapshot-source websocket-snapshot) "kotoba://quickjs/websocket-snapshot.js")
             _ (eval-dispose! vm (worker-snapshot-source worker-snapshot) "kotoba://quickjs/worker-snapshot.js")
+            _ (eval-dispose! vm (fetch-snapshot-source fetch-snapshot) "kotoba://quickjs/fetch-snapshot.js")
             _ (eval-dispose! vm webapi-shim-source "kotoba://quickjs/webapi-shim.js")
             response (eval-result vm source url module?)
             requests (dump-requests vm)]
@@ -3222,19 +3388,20 @@
            context))))
 
 #?(:cljs
-   (defn- install-document-shim! [vm document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot]
+   (defn- install-document-shim! [vm document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot]
      (eval-dispose! vm (snapshot-source document-snapshot) "kotoba://quickjs/document-snapshot.js")
      (eval-dispose! vm (storage-snapshot-source storage-snapshot) "kotoba://quickjs/storage-snapshot.js")
      (eval-dispose! vm (clipboard-snapshot-source clipboard-snapshot) "kotoba://quickjs/clipboard-snapshot.js")
      (eval-dispose! vm (geolocation-snapshot-source geolocation-snapshot) "kotoba://quickjs/geolocation-snapshot.js")
      (eval-dispose! vm (websocket-snapshot-source websocket-snapshot) "kotoba://quickjs/websocket-snapshot.js")
      (eval-dispose! vm (worker-snapshot-source worker-snapshot) "kotoba://quickjs/worker-snapshot.js")
+     (eval-dispose! vm (fetch-snapshot-source fetch-snapshot) "kotoba://quickjs/fetch-snapshot.js")
      (eval-dispose! vm webapi-shim-source "kotoba://quickjs/webapi-shim.js")))
 
 #?(:cljs
-   (defn- context-eval-result [context source url module? document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot]
+   (defn- context-eval-result [context source url module? document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot]
      (let [vm (:vm context)
-           _ (install-document-shim! vm document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot)
+           _ (install-document-shim! vm document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot)
            response (eval-result vm source url module?)
            requests (dump-requests vm)]
        (assoc response :requests requests))))
@@ -3488,7 +3655,8 @@
                                                           (:clipboard/snapshot request)
                                                           (:geolocation/snapshot request)
                                                           (:websocket/snapshot request)
-                                                          (:worker/snapshot request))
+                                                          (:worker/snapshot request)
+                                                          (:fetch/snapshot request))
 
                                      :js/module-load
                                      (if-let [source (resolve-module-source modules module-provider (:specifier request))]
@@ -3501,7 +3669,8 @@
                                                             (:clipboard/snapshot request)
                                                             (:geolocation/snapshot request)
                                                             (:websocket/snapshot request)
-                                                            (:worker/snapshot request))
+                                                            (:worker/snapshot request)
+                                                            (:fetch/snapshot request))
                                        {:error :quickjs/module-not-found
                                         :specifier (:specifier request)
                                         :requests []})

@@ -187,6 +187,50 @@
   either, mirroring the WebSocket precedent's discipline even though
   nothing here is genuinely waiting on real wall-clock time.
 
+  ## Real fetch() response delivery (auto-derived from a real :fetch-fn)
+
+  `globalThis.fetch` always returns a spec-shaped, `.then()`-chainable
+  thenable (see `quickjs-wasm/webapi-shim-source`'s `__kotobaMakeDeferred`),
+  but that thenable only ever settles for real when the session was built
+  with a real `:browser.session/fetch-fn` (the SAME opt-in capability
+  `:worker/create` already reuses to fetch a worker's script -- see
+  `quickjs-execution/worker-create-result`). Without one, the thenable is
+  registered but never resolved or rejected -- exactly as real, un-echoed
+  WebSocket sends and un-replied Worker messages already behave today, and
+  a script that never calls `.then()` on it (or reads its synchronous
+  `.ok`/`.status`/`.capability` fields, unchanged from before this feature)
+  is completely unaffected.
+
+  With a real `:fetch-fn` injected, `:net/fetch` really performs the HTTP
+  call (`quickjs-execution/apply-capability`'s `:net/fetch` case, via
+  `browser.net/fetch-resource` when a `:net/context` is present, else the
+  bare `:fetch-fn`). A real HTTP client call is itself synchronous/blocking
+  (`java.net.http.HttpClient` on the JVM), so unlike WebSocket's genuinely
+  unpredictable-arrival-time inbound bytes, there is nothing to wait for:
+  the real response (status/headers/body) already exists in full the
+  instant `apply-capability` finishes processing that `:net/fetch` request
+  -- mirroring `worker-create-result`'s eager-capture reasoning exactly.
+  It is captured then, keyed by the fetch call's own `:request/id` (assigned
+  by the JS shim when it queues the request), into `:net/fetch-responses`
+  (see `persistent-execution-keys`), and `quickjs-execution/fetch-snapshot`
+  computes the JSON-safe snapshot the same way `worker-snapshot` does.
+
+  What is NOT delivered same-tick, exactly like Worker's reply and
+  WebSocket's echo: resolving/rejecting the calling script's fetch()
+  promise waits for the NEXT script tag's webapi shim install (see
+  `quickjs-wasm/webapi-shim-source`'s fetch delivery IIFE, which looks up
+  each id present in the fetch snapshot against `__kotobaFetchPending` --
+  the still-registered pending thenable a PREVIOUS script's `fetch()` call
+  created). A real `fetch()` response is asynchronous even when
+  computationally instant, so this repo never claims same-tick delivery
+  into the calling script's own `.then()` either.
+
+  Response body support is deliberately minimal: `.text()` returns an
+  already-resolved thenable of the real fetched body (a real string, not a
+  stream), and `.json()` is a thin `JSON.parse` wrapper over it. `.headers`/
+  streaming bodies are NOT implemented -- documented follow-ups, not silent
+  gaps, should a caller need them.
+
   ## Known limitations of this first pass
 
   - The QuickJS engine must already be started and `:ready`
@@ -248,12 +292,20 @@
   captured eagerly, unlike `:websocket/handles`) but not yet delivered into
   the main thread's `worker.onmessage` -- persisting it here is what lets a
   LATER script tag's `worker-snapshot` still deliver a message a PREVIOUS
-  script tag's `postMessage` already produced a reply for. `:document` is
-  deliberately excluded -- it has its own, already-working threading path
-  (re-read from `:browser.session/page` on every call)."
+  script tag's `postMessage` already produced a reply for. `:net/fetch-responses`
+  is the `fetch()` analogue of `:worker/outbox`: real, eagerly-captured
+  `:net/fetch` responses (see `quickjs-execution/fetch-snapshot`'s
+  docstring for why capturing this eagerly is safe, mirroring
+  `worker-create-result`) not yet delivered into the calling script's
+  pending `fetch()` `.then()` chain -- persisting it here is what lets a
+  LATER script tag's `fetch-snapshot` still deliver a response a PREVIOUS
+  script tag's `fetch()` call already produced. `:document` is deliberately
+  excluded -- it has its own, already-working threading path (re-read from
+  `:browser.session/page` on every call)."
   [:storage :clipboard :geolocation
    :dom/client-ids :websocket/connections :websocket/handles
    :worker/instances :worker/handles :worker/outbox
+   :net/fetch-responses
    :broadcast/channels :history/entries :history/index
    :global/listeners])
 
@@ -302,7 +354,9 @@
   sees it too -- see the namespace docstring for the full picture, including
   which capability answers (`:storage`, `:clipboard`, `:geolocation`) now
   round-trip back into the QuickJS VM itself as real JS return values /
-  callback invocations.
+  callback invocations, and how a real `fetch()` response round-trips back
+  into a script's `.then()` chain (see the \"Real fetch() response
+  delivery\" section below).
 
   Returns `session` unchanged (plus a `:script/skipped` history entry) if the
   engine isn't ready yet -- see the namespace docstring."
