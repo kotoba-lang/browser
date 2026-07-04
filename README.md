@@ -26,7 +26,7 @@ Existing substrates are reused:
 ## Naming
 
 `dom-gpu` (renamed from `wasm-ui`, see
-`90-docs/adr/2607041500-kotoba-lang-ui-family-rename.md` in
+`90-docs/adr/2607051200-kotoba-lang-ui-family-rename.md` in
 `com-junkawasaki/root`) is the general kotoba UI substrate this repo consumes:
 DOM ABI, retained tree, layout, and render host contracts. The previously
 recorded plan to rename it to `kotoba-lang/ui` is superseded — that name
