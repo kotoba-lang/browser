@@ -35,9 +35,67 @@
    to, since that demo never went through browser.session), painting
    happens automatically as part of every browser.session/load-html! call --
    session/commit-page! already calls kotoba.wasm.host/commit! on the page's
-   real :browser/ops for us."
+   real :browser/ops for us.
+
+   ## Real networking: WebSocket, Worker, fetch()
+
+   A later session on this repo built three more real capabilities into the
+   underlying engine (browser.net.websocket, quickjs-wasm's real second-
+   context Worker execution, and quickjs-wasm's __kotobaMakeDeferred-backed
+   real fetch() delivery), each individually proven via isolated Node-based
+   CLJS smoke tests (test-cljs/browser/compat/quickjs_websocket_smoke_test.cljs,
+   quickjs_worker_smoke_test.cljs, quickjs_fetch_smoke_test.cljs). This demo
+   now exercises all three live, in a real browser tab, against a REAL small
+   local server (scripts/demo-server.js -- serves the SAME static public/
+   files shadow-cljs's own devtools http server does, PLUS a /worker.js
+   script, a /api/fetch-data endpoint, and a /ws-echo RFC6455 echo, the
+   real-server analogue of what each smoke test stood up for itself):
+
+     - `init!` derives the demo server's own origin from
+       `window.location.origin` (this page IS served by that same real
+       server -- see scripts/demo-server.js), then performs a REAL, native
+       `js/fetch` (the host browser's own fetch client, NOT the QuickJS-
+       guest-shimmed `fetch()` below) against `/worker.js` and
+       `/api/fetch-data` before the QuickJS engine ever starts. This repo's
+       `:fetch-fn` contract is synchronous end-to-end (see
+       `browser.net.http`'s `:cljs` branch docstring), so exactly like
+       `quickjs_worker_smoke_test.cljs`/`quickjs_fetch_smoke_test.cljs`'s own
+       `build-session`, the synchronous `:fetch-fn` this demo injects
+       (`synchronous-fetch-fn` below) is a thin wrapper around these
+       ALREADY-real-fetched responses, not a second, separate fabrication.
+     - `sample-html`'s real `<script>` tags then really `new Worker(...)`
+       (really re-fetches + really evaluates `/worker.js`'s real source in a
+       SECOND, independent QuickJS context) and really `fetch(...)`
+       (`:net/fetch` capability, delivered via the pre-fetched response
+       above) -- both replies are eagerly captured synchronously and
+       delivered into the calling script's `onmessage`/`.then()` chain by
+       the NEXT `<script>` tag's snapshot install, exactly as
+       `browser.compat.quickjs-runner`'s namespace docstring describes, so
+       both round trips complete within ONE `session/load-html!` call.
+     - WebSocket's real echo genuinely has to travel over a real socket to
+       the real server and back, so it CANNOT complete within a single
+       synchronous `run-page-scripts!` reduce over `sample-html`'s tags (see
+       `quickjs_websocket_smoke_test.cljs`'s own docstring on exactly this
+       point) -- `init!` instead drives it directly via two
+       `quickjs-runner/run-script!` calls sandwiching a real
+       `js/Promise`+`js/setTimeout` wait, the same real-wall-clock-time
+       technique that smoke test uses, sharing the SAME
+       `:script/generation` (hence the SAME page-lifetime runtime state,
+       including `:websocket/handles`) as the page `sample-html` already
+       loaded.
+
+   Each proof lands in its own real DOM element (`#ws-proof`,
+   `#worker-proof`, `#fetch-proof`) via a real `document.getElementById(...)
+   .textContent = ...` mutation -- painted for real by the same WebGL
+   pipeline as everything else on the page -- alongside the original
+   `document.title` proof, which is left completely unchanged."
   (:require [browser.compat.quickjs-runner :as quickjs-runner]
+            [browser.dom-bridge :as dom-bridge]
+            [browser.net.websocket :as ws]
+            [browser.origin :as origin]
+            [browser.profile :as profile]
             [browser.session :as session]
+            [clojure.string :as str]
             [kotoba.wasm.host :as host]
             [kotoba.wasm.host.webgl :as webgl]))
 
@@ -46,7 +104,26 @@
 (def viewport-width 760)
 (def viewport-height 460)
 
-(def sample-html
+(defn sample-html
+  "The demo page's real HTML, parameterized on `worker-url`/`fetch-url` (the
+   real local demo server's own /worker.js and /api/fetch-data endpoints --
+   see `init!`, which derives them from `window.location.origin` and passes
+   them in). Three real `<script>` tags:
+
+     1. (unchanged from before this session) mutates `document.title`
+        through the real dom/mutate capability path.
+     2. really opens a Worker at `worker-url` and really calls
+        `fetch(fetch-url)`, registering real `onmessage`/`.then()` callbacks
+        that mutate `#worker-proof`/`#fetch-proof`'s real `textContent`.
+     3. an intentionally empty script whose sole purpose is to BE the next
+        `<script>` tag: its own eval-dispose/snapshot-install phase is what
+        actually delivers script 2's queued real Worker reply and real
+        fetch() response into those still-registered callbacks (see
+        `browser.compat.quickjs-runner`'s namespace docstring, \"Real Worker
+        execution\"/\"Real fetch() response delivery\" sections) -- mirroring
+        `quickjs_worker_smoke_test.cljs`/`quickjs_fetch_smoke_test.cljs`'s own
+        empty `script2`."
+  [worker-url fetch-url]
   (str
    "<head><title>Kotoba Browser Demo (before script)</title></head>"
    "<main style=\"display:flex; flex-direction:column; gap:12px; padding:16px; background:#0b0e14\">"
@@ -74,27 +151,124 @@
    "<div style=\"background:#28405f; padding:8; color:#e6ebf5\">grid cell B</div>"
    "<div style=\"background:#324e6f; padding:8; color:#e6ebf5\">grid cell C</div>"
    "</section>"
+   "<section style=\"display:flex; flex-direction:column; gap:8; margin-top:4\">"
+   "<div id=\"ws-proof\" style=\"background:#101820; border-width:2; border-color:#3aa1c9; padding:8; color:#bfe4f2\">WebSocket proof: pending real echo round-trip...</div>"
+   "<div id=\"worker-proof\" style=\"background:#181022; border-width:2; border-color:#b06fe0; padding:8; color:#e6d3fa\">Worker proof: pending real second-QuickJS-context reply...</div>"
+   "<div id=\"fetch-proof\" style=\"background:#101f10; border-width:2; border-color:#7fce7f; padding:8; color:#d3f2d3\">fetch() proof: pending real HTTP response...</div>"
+   "</section>"
    "<script>"
    "document.title = 'Kotoba Browser: real QuickJS + real cssom layout + real WebGL paint';"
    "</script>"
+   "<script>"
+   "var w = new Worker(" (pr-str worker-url) ");"
+   "w.onmessage = function(e) { document.getElementById('worker-proof').textContent = "
+   "'Worker proof: real 2nd QuickJS context computed 21 * 2 -> ' + e.data; };"
+   "w.postMessage(21);"
+   "fetch(" (pr-str fetch-url) ")"
+   ".then(function(r) { return r.text(); })"
+   ".then(function(t) { document.getElementById('fetch-proof').textContent = "
+   "'fetch() proof: real HTTP response body -> \"' + t + '\"'; });"
+   "</script>"
+   "<script>"
+   "void 0;"
+   "</script>"
    "</main>"))
+
+(defn ws-script1-source
+  "Real JS source for the FIRST WebSocket round-trip script (see `init!`):
+   opens a real connection to `ws-url`, registers a real `onmessage` that
+   mutates `#ws-proof`'s real `textContent`, and sends real data. Mirrors
+   `quickjs_websocket_smoke_test.cljs`'s `run-script1!` script source."
+  [ws-url]
+  (str "var ws = new WebSocket(" (pr-str ws-url) ");"
+       "ws.onmessage = function(e) { document.getElementById('ws-proof').textContent = "
+       "'WebSocket proof: real echo round-trip -> \"' + e.data + '\"'; };"
+       "ws.send('hello from the real kotoba-lang/browser demo');"))
+
+(def ws-script2-source
+  "Real JS source for the SECOND WebSocket round-trip script: deliberately
+   empty, exactly like `quickjs_websocket_smoke_test.cljs`'s `run-script2!`
+   -- its own eval-dispose/snapshot-install phase is what delivers the real
+   echoed reply into script 1's still-registered `ws.onmessage`."
+  "void 0;")
+
+(defn grant-demo-permissions
+  "A real `browser.profile`, granting exactly the three capabilities this
+   demo's networking proofs need, each at the real origin the corresponding
+   request actually targets (see `browser.origin/origin` -- WebSocket's
+   `ws://` origin differs from Worker/fetch's `http://` origin even though
+   all three point at the SAME real local server, since origin includes
+   scheme). Public (not `defn-`) so `test-cljs/browser/demo_smoke_test.cljs`
+   can drive this demo's exact real permission wiring against its own real
+   local Node server, not a re-typed copy."
+  [worker-url fetch-url ws-url]
+  (-> (profile/new-profile {:id "browser-demo"})
+      (profile/grant-permission (origin/origin worker-url) :worker/create)
+      (profile/grant-permission (origin/origin fetch-url) :net/fetch)
+      (profile/grant-permission (origin/origin ws-url) :websocket/connect)))
+
+(defn synchronous-fetch-fn
+  "A synchronous `:fetch-fn` (the shape `browser.compat.quickjs-execution`'s
+   `:net/fetch` case, AND `worker-create-result`'s bare `:fetch-fn` call for
+   fetching a Worker's own script, both need) backed by REAL responses
+   `init!` already fetched for real, natively (see `real-prefetch!` below),
+   before the QuickJS engine's guest scripts ever ran. Mirrors
+   `quickjs_worker_smoke_test.cljs`/`quickjs_fetch_smoke_test.cljs`'s own
+   `build-session` `:fetch-fn` -- see those namespaces' docstrings for why
+   this repo's `:fetch-fn` contract is synchronous end-to-end while a real
+   fetch is not. Public (not `defn-`), same reason as
+   `grant-demo-permissions` above -- reused verbatim by
+   `test-cljs/browser/demo_smoke_test.cljs`, keyed by that test's own real,
+   Node-`http.get`-prefetched responses instead of `real-prefetch!`'s
+   browser-`js/fetch` ones (only the real HTTP client differs -- see that
+   test's own docstring)."
+  [prefetched]
+  (fn demo-fetch-fn [{:keys [url]}]
+    (get prefetched url {:status 0 :error :net/fetch-not-prefetched})))
+
+(defn- real-prefetch!
+  "A REAL, native `js/fetch` call (the actual host browser's own network
+   client -- NOT the QuickJS-guest-shimmed `fetch()` `quickjs-wasm`'s webapi
+   shim installs, see this namespace's docstring) against `url`. Same-origin
+   with this very page (both served by scripts/demo-server.js), so no CORS
+   concern for this real, outer fetch. Returns a Promise of a
+   browser.net-shaped response map ({:status :headers :body}), the same
+   shape `browser.net.http/fetch!` and the `:clj` `fetch-fn` produce."
+  [url]
+  (-> (js/fetch url)
+      (.then (fn [resp]
+               (-> (.text resp)
+                   (.then (fn [text]
+                            {:status (.-status resp)
+                             :headers (into {}
+                                            (es6-iterator-seq (.entries (.-headers resp))))
+                             :body text})))))))
+
+(defn- wait-ms
+  "A real `js/Promise`+`js/setTimeout` wait -- genuine wall-clock time has
+   to pass here for the real WebSocket echo to genuinely travel to the real
+   local server and back before script 2 asks for it (see this namespace's
+   docstring and `quickjs_websocket_smoke_test.cljs`)."
+  [ms]
+  (js/Promise. (fn [resolve _reject] (js/setTimeout resolve ms))))
 
 (defn- text-draw-op-count
   [draw-ops]
   (count (filter #(= :text (:draw/op %)) draw-ops)))
 
 (defn- gl-pixel-summary
-  "Real WebGL pixel readback, taken synchronously in the SAME JS turn as the
-   paint call (immediately after `session/load-html!` returns below) --
-   deliberately not deferred to a later tick/animation-frame. The webgl
-   host's GL context is created without `preserveDrawingBuffer` (see
-   dom-gpu's `kotoba.wasm.host.webgl/create-host!`), so a real browser is
-   allowed to clear the drawing buffer the next time it composites a frame;
-   reading it back right here, before yielding back to the event loop, is
-   what makes this a genuine proof of the pixels this session's real
-   box-model/flexbox/grid/text-wrap layout + real WebGL rasterization just
-   produced, rather than a snapshot that could race a later compositor
-   clear."
+  "Real WebGL pixel readback, taken synchronously in the SAME JS turn as
+   the paint call (immediately after the WebSocket round trip's second
+   script -- `run-script!` -- returns below, the LAST real paint this
+   demo's init! triggers) -- deliberately not deferred to a later tick/
+   animation-frame. The webgl host's GL context is created without
+   `preserveDrawingBuffer` (see dom-gpu's
+   `kotoba.wasm.host.webgl/create-host!`), so a real browser is allowed to
+   clear the drawing buffer the next time it composites a frame; reading it
+   back right here, before yielding back to the event loop, is what makes
+   this a genuine proof of the pixels this session's real box-model/
+   flexbox/grid/text-wrap layout + real WebGL rasterization just produced,
+   rather than a snapshot that could race a later compositor clear."
   [gl-canvas]
   (let [gl (.getContext gl-canvas "webgl")
         w (.-width gl-canvas)
@@ -113,6 +287,17 @@
        :non-background-pixels non-bg
        :distinct-colors distinct})))
 
+(defn- element-text
+  "Host-side read of a real element's real, current `textContent` (the
+   SAME thing a real `document.getElementById(id).textContent` read from
+   inside the QuickJS VM would see), via `browser.dom-bridge`'s already-
+   public `get-element-by-id`/`node-snapshot` -- used here only for the
+   demo's own console/status logging, not a new capability."
+  [document id]
+  (some->> (dom-bridge/get-element-by-id document id)
+           (dom-bridge/node-snapshot document)
+           :text-content))
+
 (defn ^:export init!
   []
   (let [gl-canvas (.getElementById js/document "kotoba-gl")
@@ -121,12 +306,31 @@
                                   :text-canvas text-canvas
                                   :width viewport-width
                                   :height viewport-height})
-        base-session (session/new-session
-                      (quickjs-runner/quickjs-session-opts
-                       {:host host
-                        :viewport [viewport-width viewport-height]}))]
-    (js/console.log "browser.demo: starting real QuickJS script engine...")
-    (-> (session/ensure-script-engine! base-session)
+        server-origin (.. js/window -location -origin)
+        worker-url (str server-origin "/worker.js")
+        fetch-url (str server-origin "/api/fetch-data")
+        ws-url (str (str/replace server-origin #"^http" "ws") "/ws-echo")]
+    (js/console.log "browser.demo: real prefetching (native js/fetch, same-origin"
+                     "with this very page -- see scripts/demo-server.js) the worker"
+                     "script + fetch data from" server-origin "...")
+    (-> (js/Promise.all #js [(real-prefetch! worker-url) (real-prefetch! fetch-url)])
+        (.then
+         (fn [results]
+           (let [worker-response (aget results 0)
+                 fetch-response (aget results 1)]
+             (js/console.log "browser.demo: real prefetch results ->"
+                              (pr-str {:worker worker-response :fetch fetch-response}))
+             (let [prefetched {worker-url worker-response fetch-url fetch-response}
+                   demo-profile (grant-demo-permissions worker-url fetch-url ws-url)
+                   base-session (session/new-session
+                                 (quickjs-runner/quickjs-session-opts
+                                  {:host host
+                                   :viewport [viewport-width viewport-height]
+                                   :profile demo-profile
+                                   :fetch-fn (synchronous-fetch-fn prefetched)
+                                   :websocket-fn (ws/websocket-fn)}))]
+               (js/console.log "browser.demo: starting real QuickJS script engine...")
+               (session/ensure-script-engine! base-session)))))
         (.then
          (fn [ready-session]
            (js/console.log "browser.demo: script engine status ->"
@@ -136,23 +340,59 @@
            (let [after (session/load-html!
                         ready-session
                         {:url "kotoba://browser-demo/index"
-                         :html sample-html})
-                 ;; Read the WebGL canvas back RIGHT NOW, in the same
-                 ;; synchronous continuation as the paint load-html! just
-                 ;; triggered via kotoba.wasm.host/commit! -- see
-                 ;; gl-pixel-summary's docstring for why timing matters here.
-                 pixel-proof (gl-pixel-summary gl-canvas)
-                 page (:browser.session/page after)
-                 draw-ops (:browser/draw-ops page)
-                 quickjs-events (filter #(= :script/quickjs-run (:event %))
-                                        (:browser.session/history after))]
-             (js/console.log "browser.demo: real WebGL pixel readback"
-                              "(gl.readPixels, taken synchronously right"
-                              "after paint) ->" (pr-str pixel-proof))
-             (set! (.-__kotobaDemoPixelProof js/window) (clj->js pixel-proof))
+                         :html (sample-html worker-url fetch-url)})
+                 generation (:browser.session/page-generation after)
+                 after-document (get-in after [:browser.session/page :browser/document])]
              (js/console.log "browser.demo: document.title after real"
                               "<script>document.title = '...'</script> ->"
-                              (pr-str (:browser/title page)))
+                              (pr-str (get-in after [:browser.session/page :browser/title])))
+             (js/console.log "browser.demo: real Worker + fetch() proofs after page"
+                              "scripts -> worker:"
+                              (pr-str (element-text after-document "worker-proof"))
+                              "fetch:" (pr-str (element-text after-document "fetch-proof")))
+             ;; WebSocket's real echo genuinely has to travel over a real
+             ;; socket to our real local server and back -- unlike Worker/
+             ;; fetch (whose replies are already eagerly captured
+             ;; synchronously by the time their own <script> tag finishes,
+             ;; see browser.compat.quickjs-runner's namespace docstring), so
+             ;; this cannot be embedded as more <script> tags in the SAME
+             ;; synchronous run-page-scripts! reduce sample-html just went
+             ;; through above -- it needs a genuine, separate real-wall-
+             ;; clock-time boundary, driven directly here exactly the way
+             ;; quickjs_websocket_smoke_test.cljs does.
+             (let [opened (quickjs-runner/run-script!
+                           after
+                           {:script/type :classic
+                            :script/url "kotoba://browser-demo/index/ws-open.js"
+                            :script/generation generation
+                            :script/source (ws-script1-source ws-url)})]
+               (-> (wait-ms 500)
+                   (.then (fn [_]
+                            (quickjs-runner/run-script!
+                             opened
+                             {:script/type :classic
+                              :script/url "kotoba://browser-demo/index/ws-deliver.js"
+                              :script/generation generation
+                              :script/source ws-script2-source}))))))))
+        (.then
+         (fn [final-session]
+           (let [pixel-proof (gl-pixel-summary gl-canvas)
+                 page (:browser.session/page final-session)
+                 doc (:browser/document page)
+                 draw-ops (:browser/draw-ops page)
+                 quickjs-events (filter #(= :script/quickjs-run (:event %))
+                                        (:browser.session/history final-session))
+                 ws-proof (element-text doc "ws-proof")
+                 worker-proof (element-text doc "worker-proof")
+                 fetch-proof (element-text doc "fetch-proof")]
+             (js/console.log "browser.demo: real WebGL pixel readback"
+                              "(gl.readPixels, taken synchronously right"
+                              "after the final real paint) ->" (pr-str pixel-proof))
+             (set! (.-__kotobaDemoPixelProof js/window) (clj->js pixel-proof))
+             (js/console.log "browser.demo: document.title ->" (pr-str (:browser/title page)))
+             (js/console.log "browser.demo: #ws-proof ->" (pr-str ws-proof))
+             (js/console.log "browser.demo: #worker-proof ->" (pr-str worker-proof))
+             (js/console.log "browser.demo: #fetch-proof ->" (pr-str fetch-proof))
              (js/console.log "browser.demo: document ready-state ->"
                               (pr-str (get-in page [:browser/document :ready-state])))
              (js/console.log "browser.demo: real script/quickjs-run history events ->"
@@ -162,10 +402,13 @@
                               (text-draw-op-count draw-ops) "text ops -- the"
                               "wrapped paragraph should contribute more than"
                               "one) ->" (pr-str draw-ops))
-             (reset! demo-state {:host host :session after})
+             (reset! demo-state {:host host :session final-session})
              (when-let [status-el (.getElementById js/document "status")]
                (set! (.-textContent status-el)
                      (str "document.title -> " (:browser/title page)
+                          " | " ws-proof
+                          " | " worker-proof
+                          " | " fetch-proof
                           " | draw-ops: " (count draw-ops)))))))
         (.catch (fn [err]
                   (js/console.error "browser.demo: failed to start real QuickJS"
