@@ -18,22 +18,26 @@ navigation request
 
 Existing substrates are reused:
 
-- `kotoba-lang/wasm-ui`: current DOM ABI, virtual DOM, layout, WebGL/WebGPU hosts.
+- `kotoba-lang/dom-gpu`: current DOM ABI, virtual DOM, layout, WebGL/WebGPU hosts.
 - `kotoba-lang/html`: EDN/Hiccup to HTML emitter.
 - `kotoba-lang/css`: EDN to CSS emitter.
 - `kotoba-lang/kami-webgpu`: EDN render-IR and GPU execution.
 
 ## Naming
 
-`wasm-ui` is the current repo name, but the browser architecture treats it as the
-general kotoba UI substrate. The better long-term name is `kotoba-lang/ui`.
+`dom-gpu` (renamed from `wasm-ui`, see
+`90-docs/adr/2607041500-kotoba-lang-ui-family-rename.md` in
+`com-junkawasaki/root`) is the general kotoba UI substrate this repo consumes:
+DOM ABI, retained tree, layout, and render host contracts. The previously
+recorded plan to rename it to `kotoba-lang/ui` is superseded — that name
+already belongs to an unrelated, older repo (kami-engine's HUD widget
+package, itself renamed to `kami-engine-hud` in the same ADR).
 
-- `ui`: recommended canonical name for DOM ABI, retained tree, layout, and render
-  host contracts.
-- `gui`: reserve for higher-level desktop/native app shell concerns such as windows,
-  menus, clipboard, file pickers, IME, accessibility bridges, and OS integration.
+`gui` remains reserved for higher-level desktop/native app shell concerns
+such as windows, menus, clipboard, file pickers, IME, accessibility bridges,
+and OS integration — largely covered today by `kotoba-lang/shell`.
 
-Do not build a second DOM/layout stack in `browser`. Browser consumes `ui`.
+Do not build a second DOM/layout stack in `browser`. Browser consumes `dom-gpu`.
 
 ## R0
 

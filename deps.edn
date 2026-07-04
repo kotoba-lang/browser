@@ -1,5 +1,5 @@
 {:paths ["src"]
- :deps {io.github.kotoba-lang/wasm-ui {:local/root "../wasm-ui"}
+ :deps {io.github.kotoba-lang/dom-gpu {:local/root "../dom-gpu"}
         io.github.kotoba-lang/cssom {:local/root "../cssom"}
         io.github.kotoba-lang/htmldom {:local/root "../htmldom"}
         io.github.kotoba-lang/quickjs {:local/root "../quickjs"}}
