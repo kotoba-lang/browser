@@ -5,6 +5,8 @@
   "description": "kotoba-lang/browser QuickJS/QuickJS-NG WASM guest execution build pipeline.",
   "scripts": {
     "compile:node-test": "shadow-cljs compile node-test",
+    "compile:browser-demo": "shadow-cljs compile browser-demo",
+    "watch:browser-demo": "shadow-cljs watch browser-demo",
     "test:cljs": "npm run compile:node-test && node target/node-tests.js",
     "test:clj": "clojure -M:test",
     "check": "npm run test:clj && npm run test:cljs"
