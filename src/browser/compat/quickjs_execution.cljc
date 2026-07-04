@@ -31,21 +31,25 @@
   clipboard it needs more than a bare deref -- see that fn), the real,
   current per-WebSocket-connection inbound message snapshot (computed
   host-side by `websocket-snapshot`, by draining each open connection's
-  REAL socket -- see that fn), and the real per-Worker inbound message
+  REAL socket -- see that fn), the real per-Worker inbound message
   snapshot already TAKEN (consumed, not re-derived -- see `worker-snapshot`
-  below) from a previous script's real `:worker/post-message` replies, so
-  `quickjs-wasm`'s webapi shim can install all of them as VM globals before
-  running `payload`'s script (`:document/snapshot`, `:storage/snapshot`,
-  `:clipboard/snapshot`, `:geolocation/snapshot`, `:websocket/snapshot`,
-  `:worker/snapshot` respectively) and answer reads like
+  below) from a previous script's real `:worker/post-message` replies, and
+  the real per-fetch-request response snapshot already TAKEN (consumed,
+  not re-derived -- see `fetch-snapshot`/`take-fetch-snapshot` below) from
+  a previous script's real `fetch()` calls, so `quickjs-wasm`'s webapi shim
+  can install all of them as VM globals before running `payload`'s script
+  (`:document/snapshot`, `:storage/snapshot`, `:clipboard/snapshot`,
+  `:geolocation/snapshot`, `:websocket/snapshot`, `:worker/snapshot`,
+  `:fetch/snapshot` respectively) and answer reads like
   `localStorage.getItem` / `navigator.clipboard.readText` /
   `navigator.geolocation.getCurrentPosition` synchronously from real host
   state instead of always returning `null`/`''`/never calling back, and
-  deliver any real WebSocket/Worker messages that genuinely arrived since
-  the script that opened the connection/worker ran (see
-  `websocket-snapshot`/`worker-snapshot`) to that connection/worker's
-  `onmessage` before this script's own source runs."
-  [call payload capability-results document storage clipboard geolocation-snapshot websocket-snapshot worker-snapshot]
+  deliver any real WebSocket/Worker messages or `fetch()` responses that
+  genuinely arrived since the script that opened the connection/worker/
+  request ran (see `websocket-snapshot`/`worker-snapshot`/`fetch-snapshot`)
+  to that connection/worker's `onmessage` or that `fetch()` call's pending
+  `.then()` chain before this script's own source runs."
+  [call payload capability-results document storage clipboard geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot]
   (let [snapshot (cond-> (dom-bridge/document-snapshot document)
                    (:script/node-id payload)
                    (assoc :current-script (:script/node-id payload)))]
@@ -56,7 +60,8 @@
                        :clipboard/snapshot (some-> clipboard deref)
                        :geolocation/snapshot geolocation-snapshot
                        :websocket/snapshot websocket-snapshot
-                       :worker/snapshot worker-snapshot)
+                       :worker/snapshot worker-snapshot
+                       :fetch/snapshot fetch-snapshot)
                 capability-results)))
 
 (defn- take-capability-results
@@ -471,6 +476,80 @@
   Mirrors `take-capability-results`'s `[value state]` shape."
   [state]
   [(worker-snapshot state) (assoc state :worker/outbox {})])
+
+(defn- jsonable-error
+  "Convert a response's `:error` keyword (if any) into a plain, JSON-safe
+  string (`:cors/blocked` -> `\"cors/blocked\"`), mirroring the same
+  `(subs (str kw) 1)` idiom `geolocation-snapshot` already uses to strip a
+  keyword's leading `:` before it crosses into `clj->js`/`JSON.stringify`
+  territory (`quickjs-wasm/fetch-snapshot-source`). Every other field a
+  `:net/fetch` response carries (`:status` an int, `:headers`/`:body`
+  strings) is already JSON-safe as-is."
+  [error]
+  (when error
+    (subs (str error) 1)))
+
+(defn- fetch-response-snapshot-entry
+  [response]
+  (cond-> (select-keys response [:status :headers :body])
+    (:error response) (assoc :error (jsonable-error (:error response)))))
+
+(defn- fetch-snapshot
+  "Compute the REAL, current per-fetch-request response snapshot from
+  `state`'s persisted `:net/fetch-responses` (see
+  `browser.compat.quickjs-runner`'s `persistent-execution-keys`) -- the
+  `:net/fetch` analogue of `worker-snapshot`, and for the identical reason:
+  a real `:fetch-fn`'s HTTP call (`java.net.http.HttpClient` on the JVM) is
+  itself synchronous/blocking, so by the time `apply-capability` finishes
+  processing the `:net/fetch` request that produced it, the real response
+  already exists in full -- there is nothing left to wait for the way
+  WebSocket's genuinely unpredictable-arrival-time inbound bytes make
+  `websocket-snapshot` actively `:drain` a real socket. So, exactly like
+  `worker-snapshot`, this does not call back into any `-fn` op at all -- it
+  just reads (does not yet clear) whatever `apply-capability` already
+  queued into `:net/fetch-responses` since the last time this was taken.
+  See `take-fetch-snapshot` for the consuming half (mirrors
+  `take-worker-snapshot`): `evaluate!`/`load-module!` take (and clear) the
+  snapshot BEFORE invoking the engine for the NEXT script, so a `fetch()`
+  call a PREVIOUS script made is delivered into that call's still-pending
+  `.then()` chain (`quickjs-wasm`'s `__kotobaFetchPending` registry) at the
+  start of THIS script's eval -- deliberately deferred by one script-tag
+  boundary even though the response was computed earlier, mirroring
+  `websocket-snapshot`/`worker-snapshot`'s never-same-tick delivery
+  discipline (a real `fetch()` response is asynchronous even when
+  computationally instant).
+
+  Without a real `:fetch-fn` (the default -- e.g. every existing test/
+  caller that never supplies one), `:net/fetch-responses` never receives
+  anything in the first place (see `apply-capability`'s `:net/fetch` case),
+  so this returns `{}` -- a no-op against the webapi shim's delivery step,
+  keeping every pre-existing fabricated-mode caller/test unaffected: a
+  fabricated-mode `fetch()` call's returned thenable is registered but
+  simply never resolved/rejected, exactly as real, un-echoed WebSocket
+  sends and un-replied Worker messages are today.
+
+  Returns a JSON-safe map keyed by fetch request id string (the JS shim's
+  own `fetch-<n>` ids, threaded through as the request's `:request/id` --
+  see `apply-capability`'s `:net/fetch` case): `{<id> {:status <int>
+  :headers {...} :body <string> :error <string>}}` (`:error` only present
+  for a genuine network-level failure -- see `jsonable-error` -- an HTTP
+  error status like 404 has no `:error` key, only a non-2xx `:status`,
+  mirroring a real browser's `fetch()`, which only REJECTS on network
+  failure and still RESOLVES -- with `response.ok === false` -- for HTTP
+  error statuses)."
+  [state]
+  (reduce-kv (fn [snapshot id response]
+               (assoc snapshot id (fetch-response-snapshot-entry response)))
+             {}
+             (:net/fetch-responses state)))
+
+(defn- take-fetch-snapshot
+  "Consume (read, then clear) `state`'s `:net/fetch-responses` via
+  `fetch-snapshot` -- see that fn's docstring for why, unlike
+  `websocket-snapshot`, this one needs an explicit take/clear step at all.
+  Mirrors `take-worker-snapshot`'s `[value state]` shape."
+  [state]
+  [(fetch-snapshot state) (assoc state :net/fetch-responses {})])
 
 (defn- notification-permission-result
   [state request]
@@ -1199,11 +1278,25 @@
           result (if context
                    (net/fetch-resource (assoc context :fetch-fn fetch-fn) fetch-request)
                    (when fetch-fn (fetch-fn fetch-request)))
-          response (if context (:response result) result)]
+          response (if context (:response result) result)
+          request-id (:request/id request)]
       (cond-> state
         context (assoc :net/context (assoc context :store (:store result)))
         true (assoc :last-result response)
         (:error response) (assoc :last-error (:error response))
+        ;; Eager capture, deferred delivery -- mirrors worker-create-result's
+        ;; reasoning: a real :fetch-fn's HTTP call already blocked and
+        ;; returned by the time we're here, so the real response already
+        ;; exists in full. Stash it for fetch-snapshot to hand to the NEXT
+        ;; script tag's webapi shim install, which resolves/rejects the
+        ;; calling script's still-pending fetch() promise (see
+        ;; quickjs-wasm/webapi-shim-source's fetch delivery IIFE). Guarded
+        ;; on `response` so fabricated mode (no fetch-fn, no context ->
+        ;; response is nil) never touches :net/fetch-responses, and on
+        ;; request-id so a request with no id (never happens from the real
+        ;; JS shim, which always assigns one, but could from a hand-rolled
+        ;; :engine test double) has nowhere to be delivered to.
+        (and response request-id) (assoc-in [:net/fetch-responses request-id] response)
         true (record-result {:ok? (boolean (and response (not (:error response))))
                              :result response
                              :error (:error response)})))
@@ -1683,6 +1776,7 @@
   [state script]
   (let [[capability-results state] (take-capability-results state)
         [worker-snap state] (take-worker-snapshot state)
+        [fetch-snap state] (take-fetch-snapshot state)
         state (update state :binding binding/evaluate! script)
         response (normalize-response
                   (invoke-engine (:engine state)
@@ -1694,7 +1788,8 @@
                                                             (:clipboard state)
                                                             (geolocation-snapshot state)
                                                             (websocket-snapshot state)
-                                                            worker-snap)))
+                                                            worker-snap
+                                                            fetch-snap)))
         state (record-response-errors state response)
         state (apply-requests state (:requests response))]
     (-> state
@@ -1712,6 +1807,7 @@
     (let [payload {:specifier specifier :referrer referrer}
           [capability-results state] (take-capability-results state)
           [worker-snap state] (take-worker-snapshot state)
+          [fetch-snap state] (take-fetch-snapshot state)
           state (update state :binding binding/module-load! specifier referrer)
           response (normalize-response
                     (invoke-engine (:engine state)
@@ -1723,7 +1819,8 @@
                                                               (:clipboard state)
                                                               (geolocation-snapshot state)
                                                               (websocket-snapshot state)
-                                                              worker-snap)))
+                                                              worker-snap
+                                                              fetch-snap)))
           state (record-response-errors state response)
           state (apply-requests state (:requests response))]
       (-> state
@@ -1776,6 +1873,7 @@
    :worker/handles {}
    :worker/outbox {}
    :worker/messages []
+   :net/fetch-responses {}
    :broadcast/channels {}
    :broadcast/messages []
    :beacon/requests []
