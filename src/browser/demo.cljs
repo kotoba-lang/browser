@@ -88,7 +88,61 @@
    `#worker-proof`, `#fetch-proof`) via a real `document.getElementById(...)
    .textContent = ...` mutation -- painted for real by the same WebGL
    pipeline as everything else on the page -- alongside the original
-   `document.title` proof, which is left completely unchanged."
+   `document.title` proof, which is left completely unchanged.
+
+   ## Real generated content: ::before/::after, attr(), counter()
+
+   A later session on kotoba-lang/cssom added real ::before/::after
+   generated-content support to `cssom.core/apply-cascade`: a `content`
+   declaration resolves quoted-string literals, `attr(name)` references
+   (the real element's own real HTML attribute value), and `counter(name)`
+   references (a real running per-document counter, mutated by
+   `counter-reset`/`counter-increment` declarations walked in real
+   document tree order -- e.g. CSS-only sequential `<li>` numbering), each
+   individually proven via Clojure tests directly against cssom.core/
+   cssom.layout (test/cssom/core_test.clj, test/cssom/layout_test.clj in
+   that repo), but none were exercised by this demo's own `sample-html` at
+   all.
+
+   Wiring this up surfaced a real gap in THIS demo's own pipeline:
+   pseudo-elements need an actual CSS RULE with a selector (an inline
+   `style=\"...\"` attribute can only ever target the real element itself,
+   never a generated pseudo-element box), so a real `<style>` block is
+   required -- but `browser.session/load-html!` (the fn `init!` below
+   already calls) was silently DROPPING its own `:css` argument before
+   forwarding to `browser.core/load-html` (which already accepted and
+   cascaded one), and `htmldom.core` treats a literal `<style>` tag as an
+   ordinary non-rendered raw-text element (see `cssom.layout/
+   non-rendered-tags`) -- its text is never extracted back out and fed to
+   `cssom.core/parse-rules`. Concretely: writing a real `<style>` block
+   into this demo's HTML would, by itself, do nothing at all through this
+   demo's existing session/cascade path. Fixed `browser.session/load-html!`
+   to actually forward `:css` (see that fn's own docstring for the small,
+   additive, backward-compatible fix and how it was verified not to
+   regress the one existing test that happened to already pass a `:css`
+   string through it).
+
+   `sample-html`'s new `#generated-content-proof` section below embeds a
+   REAL `<style>` block (`generated-content-css`) -- syntactically the
+   exact same real CSS text any real browser would also honor when
+   rendering this exact page -- and `init!` ALSO passes that identical
+   string as `session/load-html!`'s (now real) `:css` argument, so the
+   SAME text drives the SAME cascade this demo's underlying engine
+   actually runs, not a second, divergent copy. `#status-badge`'s
+   `data-status=\"live\"` attribute is rendered through `[data-status]
+   ::before { content: attr(data-status) \": \"; }`; `#step-counter`'s
+   four real sibling `<li>` elements are numbered \"1. \"/\"2. \"/
+   \"3. \"/\"4. \" purely by `counter-reset`/`counter-increment` +
+   `content: counter(step) \". \";`.
+
+   Unlike the WS/Worker/fetch proofs above (each a real DOM mutation,
+   readable through `browser.dom-bridge`'s `:text-content`), a pseudo-
+   element's generated content is never a DOM node or mutation at all --
+   `cssom.core/apply-cascade` instead decorates the REAL element's own
+   `:attrs` with a synthetic `:pseudo/before`/`:pseudo/after` style map
+   (see that namespace's docstring), so this demo reads it back the same
+   real way cssom's own tests do: `browser.dom-bridge/node-snapshot`'s
+   `:attrs` key (not `:text-content`) -- see `pseudo-content` below."
   (:require [browser.compat.quickjs-runner :as quickjs-runner]
             [browser.dom-bridge :as dom-bridge]
             [browser.net.websocket :as ws]
@@ -103,6 +157,22 @@
 
 (def viewport-width 760)
 (def viewport-height 460)
+
+(def generated-content-css
+  "The real CSS text embedded, verbatim, in `sample-html`'s real `<style>`
+   block below -- see this namespace's docstring's \"Real generated
+   content\" section for why `init!` ALSO passes this exact same string as
+   `session/load-html!`'s `:css` argument: this repo's own
+   `browser.session/load-html!` -> `browser.core/load-html` pipeline does
+   not itself extract a `<style>` tag's text back out of parsed HTML (see
+   `browser.session/load-html!`'s own docstring), so the `<style>` tag
+   below is real, honest HTML (any real browser would also honor it
+   rendering this exact page) but needs this same text handed to the
+   cascade explicitly for THIS engine to actually apply it too."
+  (str "[data-status]::before { content: attr(data-status) \": \"; color: #7fce7f; font-size: 12 } "
+       "#step-counter { counter-reset: step } "
+       "#step-counter li { counter-increment: step } "
+       "#step-counter li::before { content: counter(step) \". \"; color: #e0a458; font-size: 12 }"))
 
 (defn sample-html
   "The demo page's real HTML, parameterized on `worker-url`/`fetch-url` (the
@@ -122,10 +192,20 @@
         `browser.compat.quickjs-runner`'s namespace docstring, \"Real Worker
         execution\"/\"Real fetch() response delivery\" sections) -- mirroring
         `quickjs_worker_smoke_test.cljs`/`quickjs_fetch_smoke_test.cljs`'s own
-        empty `script2`."
+        empty `script2`.
+
+   Also embeds a real `<style>` block (`generated-content-css`) and a
+   `#generated-content-proof` section exercising real ::before/::after
+   generated content (`content: attr(...)` on `#status-badge`, `content:
+   counter(...)` numbering `#step-counter`'s four real `<li>` siblings) --
+   see this namespace's own docstring, \"Real generated content\" section,
+   for why `init!` must ALSO pass `generated-content-css` as
+   `session/load-html!`'s `:css` argument for this to actually cascade."
   [worker-url fetch-url]
   (str
-   "<head><title>Kotoba Browser Demo (before script)</title></head>"
+   "<head><title>Kotoba Browser Demo (before script)</title>"
+   "<style>" generated-content-css "</style>"
+   "</head>"
    "<main style=\"display:flex; flex-direction:column; gap:12px; padding:16px; background:#0b0e14\">"
    "<h1 style=\"color:#e6ebf5; font-size:20\">Kotoba Browser -- real pipeline demo</h1>"
    "<section style=\"display:flex; flex-direction:row; gap:12px\">"
@@ -155,6 +235,21 @@
    "<div id=\"ws-proof\" style=\"background:#101820; border-width:2; border-color:#3aa1c9; padding:8; color:#bfe4f2\">WebSocket proof: pending real echo round-trip...</div>"
    "<div id=\"worker-proof\" style=\"background:#181022; border-width:2; border-color:#b06fe0; padding:8; color:#e6d3fa\">Worker proof: pending real second-QuickJS-context reply...</div>"
    "<div id=\"fetch-proof\" style=\"background:#101f10; border-width:2; border-color:#7fce7f; padding:8; color:#d3f2d3\">fetch() proof: pending real HTTP response...</div>"
+   "</section>"
+   "<section id=\"generated-content-proof\" style=\"display:flex; flex-direction:column; gap:8; margin-top:4\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "Real cssom ::before/::after generated content below -- content: "
+   "attr(...) and content: counter(...), resolved by the real &lt;style&gt; "
+   "block's cascade this session's cssom.core/apply-cascade added, not "
+   "mocked here."
+   "</p>"
+   "<div id=\"status-badge\" data-status=\"live\" class=\"status-badge\" style=\"background:#101f1a; border-width:2; border-color:#4fb3a6; padding:8; color:#d3f2d3\">Kotoba engine</div>"
+   "<ol id=\"step-counter\" style=\"display:flex; flex-direction:column; gap:4; background:#181818; border-width:2; border-color:#e0a458; padding:8\">"
+   "<li id=\"step-1\" class=\"step\" style=\"color:#e6ebf5; font-size:13\">Real HTML parsed into a real kotoba.wasm.dom document</li>"
+   "<li id=\"step-2\" class=\"step\" style=\"color:#e6ebf5; font-size:13\">Real cssom cascade resolves ::before/::after generated content</li>"
+   "<li id=\"step-3\" class=\"step\" style=\"color:#e6ebf5; font-size:13\">Real box-model layout produces real draw-ops</li>"
+   "<li id=\"step-4\" class=\"step\" style=\"color:#e6ebf5; font-size:13\">Real WebGL rasterization paints the canvas</li>"
+   "</ol>"
    "</section>"
    "<script>"
    "document.title = 'Kotoba Browser: real QuickJS + real cssom layout + real WebGL paint';"
@@ -299,6 +394,27 @@
            (dom-bridge/node-snapshot document)
            :text-content))
 
+(defn- pseudo-content
+  "Host-side read of a real element's real, cascade-resolved `::before`
+   generated content -- UNLIKE `element-text` above, a pseudo-element is
+   never a DOM node or mutation (see this namespace's docstring, \"Real
+   generated content\" section), so there is no `:text-content` to read for
+   it. `cssom.core/apply-cascade` instead decorates the real element's own
+   `:attrs` with a synthetic `:pseudo/before` style map holding the
+   resolved `content` string (already substituted: a literal stays
+   literal, `attr(name)` becomes that element's own real attribute value,
+   `counter(name)` becomes that counter's real running value at this exact
+   point in document tree order) -- read here via the SAME
+   `browser.dom-bridge/get-element-by-id`+`node-snapshot` `element-text`
+   uses, just its `:attrs` key instead of `:text-content`, exactly how
+   `cssom.core-test`/`cssom.layout-test` verify this feature directly."
+  [document id]
+  (some->> (dom-bridge/get-element-by-id document id)
+           (dom-bridge/node-snapshot document)
+           :attrs
+           :pseudo/before
+           :content))
+
 (defn ^:export init!
   []
   (let [gl-canvas (.getElementById js/document "kotoba-gl")
@@ -341,7 +457,8 @@
            (let [after (session/load-html!
                         ready-session
                         {:url "kotoba://browser-demo/index"
-                         :html (sample-html worker-url fetch-url)})
+                         :html (sample-html worker-url fetch-url)
+                         :css generated-content-css})
                  generation (:browser.session/page-generation after)
                  after-document (get-in after [:browser.session/page :browser/document])]
              (js/console.log "browser.demo: document.title after real"
@@ -351,6 +468,20 @@
                               "scripts -> worker:"
                               (pr-str (element-text after-document "worker-proof"))
                               "fetch:" (pr-str (element-text after-document "fetch-proof")))
+             ;; Generated content (::before/::after, attr(), counter()) is
+             ;; fully resolved synchronously as part of the real cascade
+             ;; `session/load-html!` just ran above -- unlike the WS/Worker/
+             ;; fetch proofs, it needs no wall-clock wait or second script
+             ;; turn at all, so it's read back and logged right here.
+             (js/console.log "browser.demo: real ::before attr() proof --"
+                              "#status-badge's real data-status attribute"
+                              "resolved by [data-status]::before ->"
+                              (pr-str (pseudo-content after-document "status-badge")))
+             (js/console.log "browser.demo: real ::before counter() proof --"
+                              "#step-counter's four real sibling <li>s"
+                              "numbered purely by CSS counters ->"
+                              (pr-str (mapv #(pseudo-content after-document %)
+                                            ["step-1" "step-2" "step-3" "step-4"])))
              ;; WebSocket's real echo genuinely has to travel over a real
              ;; socket to our real local server and back -- unlike Worker/
              ;; fetch (whose replies are already eagerly captured
@@ -385,7 +516,10 @@
                                         (:browser.session/history final-session))
                  ws-proof (element-text doc "ws-proof")
                  worker-proof (element-text doc "worker-proof")
-                 fetch-proof (element-text doc "fetch-proof")]
+                 fetch-proof (element-text doc "fetch-proof")
+                 status-badge-proof (pseudo-content doc "status-badge")
+                 step-proofs (mapv #(pseudo-content doc %)
+                                   ["step-1" "step-2" "step-3" "step-4"])]
              (js/console.log "browser.demo: real WebGL pixel readback"
                               "(gl.readPixels, taken synchronously right"
                               "after the final real paint) ->" (pr-str pixel-proof))
@@ -394,6 +528,9 @@
              (js/console.log "browser.demo: #ws-proof ->" (pr-str ws-proof))
              (js/console.log "browser.demo: #worker-proof ->" (pr-str worker-proof))
              (js/console.log "browser.demo: #fetch-proof ->" (pr-str fetch-proof))
+             (js/console.log "browser.demo: real ::before generated content ->"
+                              "#status-badge:" (pr-str status-badge-proof)
+                              "#step-counter lis:" (pr-str step-proofs))
              (js/console.log "browser.demo: document ready-state ->"
                               (pr-str (get-in page [:browser/document :ready-state])))
              (js/console.log "browser.demo: real script/quickjs-run history events ->"
@@ -401,8 +538,9 @@
              (js/console.log "browser.demo: real cssom.layout draw-ops ("
                               (count draw-ops) "ops,"
                               (text-draw-op-count draw-ops) "text ops -- the"
-                              "wrapped paragraph should contribute more than"
-                              "one) ->" (pr-str draw-ops))
+                              "wrapped paragraph and the generated-content"
+                              "proofs below should together contribute more"
+                              "than one) ->" (pr-str draw-ops))
              (reset! demo-state {:host host :session final-session})
              (when-let [status-el (.getElementById js/document "status")]
                (set! (.-textContent status-el)
@@ -410,6 +548,8 @@
                           " | " ws-proof
                           " | " worker-proof
                           " | " fetch-proof
+                          " | " status-badge-proof
+                          " | " (str/join "" step-proofs)
                           " | draw-ops: " (count draw-ops)))))))
         (.catch (fn [err]
                   (js/console.error "browser.demo: failed to start real QuickJS"

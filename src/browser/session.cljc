@@ -496,11 +496,39 @@
         (persist!))))
 
 (defn load-html!
-  [session {:keys [url html]}]
+  "Navigate the current session to a fresh, real page: `browser.core/
+   load-html` parses `:html` into a real `kotoba.wasm.dom` document,
+   resolves the real cssom cascade against `:css` (a plain CSS text
+   string -- see `cssom.core/parse-rules`), then this fn commits the
+   resulting page and runs its scripts.
+
+   `:css` is NOT auto-extracted from any `<style>` tag `:html` might
+   literally contain -- `browser.core/load-html` parses HTML and CSS as
+   two independent inputs (exactly like `cssom.core-test`/
+   `cssom.layout-test` exercise `parse-rules`+`apply-cascade` directly),
+   and `htmldom.core` treats a `<style>` element as an ordinary
+   non-rendered raw-text element (see `cssom.layout/non-rendered-tags`),
+   never feeding its text content back into `parse-rules` itself. A caller
+   that wants a real `<style>` block's own text to actually cascade (e.g.
+   `browser.demo/sample-html`'s ::before/::after/attr()/counter()
+   generated-content proof) must pass that SAME text as this `:css`
+   argument too.
+
+   Until this fn's own fix, `:css` was silently DROPPED here even though
+   `browser.core/load-html` already accepted and cascaded one -- only
+   `document-click-hit-test-prefers-higher-z-index-absolute-node` in
+   test/browser/session_test.clj ever passed a `:css` string through this
+   fn, and it kept passing anyway for a telling reason: it derives its
+   click coordinates from the ACTUAL rendered box of the higher-z-index
+   element rather than a hard-coded position, so it never actually
+   noticed its own declared `position`/`z-index` CSS was being silently
+   ignored either."
+  [session {:keys [url html css]}]
   (-> (commit-page!
        session
        (browser/load-html {:url url
                            :html html
+                           :css css
                            :viewport (:browser.session/viewport session)
                            :theme (:browser.session/theme session)}))
       (run-page-scripts!)))
