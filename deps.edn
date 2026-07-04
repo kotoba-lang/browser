@@ -10,4 +10,6 @@
          :main-opts ["-m" "cognitect.test-runner"]}
   :browser-use {:extra-deps {io.github.kotoba-lang/browser-use
                              {:local/root "../browser-use"}}}
-  :browser-use-test {:extra-paths ["test-browser-use"]}}}
+  :browser-use-test {:extra-paths ["test-browser-use"]}
+  :cljs {:extra-paths ["test-cljs"]
+         :extra-deps {thheller/shadow-cljs {:mvn/version "2.28.20"}}}}}
