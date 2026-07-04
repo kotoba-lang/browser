@@ -5,4 +5,14 @@
   {:target     :node-test
    :output-to  "target/node-tests.js"
    :ns-regexp  "-smoke-test$"
-   :autorun    true}}}
+   :autorun    true}
+
+  :browser-demo
+  {:target     :browser
+   :output-dir "public/js"
+   :asset-path "/js"
+   :modules    {:browser-demo {:init-fn browser.demo/init!}}
+   :release    {:compiler-options {:optimizations :advanced}}
+   :devtools   {:watch-dir "public"
+                :http-root "public"
+                :http-port 8702}}}}
