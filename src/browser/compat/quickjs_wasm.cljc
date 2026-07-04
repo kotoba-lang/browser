@@ -76,6 +76,23 @@
     (session-module-provider session)
     (assoc :module-provider (session-module-provider session))))
 
+(defn worker-fn
+  "Extract the real, engine-provided `:worker-fn` dispatch function (see
+  `worker-runtime-fn`) from an `engine` descriptor built by `engine!`/
+  `engine-from-session!`. Present only for a genuine `:cljs` quickjs-wasm
+  engine (it rides along in `:quickjs.engine/meta`, the same bucket
+  `execution/wasm-engine` already collects any non-core engine opts into)
+  -- absent, hence nil, for the JVM `:clj` stub engine (whose `engine!`
+  never sets it) and for any hand-rolled test-double `:engine` fn (a plain
+  fn, not a map, so `map?` alone already excludes it). Callers thread the
+  result into a session as `quickjs-execution/new-state`'s `:worker-fn`
+  (via `:browser.session/worker-fn`), exactly the way a caller constructs
+  and injects a real `browser.net.websocket/websocket-fn` as
+  `:websocket-fn` -- see `test-cljs/browser/compat/quickjs_worker_smoke_test.cljs`."
+  [engine]
+  (when (map? engine)
+    (get-in engine [:quickjs.engine/meta :worker-fn])))
+
 (defn resolve-module-source
   [modules module-provider module-name]
   (or (some #(get modules %) (module-candidates module-name))
@@ -128,6 +145,7 @@
       }
       globalThis.__kotobaSnapshot = globalThis.__kotobaSnapshot || { root: null, nodes: {} };
       globalThis.__kotobaWebSockets = globalThis.__kotobaWebSockets || {};
+      globalThis.__kotobaWorkers = globalThis.__kotobaWorkers || {};
       globalThis.__kotobaClientNodes = {};
       globalThis.__kotobaElementCache = {};
       globalThis.__kotobaMutationObservers = [];
@@ -2752,6 +2770,9 @@
         var workerId = 'worker-' + globalThis.__kotobaNextWorkerId;
         globalThis.__kotobaNextWorkerId = globalThis.__kotobaNextWorkerId + 1;
         this.__kotobaWorkerId = workerId;
+        this.onmessage = null;
+        this.onerror = null;
+        globalThis.__kotobaWorkers[workerId] = this;
         var request = {
           capability: 'worker/create',
           'worker/id': workerId,
@@ -2772,6 +2793,7 @@
           capability: 'worker/terminate',
           'worker/id': this.__kotobaWorkerId
         });
+        delete globalThis.__kotobaWorkers[this.__kotobaWorkerId];
       };
       globalThis.BroadcastChannel = function(name) {
         var channelId = 'broadcast-' + globalThis.__kotobaNextBroadcastId;
@@ -2886,7 +2908,71 @@
             }
           }
         }
+      })();
+      (function() {
+        var __kotobaWorkerSnap = globalThis.__kotobaWorkerSnapshot || {};
+        var __kotobaWorkerRegistry = globalThis.__kotobaWorkers || {};
+        var __kwoIds = Object.keys(__kotobaWorkerSnap);
+        for (var __kwoi = 0; __kwoi < __kwoIds.length; __kwoi++) {
+          var __kwoId = __kwoIds[__kwoi];
+          var __kwoEntry = __kotobaWorkerSnap[__kwoId];
+          var __kwoWorker = __kotobaWorkerRegistry[__kwoId];
+          if (!__kwoWorker || !__kwoEntry) continue;
+          var __kwoMessages = __kwoEntry.messages || [];
+          for (var __kwoj = 0; __kwoj < __kwoMessages.length; __kwoj++) {
+            if (typeof __kwoWorker.onmessage === 'function') {
+              __kwoWorker.onmessage({ data: __kwoMessages[__kwoj] });
+            }
+          }
+        }
       })();")
+
+(def worker-global-scope-source
+  "JS source installed into a Worker's OWN, real, separate QuickJS context
+  (see `create-worker-context`) instead of `webapi-shim-source` -- a
+  minimal `DedicatedWorkerGlobalScope` shim, NOT the full page/window
+  webapi shim: a real Worker's global scope has `self`/`postMessage`/
+  `onmessage` but no `document`/`window`/DOM at all, so this deliberately
+  does not reuse `webapi-shim-source`.
+
+  `self` is `globalThis` itself (the worker context's own global object,
+  matching a real Worker's `self === globalThis`). `postMessage` pushes
+  onto `__kotobaWorkerOutbox`, a plain queue local to THIS context --
+  there is no `__kotobaRequests` capability-request queue in a worker
+  context at all (a worker's `postMessage` is not a host capability
+  request the way `Worker.prototype.postMessage` on the MAIN thread is;
+  it is real data the host drains straight out of this context, see
+  `dump-worker-outbox`). `onmessage`/`onerror` are plain properties a
+  worker script assigns a real function to, exactly like a real
+  `DedicatedWorkerGlobalScope`. `__kotobaWorkerDeliver` is the host's
+  entry point (see `context-worker-deliver-result`) for invoking a REAL,
+  still-registered `onmessage` inside this real context, synchronously,
+  whenever the host decides to deliver a message that arrived via
+  `Worker.prototype.postMessage` on the main thread -- mirroring
+  `webapi-shim-source`'s `__kotobaRunTask` entry point for timers/
+  microtasks. `console.*` are no-op stubs (a worker's console output is
+  not captured/proven anywhere in this repo -- a documented, accepted
+  limitation, not a correctness claim)."
+  "globalThis.self = globalThis;
+      globalThis.__kotobaWorkerOutbox = [];
+      globalThis.onmessage = null;
+      globalThis.onerror = null;
+      globalThis.postMessage = function(data) {
+        globalThis.__kotobaWorkerOutbox.push(data);
+      };
+      globalThis.close = function() {};
+      globalThis.console = {
+        log: function() {},
+        info: function() {},
+        warn: function() {},
+        error: function() {},
+        debug: function() {}
+      };
+      globalThis.__kotobaWorkerDeliver = function(data) {
+        if (typeof globalThis.onmessage === 'function') {
+          globalThis.onmessage({ data: data });
+        }
+      };")
 
 #?(:cljs
    (defn- request-keyword [k]
@@ -3076,12 +3162,32 @@
           ";")))
 
 #?(:cljs
+   (defn- worker-snapshot-source
+     "JS source that installs the real, current per-Worker inbound-message
+     snapshot (`quickjs-execution/worker-snapshot`, computed host-side from
+     messages a worker's own real, separate QuickJS context genuinely
+     produced -- see that fn and `context-worker-deliver-result`) as
+     `globalThis.__kotobaWorkerSnapshot`, keyed by Worker id. Mirrors
+     `websocket-snapshot-source` exactly: installing this snapshot is not
+     enough on its own, the webapi shim below also actively DELIVERS it
+     (see the bottom of `webapi-shim-source`) -- for each id present here
+     with a still-registered live `Worker` instance
+     (`globalThis.__kotobaWorkers`, persisted across script tags within a
+     page the same way `globalThis.__kotobaWebSockets` already is), it
+     invokes that instance's `onmessage` SYNCHRONOUSLY once per buffered
+     message, in arrival order, before the script's own source runs."
+     [worker-snapshot]
+     (str "globalThis.__kotobaWorkerSnapshot = "
+          (js/JSON.stringify (clj->js (jsonable (or worker-snapshot {}))))
+          ";")))
+
+#?(:cljs
    (defn- dump-result
      ([module source url modules]
-      (dump-result module source url modules nil false nil nil nil nil nil))
+      (dump-result module source url modules nil false nil nil nil nil nil nil))
      ([module source url modules module-provider module?]
-      (dump-result module source url modules module-provider module? nil nil nil nil nil))
-     ([module source url modules module-provider module? document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot]
+      (dump-result module source url modules module-provider module? nil nil nil nil nil nil))
+     ([module source url modules module-provider module? document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot]
       (let [^js runtime (.newRuntime ^js module #js {:moduleLoader (module-loader modules module-provider)})
             ^js vm (.newContext runtime)
             _ (eval-dispose! vm (snapshot-source document-snapshot) "kotoba://quickjs/document-snapshot.js")
@@ -3089,6 +3195,7 @@
             _ (eval-dispose! vm (clipboard-snapshot-source clipboard-snapshot) "kotoba://quickjs/clipboard-snapshot.js")
             _ (eval-dispose! vm (geolocation-snapshot-source geolocation-snapshot) "kotoba://quickjs/geolocation-snapshot.js")
             _ (eval-dispose! vm (websocket-snapshot-source websocket-snapshot) "kotoba://quickjs/websocket-snapshot.js")
+            _ (eval-dispose! vm (worker-snapshot-source worker-snapshot) "kotoba://quickjs/worker-snapshot.js")
             _ (eval-dispose! vm webapi-shim-source "kotoba://quickjs/webapi-shim.js")
             response (eval-result vm source url module?)
             requests (dump-requests vm)]
@@ -3115,18 +3222,19 @@
            context))))
 
 #?(:cljs
-   (defn- install-document-shim! [vm document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot]
+   (defn- install-document-shim! [vm document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot]
      (eval-dispose! vm (snapshot-source document-snapshot) "kotoba://quickjs/document-snapshot.js")
      (eval-dispose! vm (storage-snapshot-source storage-snapshot) "kotoba://quickjs/storage-snapshot.js")
      (eval-dispose! vm (clipboard-snapshot-source clipboard-snapshot) "kotoba://quickjs/clipboard-snapshot.js")
      (eval-dispose! vm (geolocation-snapshot-source geolocation-snapshot) "kotoba://quickjs/geolocation-snapshot.js")
      (eval-dispose! vm (websocket-snapshot-source websocket-snapshot) "kotoba://quickjs/websocket-snapshot.js")
+     (eval-dispose! vm (worker-snapshot-source worker-snapshot) "kotoba://quickjs/worker-snapshot.js")
      (eval-dispose! vm webapi-shim-source "kotoba://quickjs/webapi-shim.js")))
 
 #?(:cljs
-   (defn- context-eval-result [context source url module? document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot]
+   (defn- context-eval-result [context source url module? document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot]
      (let [vm (:vm context)
-           _ (install-document-shim! vm document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot)
+           _ (install-document-shim! vm document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot)
            response (eval-result vm source url module?)
            requests (dump-requests vm)]
        (assoc response :requests requests))))
@@ -3158,6 +3266,157 @@
          (dispose-context! context))
        {:quickjs.wasm/context :not-created})))
 
+;; ---------------------------------------------------------------------
+;; Real Worker execution: a SECOND, independent QuickJS context, alongside
+;; the page's main context, genuinely running a fetched worker script.
+;;
+;; `create-context`/`ensure-context!` above already prove `module` (one
+;; compiled WASM module instance) can back any number of independent
+;; `{:runtime :vm}` pairs -- the page's main context is just the first,
+;; page-lifetime-cached one. A Worker is a SECOND such pair, created on
+;; `:worker/create` and kept alive (not disposed) across script tags until
+;; a real `:worker/terminate`, so the SAME worker context -- and its
+;; script's real, still-registered `self.onmessage` -- observes every
+;; `postMessage` sent to it over its whole lifetime, the same way the
+;; page's main context persists across `<script>` tags.
+;; ---------------------------------------------------------------------
+
+#?(:cljs
+   (defn- create-worker-context
+     "Create a real, independent QuickJS context (its own `newRuntime` +
+     `newContext` -- NOT the page's `context-atom`) sharing the already-
+     compiled `module`, install `worker-global-scope-source` (a minimal
+     `self`/`postMessage`/`onmessage` shim, NOT the page's DOM/window
+     `webapi-shim-source` -- a worker has no `document`/`window`), then
+     REALLY EVALUATE `source` (the worker script's real, host-fetched
+     bytes) in it. No `moduleLoader` is installed here: `importScripts`/
+     module workers are not supported by this first pass (see this
+     namespace's `worker-fn` docstring for the full list of accepted
+     limitations)."
+     [module source]
+     (let [^js runtime (.newRuntime ^js module)
+           ^js vm (.newContext runtime)]
+       (eval-dispose! vm worker-global-scope-source "kotoba://quickjs/worker-global-scope.js")
+       (let [init-result (eval-result vm source "kotoba://quickjs/worker.js" false)]
+         {:runtime runtime
+          :vm vm
+          :init-result init-result}))))
+
+#?(:cljs
+   (defn- dump-worker-outbox
+     "Pop every real value the worker context's script has genuinely queued
+     via `self.postMessage` so far (see `worker-global-scope-source`),
+     draining `globalThis.__kotobaWorkerOutbox` inside `vm` the same way
+     `dump-requests` drains the page context's `__kotobaRequests`."
+     [vm]
+     (let [^js result (.evalCode ^js vm
+                                  "(function(){ var m = globalThis.__kotobaWorkerOutbox || []; globalThis.__kotobaWorkerOutbox = []; return m; })()"
+                                  "kotoba://quickjs/worker-outbox.js")]
+       (try
+         (if (.-error result)
+           []
+           (vec (.dump ^js vm (.-value result))))
+         (finally
+           (when (.-error result)
+             (.dispose ^js (.-error result)))
+           (when (.-value result)
+             (.dispose ^js (.-value result))))))))
+
+#?(:cljs
+   (defn- context-worker-deliver-result
+     "Deliver `data` (a real message sent via `Worker.prototype.postMessage`
+     on the MAIN thread) into the worker's own real context by invoking
+     `__kotobaWorkerDeliver` -- this is a REAL, synchronous eval into a
+     SECOND, already-existing, currently-idle context (not a running
+     script's context -- see `worker-fn`'s docstring for why this can
+     happen immediately, unlike WebSocket's real inbound data), so if the
+     worker's script's `self.onmessage` calls `self.postMessage(...)`
+     synchronously in response (the common case), that reply is already
+     sitting in `__kotobaWorkerOutbox` by the time this returns. Mirrors
+     `context-run-task-result`'s `__kotobaRunTask(...)` invocation shape."
+     [context data]
+     (let [vm (:vm context)
+           source (str "__kotobaWorkerDeliver("
+                       (js/JSON.stringify (clj->js (jsonable data)))
+                       ");")]
+       (eval-dispose! vm source "kotoba://quickjs/worker-deliver.js")
+       (dump-worker-outbox vm))))
+
+#?(:cljs
+   (defn- worker-runtime-fn
+     "Return a single dispatch function -- the shape
+     `browser.compat.quickjs-execution`'s `:worker-fn` state key expects,
+     mirroring `browser.net.websocket/websocket-fn`'s `{:op ...}` shape --
+     backed by REAL, independent QuickJS contexts sharing `module` (the
+     same compiled WASM module instance the page's own context uses).
+     `worker-registry` is a page-lifetime atom (`{id context}`) this
+     engine's `:dispose` uses to clean up any worker contexts still alive
+     when the whole engine (and its page) goes away -- callers never see
+     or use it directly, they only ever get `context` back wrapped inside
+     an opaque `:handle` map.
+
+     `{:op :create :url ... :source ...}` -- `source` is the REAL script
+     text the host already fetched via `:fetch-fn`
+     (`quickjs-execution/worker-create-result`); creates a real second
+     context and evaluates `source` in it for real (see
+     `create-worker-context`), draining whatever the script's OWN
+     synchronous top-level execution already `postMessage`d (e.g. a worker
+     that posts a ready message immediately on load). Returns `{:ok? true
+     :handle {...} :messages [...]}` or, if the host eval itself throws
+     (as opposed to a normal in-VM JS exception, which this does not treat
+     as a creation failure -- see the docstring note below),
+     `{:ok? false :error :worker/eval-failed :error/message ...}`.
+
+     `{:op :post-message :handle ... :data ...}` -- delivers `data` into
+     the worker's real, still-registered `self.onmessage` SYNCHRONOUSLY
+     (see `context-worker-deliver-result`) and returns any real reply
+     messages the worker's script queued in response: `{:ok? true
+     :messages [...]}`.
+
+     `{:op :terminate :handle ...}` -- disposes the worker's real context
+     (`dispose-context!`) for real, freeing its WASM memory, and forgets
+     it in `worker-registry`. Returns `{:ok? true}`.
+
+     Known, accepted limitations of this first pass (documented, not
+     silently missing): a worker script that throws synchronously at its
+     own top level does not surface a real `worker.onerror` on the main
+     thread (the context is still created -- a real worker in this state
+     also 'exists but is broken'; this repo just does not yet propagate
+     the error). No `importScripts`/module workers. No real OS-thread
+     parallelism -- see this namespace's `engine!` docstring and
+     `quickjs-execution/worker-snapshot` for what IS genuinely real here."
+     [module worker-registry]
+     (fn real-worker-fn [{:keys [op] :as request}]
+       (case op
+         :create
+         (try
+           (let [context (create-worker-context module (:source request))
+                 id (str (count @worker-registry) "-" (random-uuid))]
+             (swap! worker-registry assoc id context)
+             {:ok? true
+              :handle {:worker/registry-id id :context context}
+              :messages (dump-worker-outbox (:vm context))})
+           (catch :default e
+             {:ok? false :error :worker/eval-failed :error/message (str (.-message e))}))
+
+         :post-message
+         (try
+           {:ok? true
+            :messages (context-worker-deliver-result (:context (:handle request)) (:data request))}
+           (catch :default e
+             {:ok? false :error :worker/post-message-failed :error/message (str (.-message e))}))
+
+         :terminate
+         (try
+           (let [{:worker/keys [registry-id] :keys [context]} (:handle request)]
+             (dispose-context! context)
+             (swap! worker-registry dissoc registry-id)
+             {:ok? true})
+           (catch :default e
+             {:ok? false :error :worker/terminate-failed :error/message (str (.-message e))}))
+
+         {:ok? false :error :worker/unsupported-op}))))
+
 #?(:cljs
    (defn module!
      []
@@ -3178,7 +3437,20 @@
      "Create a quickjs-execution compatible engine descriptor.
 
      Returns a Promise because the WASM module is initialized asynchronously.
-     Once resolved, `execution/evaluate!` can call the engine synchronously."
+     Once resolved, `execution/evaluate!` can call the engine synchronously.
+
+     The returned descriptor's `:quickjs.engine/meta` carries a real
+     `:worker-fn` (see `worker-runtime-fn`) -- a genuine capability of this
+     ENGINE (running more real JS inside the same sandboxed WASM engine has
+     no external side effect, unlike real network I/O), not something that
+     needs its own opt-in flag the way `:fetch-fn`/`:websocket-fn` do.
+     `:worker/create` only actually USES it once a real `:fetch-fn` is ALSO
+     injected into `quickjs-execution/new-state` as `:worker-fn` (see
+     `worker-fn` below and `quickjs-execution/worker-create-result`) -- a
+     hand-rolled test-double `:engine` fn (every existing JVM test, and any
+     `:cljs` test that never calls `worker-fn`) simply never has this key,
+     so `(worker-fn engine)` is nil and every existing fabricated-mode
+     caller/test is unaffected."
      ([] (engine! {}))
      ([{:keys [modules module-provider signal] :or {modules {}}}]
       (if (aborted? signal)
@@ -3187,7 +3459,8 @@
           (.then (fn [module]
                    (when (aborted? signal)
                      (throw (js/Error. "QuickJS WASM initialization aborted")))
-                   (let [context-atom (atom nil)]
+                   (let [context-atom (atom nil)
+                         worker-registry (atom {})]
                      (execution/wasm-engine
                       {:binary (binary-descriptor)
                        :manifest (runtime/component-manifest (runtime/quickjs))
@@ -3195,7 +3468,11 @@
                                                        :quickjs.wasm/modules (vec (keys modules))
                                                        :quickjs.wasm/module-provider? (boolean module-provider)
                                                        :quickjs.wasm/context :reusable)
+                       :worker-fn (worker-runtime-fn module worker-registry)
                        :dispose (fn [_engine]
+                                  (doseq [[_ context] @worker-registry]
+                                    (dispose-context! context))
+                                  (reset! worker-registry {})
                                   (dispose-context-atom! context-atom))
                        :invoke (fn [request]
                                  (let [context (ensure-context! context-atom module modules module-provider)]
@@ -3210,7 +3487,8 @@
                                                           (:storage/snapshot request)
                                                           (:clipboard/snapshot request)
                                                           (:geolocation/snapshot request)
-                                                          (:websocket/snapshot request))
+                                                          (:websocket/snapshot request)
+                                                          (:worker/snapshot request))
 
                                      :js/module-load
                                      (if-let [source (resolve-module-source modules module-provider (:specifier request))]
@@ -3222,7 +3500,8 @@
                                                             (:storage/snapshot request)
                                                             (:clipboard/snapshot request)
                                                             (:geolocation/snapshot request)
-                                                            (:websocket/snapshot request))
+                                                            (:websocket/snapshot request)
+                                                            (:worker/snapshot request))
                                        {:error :quickjs/module-not-found
                                         :specifier (:specifier request)
                                         :requests []})

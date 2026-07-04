@@ -28,20 +28,24 @@
   `browser.compat.quickjs-runner`'s `persistent-execution-keys`), the real,
   current geolocation permission-decision + position snapshot (already
   computed host-side by `geolocation-snapshot`, since unlike storage/
-  clipboard it needs more than a bare deref -- see that fn), and the real,
+  clipboard it needs more than a bare deref -- see that fn), the real,
   current per-WebSocket-connection inbound message snapshot (computed
   host-side by `websocket-snapshot`, by draining each open connection's
-  REAL socket -- see that fn), so `quickjs-wasm`'s webapi shim can install
-  all of them as VM globals before running `payload`'s script
-  (`:document/snapshot`, `:storage/snapshot`, `:clipboard/snapshot`,
-  `:geolocation/snapshot`, `:websocket/snapshot` respectively) and answer
-  reads like `localStorage.getItem` / `navigator.clipboard.readText` /
+  REAL socket -- see that fn), and the real per-Worker inbound message
+  snapshot already TAKEN (consumed, not re-derived -- see `worker-snapshot`
+  below) from a previous script's real `:worker/post-message` replies, so
+  `quickjs-wasm`'s webapi shim can install all of them as VM globals before
+  running `payload`'s script (`:document/snapshot`, `:storage/snapshot`,
+  `:clipboard/snapshot`, `:geolocation/snapshot`, `:websocket/snapshot`,
+  `:worker/snapshot` respectively) and answer reads like
+  `localStorage.getItem` / `navigator.clipboard.readText` /
   `navigator.geolocation.getCurrentPosition` synchronously from real host
   state instead of always returning `null`/`''`/never calling back, and
-  deliver any real WebSocket messages that genuinely arrived since the
-  script that opened the connection ran (see `websocket-snapshot`) to that
-  connection's `onmessage` before this script's own source runs."
-  [call payload capability-results document storage clipboard geolocation-snapshot websocket-snapshot]
+  deliver any real WebSocket/Worker messages that genuinely arrived since
+  the script that opened the connection/worker ran (see
+  `websocket-snapshot`/`worker-snapshot`) to that connection/worker's
+  `onmessage` before this script's own source runs."
+  [call payload capability-results document storage clipboard geolocation-snapshot websocket-snapshot worker-snapshot]
   (let [snapshot (cond-> (dom-bridge/document-snapshot document)
                    (:script/node-id payload)
                    (assoc :current-script (:script/node-id payload)))]
@@ -51,7 +55,8 @@
                        :storage/snapshot (some-> storage deref)
                        :clipboard/snapshot (some-> clipboard deref)
                        :geolocation/snapshot geolocation-snapshot
-                       :websocket/snapshot websocket-snapshot)
+                       :websocket/snapshot websocket-snapshot
+                       :worker/snapshot worker-snapshot)
                 capability-results)))
 
 (defn- take-capability-results
@@ -415,6 +420,58 @@
      (:websocket/connections state))
     {}))
 
+(defn- worker-snapshot
+  "Compute the REAL, current per-Worker inbound-message snapshot from
+  `state`'s persisted `:worker/outbox` (see
+  `browser.compat.quickjs-runner`'s `persistent-execution-keys`) -- the
+  Worker analogue of `websocket-snapshot`, but simpler: unlike a real
+  WebSocket's inbound bytes (whose arrival time on the wire is genuinely
+  unpredictable, so `websocket-snapshot` has to actively re-`:drain` the
+  real socket fresh before every script eval), a real Worker's reply is
+  ALREADY captured, in full, host-side, the instant `apply-capability`
+  processes the `:worker/post-message` request that produced it (same-
+  process, synchronous QuickJS-to-QuickJS delivery -- see
+  `worker-create-result`/the `:worker/post-message` case below and
+  `browser.compat.quickjs-wasm/worker-fn`'s docstring for exactly why
+  there is nothing left to wait for). So this fn does not call back into
+  any `:worker-fn` op at all -- it just reads (does not yet clear)
+  whatever `apply-capability` already queued into `:worker/outbox` since
+  the last time this was taken. See `take-worker-snapshot` for the
+  consuming half (mirrors `take-capability-results`): `evaluate!`/
+  `load-module!` take (and clear) the snapshot BEFORE invoking the engine
+  for the NEXT script, so a message a PREVIOUS script's `worker.postMessage`
+  produced a real reply for is delivered into that worker's still-
+  registered `worker.onmessage` at the start of THIS script's eval --
+  deliberately deferred by one script-tag boundary even though the reply
+  was computed earlier, mirroring `websocket-snapshot`'s
+  never-same-tick delivery discipline (a real `postMessage` is
+  asynchronous even when computationally instant -- see
+  `quickjs-execution/worker-create-result`'s docstring).
+
+  Without a `:worker-fn` (the default), `:worker/outbox` never receives
+  anything in the first place (see the `:worker/post-message` case below),
+  so this returns `{}` -- a no-op against the webapi shim's delivery step,
+  keeping every pre-existing fabricated-mode caller/test unaffected.
+
+  Returns a JSON-safe map keyed by Worker id string: `{<id> {:messages
+  [...]}}`."
+  [state]
+  (reduce-kv
+   (fn [snapshot id messages]
+     (if (seq messages)
+       (assoc snapshot id {:messages (vec messages)})
+       snapshot))
+   {}
+   (:worker/outbox state)))
+
+(defn- take-worker-snapshot
+  "Consume (read, then clear) `state`'s `:worker/outbox` via
+  `worker-snapshot` -- see that fn's docstring for why, unlike
+  `websocket-snapshot`, this one needs an explicit take/clear step at all.
+  Mirrors `take-capability-results`'s `[value state]` shape."
+  [state]
+  [(worker-snapshot state) (assoc state :worker/outbox {})])
+
 (defn- notification-permission-result
   [state request]
   (let [decision (permission-decision-for state request :notification/show)
@@ -600,19 +657,94 @@
        :profile/id nil
        :reason :permission/no-profile})))
 
+(defn- worker-connection-result
+  [request id]
+  (cond-> {:worker/id id
+           :url (:url request)
+           :state :running}
+    (:worker/options request)
+    (assoc :worker/options (:worker/options request))))
+
+(defn- fetch-response-ok?
+  [response]
+  (and (map? response)
+       (not (:error response))
+       (integer? (:status response))
+       (<= 200 (:status response) 299)))
+
 (defn- worker-create-result
+  "Decide + (if a real `:worker-fn` is injected -- see `new-state`) REALLY
+  fetch the worker's script source and REALLY evaluate it in a second, real
+  QuickJS context, for a `:worker/create` request.
+
+  Without a `:worker-fn` (the default -- e.g. every existing test that
+  never injects one, and every JVM caller since the JVM `quickjs-wasm`
+  engine has no real second context to offer -- see
+  `browser.compat.quickjs-wasm/engine!`), behaves exactly as before this
+  change: a bare, host-side-only fabrication, `:state :running` from the
+  moment the request is applied, no real script ever runs. This keeps
+  every pre-existing caller and test byte-for-byte unaffected -- the real
+  path below is opt-in.
+
+  With a real `:worker-fn` injected (see
+  `browser.compat.quickjs-wasm/worker-fn`), this REUSES the state's
+  existing `:fetch-fn` (the same real, opt-in HTTP capability
+  `:net/fetch` already uses -- a worker script is just another URL) to
+  really fetch `(:url request)`, then calls `:worker-fn` with `{:op
+  :create :url ... :source <real fetched body>}` to really evaluate it in
+  a brand-new, real, independent QuickJS context. A missing `:fetch-fn`, a
+  real fetch failure, or a real non-2xx status are all real, honest
+  failures here (`:worker/no-fetch-fn` / the fetch response's own `:error`
+  or `:worker/script-fetch-failed` / `:worker/create-failed`) -- once
+  `:worker-fn` opts a caller INTO real mode, this never silently falls
+  back to fabricating success the way `:websocket/connect` never does
+  either.
+
+  On success, the PUBLIC result map handed back to `apply-capability` is
+  identical in shape to the fabricated path (`:context/requests`/
+  `:capability/results` -- the audit-visible log -- never has to know or
+  care whether the worker behind it is real); the real, opaque worker
+  context handle is returned separately as `:handle` (kept OUT of the
+  audit log, mirroring `websocket-connect-result`'s `:handle`), and any
+  messages the worker script's OWN synchronous top-level execution already
+  `postMessage`d are returned as `:messages`, for `apply-capability` to
+  queue into `:worker/outbox` (see `worker-snapshot`)."
   [state request]
   (let [decision (worker-permission-decision state request)]
     (if (= :allow (:permission/decision decision))
-      (let [worker (cond-> {:worker/id (or (:worker/id request)
-                                           (str "worker-" (inc (count (:worker/instances state)))))
-                            :url (:url request)
-                            :state :running}
-                     (:worker/options request)
-                     (assoc :worker/options (:worker/options request)))]
-        {:ok? true
-         :result worker
-         :permission/decision decision})
+      (let [id (or (:worker/id request)
+                   (str "worker-" (inc (count (:worker/instances state)))))
+            worker-fn (:worker-fn state)
+            fetch-fn (:fetch-fn state)]
+        (cond
+          (not worker-fn)
+          {:ok? true
+           :result (worker-connection-result request id)
+           :permission/decision decision}
+
+          (not fetch-fn)
+          {:ok? false
+           :error :worker/no-fetch-fn
+           :permission/decision decision}
+
+          :else
+          (let [fetch-response (fetch-fn {:url (:url request) :method :get})]
+            (if (fetch-response-ok? fetch-response)
+              (let [real (worker-fn {:op :create
+                                      :url (:url request)
+                                      :source (:body fetch-response)})]
+                (if (:ok? real)
+                  {:ok? true
+                   :result (worker-connection-result request id)
+                   :handle (:handle real)
+                   :messages (:messages real)
+                   :permission/decision decision}
+                  {:ok? false
+                   :error (or (:error real) :worker/create-failed)
+                   :permission/decision decision}))
+              {:ok? false
+               :error (or (:error fetch-response) :worker/script-fetch-failed)
+               :permission/decision decision}))))
       {:ok? false
        :error (:reason decision)
        :permission/decision decision})))
@@ -1344,10 +1476,15 @@
     (let [create-result (worker-create-result state request)
           ok? (:ok? create-result)
           result (:result create-result)
+          handle (:handle create-result)
+          messages (:messages create-result)
           error (:error create-result)
           decision (:permission/decision create-result)]
       (cond-> state
         result (assoc-in [:worker/instances (:worker/id result)] result)
+        (and result handle) (assoc-in [:worker/handles (:worker/id result)] handle)
+        (and result (seq messages)) (update-in [:worker/outbox (:worker/id result)]
+                                                (fnil into []) messages)
         result (update :context/requests conj (assoc result :capability :worker/create))
         true (assoc :last-result result)
         error (assoc :last-error error)
@@ -1359,13 +1496,44 @@
 
     :worker/post-message
     (let [worker (get-in state [:worker/instances (:worker/id request)])
+          handle (get-in state [:worker/handles (:worker/id request)])
+          worker-fn (:worker-fn state)
           result {:worker/id (:worker/id request)
                   :message (:message request)}]
       (if worker
-        (-> state
-            (update :worker/messages conj result)
-            (assoc :last-result result)
-            (record-result {:ok? true :result result}))
+        ;; A real handle only exists in real (:worker-fn-injected) mode --
+        ;; see worker-create-result. In fabricated mode (the default), this
+        ;; deliver-result is always {:ok? true}, exactly the pre-existing
+        ;; behavior: no real second context to deliver into, no reply ever
+        ;; comes back.
+        (let [deliver-result (if (and worker-fn handle)
+                                (worker-fn {:op :post-message :handle handle
+                                            :data (:message request)})
+                                {:ok? true})]
+          (if (:ok? deliver-result)
+            (-> state
+                (update :worker/messages conj result)
+                ;; Real replies the worker's script synchronously
+                ;; `self.postMessage`d back are captured RIGHT NOW (see
+                ;; worker-create-result's docstring for why this is safe
+                ;; to do synchronously, unlike WebSocket's inbound data)
+                ;; but deliberately queued for delivery at the NEXT script
+                ;; tag's snapshot install, never into THIS request's own
+                ;; script (already finished running) -- see worker-snapshot.
+                ;; Guarded by `seq` so fabricated mode (no real handle, so
+                ;; `:messages` is always nil here) never even touches
+                ;; `:worker/outbox`, keeping it byte-for-byte absent/empty
+                ;; exactly as before this change.
+                (cond-> (seq (:messages deliver-result))
+                  (update-in [:worker/outbox (:worker/id request)]
+                             (fnil into []) (:messages deliver-result)))
+                (assoc :last-result result)
+                (record-result {:ok? true :result result}))
+            (-> state
+                (assoc :last-error (or (:error deliver-result) :worker/post-message-failed))
+                (record-result {:ok? false
+                                :result nil
+                                :error (or (:error deliver-result) :worker/post-message-failed)}))))
         (-> state
             (assoc :last-error :worker/not-running)
             (record-result {:ok? false
@@ -1374,14 +1542,19 @@
 
     :worker/terminate
     (let [worker (get-in state [:worker/instances (:worker/id request)])
+          handle (get-in state [:worker/handles (:worker/id request)])
+          worker-fn (:worker-fn state)
           result {:worker/id (:worker/id request)
                   :terminated? true}]
       (if worker
-        (-> state
-            (assoc-in [:worker/instances (:worker/id request) :state] :terminated)
-            (update :context/requests conj (assoc result :capability :worker/terminate))
-            (assoc :last-result result)
-            (record-result {:ok? true :result result}))
+        (do
+          (when (and worker-fn handle)
+            (worker-fn {:op :terminate :handle handle}))
+          (-> state
+              (assoc-in [:worker/instances (:worker/id request) :state] :terminated)
+              (update :context/requests conj (assoc result :capability :worker/terminate))
+              (assoc :last-result result)
+              (record-result {:ok? true :result result})))
         (-> state
             (assoc :last-error :worker/not-running)
             (record-result {:ok? false
@@ -1509,6 +1682,7 @@
 (defn evaluate!
   [state script]
   (let [[capability-results state] (take-capability-results state)
+        [worker-snap state] (take-worker-snapshot state)
         state (update state :binding binding/evaluate! script)
         response (normalize-response
                   (invoke-engine (:engine state)
@@ -1519,7 +1693,8 @@
                                                             (:storage state)
                                                             (:clipboard state)
                                                             (geolocation-snapshot state)
-                                                            (websocket-snapshot state))))
+                                                            (websocket-snapshot state)
+                                                            worker-snap)))
         state (record-response-errors state response)
         state (apply-requests state (:requests response))]
     (-> state
@@ -1536,6 +1711,7 @@
         (update :results conj (assoc cached :cached? true)))
     (let [payload {:specifier specifier :referrer referrer}
           [capability-results state] (take-capability-results state)
+          [worker-snap state] (take-worker-snapshot state)
           state (update state :binding binding/module-load! specifier referrer)
           response (normalize-response
                     (invoke-engine (:engine state)
@@ -1546,7 +1722,8 @@
                                                               (:storage state)
                                                               (:clipboard state)
                                                               (geolocation-snapshot state)
-                                                              (websocket-snapshot state))))
+                                                              (websocket-snapshot state)
+                                                              worker-snap)))
           state (record-response-errors state response)
           state (apply-requests state (:requests response))]
       (-> state
@@ -1574,13 +1751,14 @@
             tasks)))
 
 (defn new-state
-  [{:keys [binding document engine fetch-fn websocket-fn storage clipboard geolocation
+  [{:keys [binding document engine fetch-fn websocket-fn worker-fn storage clipboard geolocation
            crypto-random-bytes crypto-random-uuids audit net-context]}]
   {:binding binding
    :document document
    :engine engine
    :fetch-fn fetch-fn
    :websocket-fn websocket-fn
+   :worker-fn worker-fn
    :storage (or storage (atom {}))
    :clipboard (or clipboard (atom {:text ""}))
    :geolocation (or geolocation (atom {:latitude 0.0
@@ -1595,6 +1773,8 @@
    :crypto/random-bytes (vec (or crypto-random-bytes []))
    :crypto/random-uuids (vec (or crypto-random-uuids []))
    :worker/instances {}
+   :worker/handles {}
+   :worker/outbox {}
    :worker/messages []
    :broadcast/channels {}
    :broadcast/messages []

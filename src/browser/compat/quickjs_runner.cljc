@@ -145,6 +145,48 @@
   provable ACROSS two `<script>` tags, never claimed to be same-tick async
   delivery the way a real browser's event loop would do it.
 
+  ## Real Worker execution (auto-derived from the engine + `:fetch-fn`)
+
+  `:worker/create|post-message|terminate` are fabricated (host-side-only,
+  no real second JS engine) UNLESS TWO things are both true: the session
+  has a real `:fetch-fn` (the SAME opt-in `:browser.session/fetch-fn`
+  `:net/fetch` already uses -- a worker script is just another URL, see
+  `quickjs-execution/worker-create-result`), AND the engine is a genuine
+  `:cljs` `quickjs-wasm` engine (i.e. `(quickjs-wasm/worker-fn engine)` is
+  non-nil -- the JVM `:clj` engine stub has no real second-context
+  capability to offer at all, and any hand-rolled test-double `:engine` fn
+  never has one either). Unlike WebSocket, there is no separate
+  `:browser.session/worker-fn` opt-in flag REQUIRED for this: running more
+  real JS inside a second, real, sandboxed QuickJS context has no external
+  side effect the way opening a real socket does, so `run-script!` derives
+  it automatically from whatever engine is already running (a caller can
+  still override it via `:browser.session/worker-fn`, e.g. a test wanting
+  a fake worker-fn double). `:worker/create` really fetches the worker's
+  script over `:fetch-fn` and really evaluates it in a brand-new, real,
+  independent QuickJS context (`quickjs-wasm/create-worker-context`) --
+  NOT the page's own context -- with its own minimal `self`/`postMessage`/
+  `onmessage` global scope (`quickjs-wasm/worker-global-scope-source`),
+  kept alive across script tags (via `:worker/handles`, see
+  `persistent-execution-keys`) until a real `:worker/terminate` disposes it.
+
+  Message delivery is NOT symmetric with WebSocket, and genuinely does not
+  need to be: `:worker/post-message` (main thread -> worker) delivers
+  SYNCHRONOUSLY, immediately, as part of `apply-capability` processing that
+  very request -- not deferred to a later script tag -- because unlike a
+  real WebSocket's remote peer, the worker's context already exists,
+  in-process, completely idle (the sending script has already finished its
+  own synchronous pass by the time `apply-capability` runs), so evaluating
+  a message into it right then does not interrupt anything running. Any
+  reply the worker's script synchronously `self.postMessage`s back is
+  captured the same instant. What IS still deferred, exactly like
+  WebSocket: delivering that reply into the MAIN thread's
+  `worker.onmessage` waits for the NEXT script tag's snapshot install
+  (`quickjs-execution/worker-snapshot`) -- a real `postMessage` is
+  asynchronous even when computationally instant, so this repo never
+  claims same-tick delivery into the sending script's own `onmessage`
+  either, mirroring the WebSocket precedent's discipline even though
+  nothing here is genuinely waiting on real wall-clock time.
+
   ## Known limitations of this first pass
 
   - The QuickJS engine must already be started and `:ready`
@@ -197,11 +239,21 @@
   `browser.net.websocket`) hands back from `:websocket/connect` -- kept
   separate from the JSON-safe, audit-visible `:websocket/connections` map so
   a later script's `websocket-snapshot` (`quickjs-execution`) can still
-  drain a connection a PREVIOUS script tag opened. `:document` is
+  drain a connection a PREVIOUS script tag opened. `:worker/handles` is the
+  Worker analogue: the REAL, opaque per-worker QuickJS context objects a
+  real `:worker-fn` (see `browser.compat.quickjs-wasm/worker-fn`) hands back
+  from `:worker/create`. `:worker/outbox` carries real reply messages a
+  worker's own script already, genuinely produced (see
+  `quickjs-execution/worker-create-result`'s docstring for why this is
+  captured eagerly, unlike `:websocket/handles`) but not yet delivered into
+  the main thread's `worker.onmessage` -- persisting it here is what lets a
+  LATER script tag's `worker-snapshot` still deliver a message a PREVIOUS
+  script tag's `postMessage` already produced a reply for. `:document` is
   deliberately excluded -- it has its own, already-working threading path
   (re-read from `:browser.session/page` on every call)."
   [:storage :clipboard :geolocation
-   :dom/client-ids :websocket/connections :websocket/handles :worker/instances
+   :dom/client-ids :websocket/connections :websocket/handles
+   :worker/instances :worker/handles :worker/outbox
    :broadcast/channels :history/entries :history/index
    :global/listeners])
 
@@ -268,7 +320,10 @@
                            :engine engine
                            :audit (:browser.session/audit session)
                            :net-context (session/net-context session)
-                           :websocket-fn (:browser.session/websocket-fn session)})
+                           :websocket-fn (:browser.session/websocket-fn session)
+                           :worker-fn (or (:browser.session/worker-fn session)
+                                          (quickjs-wasm/worker-fn engine))
+                           :fetch-fn (:browser.session/fetch-fn session)})
                          persisted)
             result (execution/evaluate! state (script-payload script))]
         (-> session
