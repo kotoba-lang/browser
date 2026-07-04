@@ -40,24 +40,53 @@
   `browser.dom-bridge` document and lands in the committed page's
   `:browser/title` -- not a mock, not an inlined stub.
 
+  ## Runtime state threading across a page's scripts
+
+  Every script / lifecycle-event invocation still builds a fresh
+  `quickjs-execution/new-state` map, but it is no longer *empty* apart from
+  `:document`: `run-script!` now rehydrates the page-lifetime slice of that
+  state (see `persistent-execution-keys`) from whatever the *previous*
+  script/lifecycle invocation within the same page load left behind --
+  `:storage` (the script-local `storage/get|put|delete` capability; distinct
+  from `browser.session`'s persistent script-source cache), `:clipboard`,
+  `:geolocation`, `:dom/client-ids`, `:websocket/connections`,
+  `:worker/instances`, `:broadcast/channels`, and `:history/entries` /
+  `:history/index`, `:global/listeners`. A script that calls
+  `localStorage.setItem(...)` (or opens a WebSocket, or registers a
+  `document.addEventListener`) in one `<script>` tag is visible to a later
+  `<script>` tag and to the `DOMContentLoaded`/`load` lifecycle dispatch
+  within the same page load.
+
+  The persisted slice is stored on the session under
+  `:browser.session/quickjs-runtime-state`, tagged with the
+  `:browser.session/page-generation` it belongs to (mirroring how
+  `browser.script-engine`'s pending-start tracking tags its handles with a
+  generation to detect staleness -- see `pending-matches?` there). `run-script!`
+  only reuses the persisted state when its generation still matches the
+  current page generation; `browser.session/commit-page!` bumps the
+  generation on every real navigation/reload, which makes the previous
+  generation's entry unreachable and the next script starts from a fresh
+  `quickjs-execution/new-state` again. The `:document` key is deliberately
+  NOT part of the persisted slice -- it keeps using its existing, separate
+  threading path (each call re-reads `:browser.session/page :browser/document`,
+  which already reflects every prior script's committed mutations).
+
+  Note this only threads the *host-side* (`quickjs-execution`) view of that
+  state. It does not change what's JS-visible inside the QuickJS VM itself:
+  as of this writing `browser.compat.quickjs-wasm`'s webapi shim never feeds
+  capability *answers* back into the VM (e.g. `localStorage.getItem` always
+  returns `null` to JS, regardless of what's stored host-side) -- only
+  `document.*` reads are wired to see real state, via the document snapshot
+  reinstalled before each script. Real, observable proof of the host-side
+  threading therefore has to inspect the session's committed
+  `:capability/results` (now included on the `:script/quickjs-run` history
+  event) rather than a JS-visible return value; see
+  `test-cljs/browser/compat/quickjs_runtime_state_threading_smoke_test.cljs`.
+  Making capability answers round-trip back into the VM is separate,
+  follow-up work in `quickjs-wasm`/its webapi shim, not this namespace.
+
   ## Known limitations of this first pass
 
-  - Every script / lifecycle-event invocation builds a *fresh*
-    `quickjs-execution/new-state`. The one piece of state that IS threaded
-    across scripts within a page load is the authoritative `:document`
-    (each call re-reads `:browser.session/page :browser/document`, which
-    already reflects every prior script's committed mutations). Everything
-    else `quickjs-execution/new-state` models as page-lifetime state --
-    `:storage` (the script-local `storage/get|put|delete` capability; distinct
-    from `browser.session`'s persistent script-source cache),
-    `:dom/client-ids`, `:websocket/connections`, `:worker/instances`,
-    `:broadcast/channels`, `:history/*`, `:clipboard`, `:geolocation`,
-    `:global/listeners` -- resets on every `<script>` tag and on every
-    lifecycle dispatch. A script that opens a WebSocket (or registers a
-    `document.addEventListener`) in one `<script>` tag will not see it survive
-    into a second `<script>` tag or into the `DOMContentLoaded` dispatch yet.
-    Threading full runtime state across one page's script tags (keyed by page
-    generation, reset on navigation) is follow-up work.
   - The QuickJS engine must already be started and `:ready`
     (i.e. the promise returned by `browser.session/ensure-script-engine!` has
     resolved) before `run-page-scripts!` runs. Starting the engine is
@@ -97,6 +126,46 @@
    :script/url (:script/url script)
    :script/lifecycle-event (:script/lifecycle-event script)})
 
+(def persistent-execution-keys
+  "`quickjs-execution/new-state` keys that model page-lifetime runtime state
+  (per this namespace's docstring): the script-local storage/clipboard/
+  geolocation capabilities, plus the host-side capability registries a script
+  can build up over a page load (open DOM client-id mappings, WebSocket/
+  Worker/BroadcastChannel handles, the session-history navigation stack, and
+  registered global event listeners). `:document` is deliberately excluded --
+  it has its own, already-working threading path (re-read from
+  `:browser.session/page` on every call)."
+  [:storage :clipboard :geolocation
+   :dom/client-ids :websocket/connections :worker/instances
+   :broadcast/channels :history/entries :history/index
+   :global/listeners])
+
+(defn- script-generation
+  [session script]
+  (:script/generation script (:browser.session/page-generation session)))
+
+(defn- runtime-state-for-generation
+  "Previously persisted page-lifetime `quickjs-execution` state for
+  `generation`, or nil if there isn't any yet, or what's persisted belongs to
+  a stale generation (i.e. a navigation happened since)."
+  [session generation]
+  (let [entry (:browser.session/quickjs-runtime-state session)]
+    (when (= generation (:quickjs-runtime/generation entry))
+      (:quickjs-runtime/state entry))))
+
+(defn- remember-runtime-state!
+  "Persist the page-lifetime slice of `state` (`persistent-execution-keys`)
+  on `session`, tagged with `generation`. A later call at the same
+  `generation` (the next script tag or lifecycle dispatch within the same
+  page load) picks this back up via `runtime-state-for-generation`; a
+  navigation bumps `:browser.session/page-generation`, which makes this
+  entry's generation stale and therefore unreachable -- the next script then
+  starts from a fresh `quickjs-execution/new-state`."
+  [session generation state]
+  (assoc session :browser.session/quickjs-runtime-state
+         {:quickjs-runtime/generation generation
+          :quickjs-runtime/state (select-keys state persistent-execution-keys)}))
+
 (defn run-script!
   "Real `:browser.session/script-runner`.
 
@@ -109,6 +178,14 @@
   evaluations show up in the same append-only ledger as page commits and
   permission decisions.
 
+  Rehydrates the page-lifetime slice of `quickjs-execution` runtime state
+  (`persistent-execution-keys`) left behind by the previous script/lifecycle
+  invocation at the same page generation, and persists the (possibly
+  updated) slice back via `remember-runtime-state!` so the *next* invocation
+  sees it too -- see the namespace docstring for the full picture and its
+  documented gap (JS-visible capability answers still don't round-trip into
+  the QuickJS VM itself).
+
   Returns `session` unchanged (plus a `:script/skipped` history entry) if the
   engine isn't ready yet -- see the namespace docstring."
   [session script]
@@ -117,23 +194,28 @@
       (update session :browser.session/history conj
               (skip-event script :script/engine-not-ready))
       (let [document (get-in session [:browser.session/page :browser/document])
-            state (execution/new-state
-                   {:binding (binding/empty-binding (script-adapter session))
-                    :document document
-                    :engine engine
-                    :audit (:browser.session/audit session)
-                    :net-context (session/net-context session)})
+            generation (script-generation session script)
+            persisted (runtime-state-for-generation session generation)
+            state (merge (execution/new-state
+                          {:binding (binding/empty-binding (script-adapter session))
+                           :document document
+                           :engine engine
+                           :audit (:browser.session/audit session)
+                           :net-context (session/net-context session)})
+                         persisted)
             result (execution/evaluate! state (script-payload script))]
         (-> session
             (cond-> (:audit result) (assoc :browser.session/audit (:audit result)))
             (session/commit-script-state! result)
+            (remember-runtime-state! generation result)
             (update :browser.session/history conj
                     {:event :script/quickjs-run
                      :script/type (:script/type script)
                      :script/url (:script/url script)
                      :script/lifecycle-event (:script/lifecycle-event script)
                      :result (:result result)
-                     :error (:last-error result)}))))))
+                     :error (:last-error result)
+                     :capability/results (:capability/results result)}))))))
 
 (defn quickjs-session-opts
   "Merge the `browser.session/new-session` options needed to run page scripts
