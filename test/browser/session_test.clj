@@ -604,7 +604,9 @@
         recorded (host/recorded h)
         link-event (first (filter #(= :link/navigation (:event %))
                                   (:browser.session/history result)))]
-    (is (= [{:url "https://app.example/next" :method :get}]
+    ;; No explicit referrerpolicy + same-origin destination -> full page-url referer.
+    (is (= [{:headers {"referer" "https://app.example/docs/"}
+             :url "https://app.example/next" :method :get}]
            @calls))
     (is (= "Next page"
            (-> result :browser.session/page :browser/document kotoba.wasm.dom/text-content)))
@@ -615,7 +617,8 @@
             :href "/next"
             :target "_self"
             :link/id (:node/id (get-in result [:browser.session/document-input-result]))
-            :node/id (:node/id (get-in result [:browser.session/document-input-result]))}
+            :node/id (:node/id (get-in result [:browser.session/document-input-result]))
+            :referrer "https://app.example/docs/"}
            link-event))
     (is (= [:page/commit :document/input :link/navigation :page/commit]
            (mapv :event (:browser.session/history result))))))
@@ -681,6 +684,94 @@
             :node/id (:node/id (get-in result [:browser.session/document-input-result]))}
            link-event))))
 
+(deftest document-link-cross-origin-no-policy-sends-origin-only-referer
+  ;; Proves the request-referrer / link-request-referrer fix: with no explicit
+  ;; referrerpolicy, a cross-origin destination gets the real
+  ;; strict-origin-when-cross-origin default (source origin only), not the
+  ;; full page-url the pre-fix code leaked to any destination.
+  (let [h (host/recording-host)
+        calls (atom [])
+        loaded (-> (session/new-session
+                    {:host h
+                     :fetch-fn (fn [{:keys [url] :as req}]
+                                 (swap! calls conj req)
+                                 (case url
+                                   "https://other.example/next"
+                                   {:status 200 :body "<main>Next page</main>"}
+                                   {:status 404 :body "<main>Missing</main>"}))})
+                   (session/load-html! {:url "https://app.example/docs/index.html"
+                                        :html "<main><a id=\"next\" href=\"https://other.example/next\">Next</a></main>"}))
+        result (session/apply-document-input-event! loaded {:event/type :pointer/click
+                                                           :node/selector "#next"})
+        link-event (first (filter #(= :link/navigation (:event %))
+                                  (:browser.session/history result)))]
+    (is (= [{:headers {"referer" "https://app.example"}
+             :url "https://other.example/next"
+             :method :get}]
+           @calls))
+    (is (= {:event :link/navigation
+            :url "https://other.example/next"
+            :href "https://other.example/next"
+            :target "_self"
+            :referrer "https://app.example"
+            :link/id (:node/id (get-in result [:browser.session/document-input-result]))
+            :node/id (:node/id (get-in result [:browser.session/document-input-result]))}
+           link-event))))
+
+(deftest document-link-same-origin-no-policy-sends-full-referer
+  ;; Confirms the fix did not break the existing, correct same-origin
+  ;; default: a same-origin destination still gets the full page-url.
+  (let [h (host/recording-host)
+        calls (atom [])
+        loaded (-> (session/new-session
+                    {:host h
+                     :fetch-fn (fn [{:keys [url] :as req}]
+                                 (swap! calls conj req)
+                                 (case url
+                                   "https://app.example/next"
+                                   {:status 200 :body "<main>Next page</main>"}
+                                   {:status 404 :body "<main>Missing</main>"}))})
+                   (session/load-html! {:url "https://app.example/docs/index.html"
+                                        :html "<main><a id=\"next\" href=\"/next\">Next</a></main>"}))
+        result (session/apply-document-input-event! loaded {:event/type :pointer/click
+                                                           :node/selector "#next"})]
+    (is (= [{:headers {"referer" "https://app.example/docs/index.html"}
+             :url "https://app.example/next"
+             :method :get}]
+           @calls))))
+
+(deftest document-link-https-to-http-downgrade-suppresses-referer
+  ;; Proves downgrade suppression: even though the destination is the same
+  ;; host, an HTTPS page linking to a plain-HTTP destination must send no
+  ;; referrer at all -- checked before, and regardless of, the
+  ;; same-origin/cross-origin split.
+  (let [h (host/recording-host)
+        calls (atom [])
+        loaded (-> (session/new-session
+                    {:host h
+                     :fetch-fn (fn [{:keys [url] :as req}]
+                                 (swap! calls conj req)
+                                 (case url
+                                   "http://app.example/other"
+                                   {:status 200 :body "<main>Other page</main>"}
+                                   {:status 404 :body "<main>Missing</main>"}))})
+                   (session/load-html! {:url "https://app.example/"
+                                        :html "<main><a id=\"next\" href=\"http://app.example/other\">Next</a></main>"}))
+        result (session/apply-document-input-event! loaded {:event/type :pointer/click
+                                                           :node/selector "#next"})
+        link-event (first (filter #(= :link/navigation (:event %))
+                                  (:browser.session/history result)))]
+    (is (= [{:url "http://app.example/other" :method :get}]
+           @calls))
+    (is (= {:event :link/navigation
+            :url "http://app.example/other"
+            :href "http://app.example/other"
+            :target "_self"
+            :link/id (:node/id (get-in result [:browser.session/document-input-result]))
+            :node/id (:node/id (get-in result [:browser.session/document-input-result]))}
+           link-event)
+        "no :referrer key at all -- referrer computed to nil and rel/referrer-policy both absent")))
+
 (deftest document-blank-target-link-records-context-request-without-current-navigation
   (let [h (host/recording-host)
         calls (atom [])
@@ -737,6 +828,96 @@
             :target "report"
             :rel "noreferrer opener"
             :referrer-policy "origin"
+            :referrer nil
+            :opener? false
+            :link/id (:node/id (get-in result [:browser.session/document-input-result]))
+            :node/id (:node/id (get-in result [:browser.session/document-input-result]))}
+           context-event))))
+
+(deftest document-blank-target-link-cross-origin-no-policy-sends-origin-only-referer
+  ;; Proves the link-context-request-event fix: with no explicit
+  ;; referrerpolicy, a target="_blank" link to a cross-origin destination
+  ;; gets origin-only referer, matching the same strict-origin-when-cross-origin
+  ;; default as same-page navigation (link-request-referrer).
+  (let [h (host/recording-host)
+        calls (atom [])
+        loaded (-> (session/new-session
+                    {:host h
+                     :fetch-fn (fn [req]
+                                 (swap! calls conj req)
+                                 {:status 200 :body "<main>New context?</main>"})})
+                   (session/load-html! {:url "https://app.example/docs/"
+                                        :html "<main><a id=\"next\" href=\"https://other.example/next\" target=\"_blank\">Next</a></main>"}))
+        result (session/apply-document-input-event! loaded {:event/type :pointer/click
+                                                           :node/selector "#next"})
+        context-event (last (:browser.session/history result))]
+    (is (= [] @calls))
+    (is (= {:event :link/context-request
+            :url "https://other.example/next"
+            :href "https://other.example/next"
+            :target "_blank"
+            :rel nil
+            :referrer-policy nil
+            :referrer "https://app.example"
+            :opener? false
+            :link/id (:node/id (get-in result [:browser.session/document-input-result]))
+            :node/id (:node/id (get-in result [:browser.session/document-input-result]))}
+           context-event))))
+
+(deftest document-blank-target-link-https-to-http-downgrade-suppresses-referer
+  ;; Proves downgrade suppression on the context-request path too: same host,
+  ;; but HTTPS -> HTTP, so no referrer at all.
+  (let [h (host/recording-host)
+        calls (atom [])
+        loaded (-> (session/new-session
+                    {:host h
+                     :fetch-fn (fn [req]
+                                 (swap! calls conj req)
+                                 {:status 200 :body "<main>New context?</main>"})})
+                   (session/load-html! {:url "https://app.example/"
+                                        :html "<main><a id=\"next\" href=\"http://app.example/other\" target=\"_blank\">Next</a></main>"}))
+        result (session/apply-document-input-event! loaded {:event/type :pointer/click
+                                                           :node/selector "#next"})
+        context-event (last (:browser.session/history result))]
+    (is (= [] @calls))
+    (is (= {:event :link/context-request
+            :url "http://app.example/other"
+            :href "http://app.example/other"
+            :target "_blank"
+            :rel nil
+            :referrer-policy nil
+            :referrer nil
+            :opener? false
+            :link/id (:node/id (get-in result [:browser.session/document-input-result]))
+            :node/id (:node/id (get-in result [:browser.session/document-input-result]))}
+           context-event))))
+
+(deftest document-blank-target-link-explicit-no-referrer-policy-without-rel-suppresses-referer
+  ;; Proves the core link-context-request-event bug fix: before the fix, this
+  ;; function only ever checked rel="noreferrer" and otherwise unconditionally
+  ;; sent the full page-url, silently ignoring an explicit
+  ;; referrerpolicy="no-referrer" attribute whenever rel="noreferrer" was not
+  ;; also present. A target="_blank" link with an explicit no-referrer policy
+  ;; (but no rel="noreferrer") must now suppress the referrer.
+  (let [h (host/recording-host)
+        calls (atom [])
+        loaded (-> (session/new-session
+                    {:host h
+                     :fetch-fn (fn [req]
+                                 (swap! calls conj req)
+                                 {:status 200 :body "<main>New context?</main>"})})
+                   (session/load-html! {:url "https://app.example/docs/"
+                                        :html "<main><a id=\"next\" href=\"/next\" target=\"_blank\" referrerpolicy=\"no-referrer\">Next</a></main>"}))
+        result (session/apply-document-input-event! loaded {:event/type :pointer/click
+                                                           :node/selector "#next"})
+        context-event (last (:browser.session/history result))]
+    (is (= [] @calls))
+    (is (= {:event :link/context-request
+            :url "https://app.example/next"
+            :href "/next"
+            :target "_blank"
+            :rel nil
+            :referrer-policy "no-referrer"
             :referrer nil
             :opener? false
             :link/id (:node/id (get-in result [:browser.session/document-input-result]))
@@ -822,7 +1003,9 @@
                                                            :node/selector "#next"
                                                            :key "Enter"})
         recorded (host/recorded h)]
-    (is (= [{:url "https://app.example/next" :method :get}]
+    ;; No explicit referrerpolicy + same-origin destination -> full page-url referer.
+    (is (= [{:headers {"referer" "https://app.example/docs/index.html"}
+             :url "https://app.example/next" :method :get}]
            @calls))
     (is (= "Next page"
            (-> result :browser.session/page :browser/document kotoba.wasm.dom/text-content)))
@@ -1100,7 +1283,11 @@
                                                               :y (+ (:y go-op) 2)})
         expected-url "https://app.example/results?q=hello+world&amount=7&volume=4&ok=on&action=find"
         recorded (host/recorded h)]
-    (is (= [{:url expected-url :method :get}]
+    ;; No explicit referrerpolicy + same-origin destination -> the real
+    ;; strict-origin-when-cross-origin default sends the full page-url as
+    ;; the referer (see request-referrer in session.cljc).
+    (is (= [{:headers {"referer" "https://app.example/search/index.html"}
+             :url expected-url :method :get}]
            @calls))
     (is (= expected-url (get-in submitted [:browser.session/page :browser/url])))
     (is (= expected-url
@@ -1161,6 +1348,67 @@
                         {:name "action" :value "find" :node/id go}]}
            nav-event))))
 
+(deftest get-form-cross-origin-no-policy-sends-origin-only-referer
+  ;; Proves the form-submit-request / request-referrer fix on the GET
+  ;; (navigate!) path: with no explicit referrerpolicy, a cross-origin form
+  ;; action gets origin-only referer, not the full page-url.
+  (let [h (host/recording-host)
+        calls (atom [])
+        loaded (-> (session/new-session
+                    {:host h
+                     :fetch-fn (fn [{:keys [url] :as req}]
+                                 (swap! calls conj req)
+                                 {:status 200
+                                  :body (str "<main><p>" url "</p></main>")})})
+                   (session/load-html! {:url "https://app.example/search/index.html"
+                                        :html "<main><form id=\"form\" action=\"https://other.example/results\" method=\"get\"><input id=\"q\" name=\"q\" value=\"hello\"><button id=\"go\" name=\"action\" value=\"find\">Find</button></form></main>"}))
+        page (:browser.session/page loaded)
+        document (:browser/document page)
+        go (bridge/query-selector document "#go")
+        go-op (some #(when (and (= :node (:draw/op %))
+                                (= go (:id %)))
+                       %)
+                    (:browser/draw-ops page))
+        submitted (session/apply-document-input-event! loaded {:event/type :pointer/click
+                                                              :x (+ (:x go-op) 2)
+                                                              :y (+ (:y go-op) 2)})
+        expected-url "https://other.example/results?q=hello&action=find"]
+    (is (= [{:headers {"referer" "https://app.example"}
+             :url expected-url
+             :method :get}]
+           @calls))
+    (is (= expected-url (get-in submitted [:browser.session/page :browser/url])))))
+
+(deftest get-form-https-to-http-downgrade-suppresses-referer
+  ;; Proves downgrade suppression on the form-submission path: same host,
+  ;; but HTTPS -> HTTP, so no referrer at all even though there is no
+  ;; explicit referrerpolicy and the destination is same-origin-ish (same
+  ;; host, different scheme).
+  (let [h (host/recording-host)
+        calls (atom [])
+        loaded (-> (session/new-session
+                    {:host h
+                     :fetch-fn (fn [{:keys [url] :as req}]
+                                 (swap! calls conj req)
+                                 {:status 200
+                                  :body (str "<main><p>" url "</p></main>")})})
+                   (session/load-html! {:url "https://app.example/search/index.html"
+                                        :html "<main><form id=\"form\" action=\"http://app.example/results\" method=\"get\"><input id=\"q\" name=\"q\" value=\"hello\"><button id=\"go\" name=\"action\" value=\"find\">Find</button></form></main>"}))
+        page (:browser.session/page loaded)
+        document (:browser/document page)
+        go (bridge/query-selector document "#go")
+        go-op (some #(when (and (= :node (:draw/op %))
+                                (= go (:id %)))
+                       %)
+                    (:browser/draw-ops page))
+        submitted (session/apply-document-input-event! loaded {:event/type :pointer/click
+                                                              :x (+ (:x go-op) 2)
+                                                              :y (+ (:y go-op) 2)})
+        expected-url "http://app.example/results?q=hello&action=find"]
+    (is (= [{:url expected-url :method :get}]
+           @calls))
+    (is (= expected-url (get-in submitted [:browser.session/page :browser/url])))))
+
 (deftest nameless-submitters-navigate-without-query-entry
   (let [h (host/recording-host)
         calls (atom [])
@@ -1192,8 +1440,11 @@
                                                                      :x (+ (:x empty-submit-op) 2)
                                                                      :y (+ (:y empty-submit-op) 2)})
         expected-url "https://app.example/results?q=hello"]
-    (is (= [{:url expected-url :method :get}
-            {:url expected-url :method :get}]
+    ;; No explicit referrerpolicy + same-origin destination -> full page-url referer.
+    (is (= [{:headers {"referer" "https://app.example/search/index.html"}
+             :url expected-url :method :get}
+            {:headers {"referer" "https://app.example/search/index.html"}
+             :url expected-url :method :get}]
            @calls))
     (is (= expected-url (get-in button-submitted [:browser.session/page :browser/url])))
     (is (= expected-url (get-in empty-submitted [:browser.session/page :browser/url])))
@@ -1232,7 +1483,9 @@
                                                                        :x 2
                                                                        :y 3})
         expected-url (str "https://app.example/pick?q=map&spot.x=" x "&spot.y=" y)]
-    (is (= [{:url expected-url :method :get}]
+    ;; No explicit referrerpolicy + same-origin destination -> full page-url referer.
+    (is (= [{:headers {"referer" "https://app.example/search/index.html"}
+             :url expected-url :method :get}]
            (take 1 @calls)))
     (is (= expected-url (get-in submitted [:browser.session/page :browser/url])))
     (is (= [{:name "q" :value "map" :node/id q}
@@ -1317,7 +1570,9 @@
                                                               :y (+ (:y skip-op) 2)})
         expected-url "https://app.example/results?q=&action=skip"
         recorded (host/recorded h)]
-    (is (= [{:url expected-url :method :get}]
+    ;; No explicit referrerpolicy + same-origin destination -> full page-url referer.
+    (is (= [{:headers {"referer" "https://app.example/search"}
+             :url expected-url :method :get}]
            @calls))
     (is (= expected-url (get-in submitted [:browser.session/page :browser/url])))
     (is (nil? (get-in submitted [:browser.session/document-input-result :invalid?])))
@@ -1387,7 +1642,9 @@
                                                               :y (+ (:y skip-op) 2)})
         expected-url "https://app.example/results?short=ab&long=abcde&action=skip"
         recorded (host/recorded h)]
-    (is (= [{:url expected-url :method :get}]
+    ;; No explicit referrerpolicy + same-origin destination -> full page-url referer.
+    (is (= [{:headers {"referer" "https://app.example/search"}
+             :url expected-url :method :get}]
            @calls))
     (is (= expected-url (get-in submitted [:browser.session/page :browser/url])))
     (is (nil? (get-in submitted [:browser.session/document-input-result :invalid?])))
@@ -1434,7 +1691,9 @@
                                                               :y (+ (:y go-op) 2)})
         expected-url "https://app.example/results?q=&long=abcde&action=go"
         recorded (host/recorded h)]
-    (is (= [{:url expected-url :method :get}]
+    ;; No explicit referrerpolicy + same-origin destination -> full page-url referer.
+    (is (= [{:headers {"referer" "https://app.example/search"}
+             :url expected-url :method :get}]
            @calls))
     (is (= expected-url (get-in submitted [:browser.session/page :browser/url])))
     (is (nil? (get-in submitted [:browser.session/document-input-result :invalid?])))
@@ -1518,7 +1777,9 @@
                                                               :x (+ (:x go-op) 2)
                                                               :y (+ (:y go-op) 2)})
         expected-url "https://app.example/alternate?q=override&action=alt"]
-    (is (= [{:url expected-url :method :get}]
+    ;; No explicit referrerpolicy + same-origin destination -> full page-url referer.
+    (is (= [{:headers {"referer" "https://app.example/form"}
+             :url expected-url :method :get}]
            @calls))
     (is (= expected-url (get-in submitted [:browser.session/page :browser/url])))))
 
@@ -1546,9 +1807,11 @@
         submitted (session/apply-document-input-event! loaded {:event/type :pointer/click
                                                               :x (+ (:x go-op) 2)
                                                               :y (+ (:y go-op) 2)})]
+    ;; No explicit referrerpolicy + same-origin destination -> full page-url referer.
     (is (= [{:url "https://app.example/submit"
              :method :post
-             :headers {"content-type" "application/x-www-form-urlencoded"}
+             :headers {"content-type" "application/x-www-form-urlencoded"
+                       "referer" "https://app.example/form"}
              :body "q=override&action=post"}]
            @calls))
     (is (= "Posted override" (-> submitted :browser.session/page :browser/document kotoba.wasm.dom/text-content)))
@@ -1595,6 +1858,127 @@
            (first (filter #(= :form/context-request (:event %))
                           (:browser.session/history submitted)))))))
 
+(deftest submitter-formtarget-referrerpolicy-origin-sends-origin-only-referer
+  ;; Proves the core form-context-request-event bug fix: before the fix, any
+  ;; referrer-policy string other than the literal "no-referrer" fell through
+  ;; to sending the full page-url unconditionally, so referrerpolicy="origin"
+  ;; was silently ignored on the context-request path. It must now trim to
+  ;; the origin.
+  (let [h (host/recording-host)
+        calls (atom [])
+        loaded (-> (session/new-session
+                    {:host h
+                     :fetch-fn (fn [{:keys [url] :as req}]
+                                 (swap! calls conj req)
+                                 {:status 200 :body (str "<main>" url "</main>")})})
+                   (session/load-html! {:url "https://app.example/form"
+                                        :html "<main><form id=\"form\" action=\"/default\" method=\"get\" target=\"_self\" referrerpolicy=\"origin\"><input id=\"q\" name=\"q\" value=\"target\"><button id=\"go\" formtarget=\"_blank\" name=\"action\" value=\"open\">Open</button></form></main>"}))
+        page (:browser.session/page loaded)
+        document (:browser/document page)
+        q (bridge/query-selector document "#q")
+        go (bridge/query-selector document "#go")
+        go-op (some #(when (and (= :node (:draw/op %))
+                                (= go (:id %)))
+                       %)
+                    (:browser/draw-ops page))
+        submitted (session/apply-document-input-event! loaded {:event/type :pointer/click
+                                                              :x (+ (:x go-op) 2)
+                                                              :y (+ (:y go-op) 2)})
+        expected-url "https://app.example/default?q=target&action=open"]
+    (is (= [] @calls))
+    (is (= {:event :form/context-request
+            :url expected-url
+            :method :get
+            :target "_blank"
+            :referrer-policy "origin"
+            :referrer "https://app.example"
+            :enctype "application/x-www-form-urlencoded"
+            :form/id (bridge/query-selector document "#form")
+            :submitter/id go
+            :form/data [{:name "q" :value "target" :node/id q}
+                        {:name "action" :value "open" :node/id go}]}
+           (first (filter #(= :form/context-request (:event %))
+                          (:browser.session/history submitted)))))))
+
+(deftest submitter-formtarget-cross-origin-no-policy-sends-origin-only-referer
+  ;; No explicit referrerpolicy + cross-origin destination on the
+  ;; context-request path -> origin-only referer, same default as the other
+  ;; two referrer code paths.
+  (let [h (host/recording-host)
+        calls (atom [])
+        loaded (-> (session/new-session
+                    {:host h
+                     :fetch-fn (fn [{:keys [url] :as req}]
+                                 (swap! calls conj req)
+                                 {:status 200 :body (str "<main>" url "</main>")})})
+                   (session/load-html! {:url "https://app.example/form"
+                                        :html "<main><form id=\"form\" action=\"https://other.example/default\" method=\"get\" target=\"_self\"><input id=\"q\" name=\"q\" value=\"target\"><button id=\"go\" formtarget=\"_blank\" name=\"action\" value=\"open\">Open</button></form></main>"}))
+        page (:browser.session/page loaded)
+        document (:browser/document page)
+        q (bridge/query-selector document "#q")
+        go (bridge/query-selector document "#go")
+        go-op (some #(when (and (= :node (:draw/op %))
+                                (= go (:id %)))
+                       %)
+                    (:browser/draw-ops page))
+        submitted (session/apply-document-input-event! loaded {:event/type :pointer/click
+                                                              :x (+ (:x go-op) 2)
+                                                              :y (+ (:y go-op) 2)})
+        expected-url "https://other.example/default?q=target&action=open"]
+    (is (= [] @calls))
+    (is (= {:event :form/context-request
+            :url expected-url
+            :method :get
+            :target "_blank"
+            :referrer-policy nil
+            :referrer "https://app.example"
+            :enctype "application/x-www-form-urlencoded"
+            :form/id (bridge/query-selector document "#form")
+            :submitter/id go
+            :form/data [{:name "q" :value "target" :node/id q}
+                        {:name "action" :value "open" :node/id go}]}
+           (first (filter #(= :form/context-request (:event %))
+                          (:browser.session/history submitted)))))))
+
+(deftest submitter-formtarget-https-to-http-downgrade-suppresses-referer
+  ;; Downgrade suppression on the context-request path: same host, HTTPS ->
+  ;; HTTP, so no referrer at all.
+  (let [h (host/recording-host)
+        calls (atom [])
+        loaded (-> (session/new-session
+                    {:host h
+                     :fetch-fn (fn [{:keys [url] :as req}]
+                                 (swap! calls conj req)
+                                 {:status 200 :body (str "<main>" url "</main>")})})
+                   (session/load-html! {:url "https://app.example/form"
+                                        :html "<main><form id=\"form\" action=\"http://app.example/default\" method=\"get\" target=\"_self\"><input id=\"q\" name=\"q\" value=\"target\"><button id=\"go\" formtarget=\"_blank\" name=\"action\" value=\"open\">Open</button></form></main>"}))
+        page (:browser.session/page loaded)
+        document (:browser/document page)
+        q (bridge/query-selector document "#q")
+        go (bridge/query-selector document "#go")
+        go-op (some #(when (and (= :node (:draw/op %))
+                                (= go (:id %)))
+                       %)
+                    (:browser/draw-ops page))
+        submitted (session/apply-document-input-event! loaded {:event/type :pointer/click
+                                                              :x (+ (:x go-op) 2)
+                                                              :y (+ (:y go-op) 2)})
+        expected-url "http://app.example/default?q=target&action=open"]
+    (is (= [] @calls))
+    (is (= {:event :form/context-request
+            :url expected-url
+            :method :get
+            :target "_blank"
+            :referrer-policy nil
+            :referrer nil
+            :enctype "application/x-www-form-urlencoded"
+            :form/id (bridge/query-selector document "#form")
+            :submitter/id go
+            :form/data [{:name "q" :value "target" :node/id q}
+                        {:name "action" :value "open" :node/id go}]}
+           (first (filter #(= :form/context-request (:event %))
+                          (:browser.session/history submitted)))))))
+
 (deftest unknown-formmethod-falls-back-to-get-navigation
   (let [h (host/recording-host)
         calls (atom [])
@@ -1616,7 +2000,9 @@
                                                               :x (+ (:x go-op) 2)
                                                               :y (+ (:y go-op) 2)})
         expected-url "https://app.example/default?q=fallback&action=go"]
-    (is (= [{:url expected-url :method :get}]
+    ;; No explicit referrerpolicy + same-origin destination -> full page-url referer.
+    (is (= [{:headers {"referer" "https://app.example/form"}
+             :url expected-url :method :get}]
            @calls))
     (is (= expected-url (get-in submitted [:browser.session/page :browser/url])))
     (is (= :form/submit-navigation
@@ -1692,7 +2078,9 @@
     (is (= disabled-go (-> disabled-submitted :browser.session/history last :node/id)))
     (is (= false (-> disabled-submitted :browser.session/history last :handled?)))
     (is (nil? (get-in disabled-submitted [:browser.session/document-input-result :submitted?])))
-    (is (= [{:url expected-url :method :get}]
+    ;; No explicit referrerpolicy + same-origin destination -> full page-url referer.
+    (is (= [{:headers {"referer" "https://app.example/form"}
+             :url expected-url :method :get}]
            @calls))
     (is (= expected-url (get-in submitted [:browser.session/page :browser/url])))
     (is (= [{:name "inside" :value "one" :node/id inside}
@@ -1724,7 +2112,9 @@
                                                               :x (+ (:x go-op) 2)
                                                               :y (+ (:y go-op) 2)})
         expected-url "https://app.example/submit?action=go&outside=ok&legend=ok"]
-    (is (= [{:url expected-url :method :get}]
+    ;; No explicit referrerpolicy + same-origin destination -> full page-url referer.
+    (is (= [{:headers {"referer" "https://app.example/form"}
+             :url expected-url :method :get}]
            @calls))
     (is (= expected-url (get-in submitted [:browser.session/page :browser/url])))
     (is (= [{:name "action" :value "go" :node/id go}
@@ -1967,7 +2357,9 @@
                                                               :x (+ (:x go-op) 2)
                                                               :y (+ (:y go-op) 2)})
         expected-url "https://app.example/submit?action=go"]
-    (is (= [{:url expected-url :method :get}]
+    ;; No explicit referrerpolicy + same-origin destination -> full page-url referer.
+    (is (= [{:headers {"referer" "https://app.example/form"}
+             :url expected-url :method :get}]
            @calls))
     (is (= expected-url (get-in submitted [:browser.session/page :browser/url])))
     (is (= [{:name "action" :value "go" :node/id go}]
@@ -2006,7 +2398,9 @@
         expected-url "https://app.example/submit?action=go"]
     (is (= false (-> locked-result :browser.session/history last :handled?)))
     (is (= locked (-> locked-result :browser.session/history last :node/id)))
-    (is (= [{:url expected-url :method :get}]
+    ;; No explicit referrerpolicy + same-origin destination -> full page-url referer.
+    (is (= [{:headers {"referer" "https://app.example/form"}
+             :url expected-url :method :get}]
            @calls))
     (is (= expected-url (get-in submitted [:browser.session/page :browser/url])))
     (is (= [{:name "action" :value "go" :node/id go}]
@@ -2037,7 +2431,9 @@
                                                               :x (+ (:x go-op) 2)
                                                               :y (+ (:y go-op) 2)})
         expected-url "https://app.example/submit?tag=one&tag=two&action=go"]
-    (is (= [{:url expected-url :method :get}]
+    ;; No explicit referrerpolicy + same-origin destination -> full page-url referer.
+    (is (= [{:headers {"referer" "https://app.example/form"}
+             :url expected-url :method :get}]
            @calls))
     (is (= expected-url (get-in submitted [:browser.session/page :browser/url])))
     (is (= [{:name "tag" :value "one" :node/id tags}
@@ -2119,9 +2515,11 @@
                                                               :x (+ (:x go-op) 2)
                                                               :y (+ (:y go-op) 2)})
         recorded (host/recorded h)]
+    ;; No explicit referrerpolicy + same-origin destination -> full page-url referer.
     (is (= [{:url "https://app.example/post"
              :method :post
              :headers {"content-type" "application/x-www-form-urlencoded"
+                       "referer" "https://app.example/form"
                        "cookie" "sid=abc"}
              :body "q=hello+world&action=save"}]
            @calls))
@@ -2176,9 +2574,11 @@
         submitted (session/apply-document-input-event! loaded {:event/type :pointer/click
                                                               :x (+ (:x go-op) 2)
                                                               :y (+ (:y go-op) 2)})]
+    ;; No explicit referrerpolicy + same-origin destination -> full page-url referer.
     (is (= [{:url "https://app.example/post"
              :method :post
-             :headers {"content-type" "text/plain"}
+             :headers {"content-type" "text/plain"
+                       "referer" "https://app.example/form"}
              :body "q=hello world\r\naction=save"}]
            @calls))
     (is (= "Posted plain" (-> submitted :browser.session/page :browser/document kotoba.wasm.dom/text-content)))
@@ -2343,7 +2743,9 @@
         req (first @calls)]
     (is (= "https://app.example/upload" (:url req)))
     (is (= :post (:method req)))
-    (is (= {"content-type" "multipart/form-data; boundary=kotoba-browser-form-boundary"}
+    ;; No explicit referrerpolicy + same-origin destination -> full page-url referer.
+    (is (= {"content-type" "multipart/form-data; boundary=kotoba-browser-form-boundary"
+            "referer" "https://app.example/form"}
            (:headers req)))
     (is (re-find #"Content-Disposition: form-data; name=\"q\"\r\n\r\nhello world" (:body req)))
     (is (re-find #"Content-Disposition: form-data; name=\"action\"\r\n\r\nsave" (:body req)))
@@ -2472,10 +2874,14 @@
         blocked (first (filter #(= :form/submit-fetch-blocked (:event %))
                                (:browser.session/history submitted)))
         recorded (host/recorded h)]
+    ;; No explicit referrerpolicy + cross-origin destination -> the real
+    ;; strict-origin-when-cross-origin default trims the referer to just the
+    ;; source origin (not the full page-url).
     (is (= [{:url "https://api.example/post"
              :method :post
              :headers {"content-type" "application/x-www-form-urlencoded"
-                       "origin" "https://app.example"}
+                       "origin" "https://app.example"
+                       "referer" "https://app.example"}
              :body "q=secret"}]
            @calls))
     (is (= "https://app.example/form" (get-in submitted [:browser.session/page :browser/url])))
@@ -2510,10 +2916,14 @@
                                                               :x (+ (:x go-op) 2)
                                                               :y (+ (:y go-op) 2)})
         recorded (host/recorded h)]
+    ;; No explicit referrerpolicy + cross-origin destination -> the real
+    ;; strict-origin-when-cross-origin default trims the referer to just the
+    ;; source origin (not the full page-url).
     (is (= [{:url "https://api.example/post"
              :method :post
              :headers {"content-type" "application/x-www-form-urlencoded"
-                       "origin" "https://app.example"}
+                       "origin" "https://app.example"
+                       "referer" "https://app.example"}
              :body "q=secret"}]
            @calls))
     (is (= "https://api.example/post" (get-in submitted [:browser.session/page :browser/url])))
@@ -2558,9 +2968,14 @@
         redirect (first (filter #(= :form/submit-redirect (:event %))
                                 (:browser.session/history submitted)))
         recorded (host/recorded h)]
+    ;; No explicit referrerpolicy + same-origin destination -> full page-url
+    ;; referer on the initial POST. The follow-up redirect GET goes through
+    ;; navigate! (not form-submit-request/request-referrer), so it is
+    ;; unaffected and keeps sending no referer.
     (is (= [{:url "https://app.example/post"
              :method :post
-             :headers {"content-type" "application/x-www-form-urlencoded"}
+             :headers {"content-type" "application/x-www-form-urlencoded"
+                       "referer" "https://app.example/form"}
              :body "q=redirect"}
             {:url "https://app.example/done" :method :get}]
            @calls))

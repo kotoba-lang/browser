@@ -698,12 +698,45 @@
       url
       (str url (if (str/includes? url "?") "&" "?") query))))
 
+(defn- referrer-downgrade?
+  "True when page-url is https and destination-url is not -- an
+   HTTPS -> non-HTTPS transition, which every non-\"unsafe-url\" referrer
+   policy must suppress the referrer for (https://www.w3.org/TR/referrer-policy/
+   #referrer-policy-strict-origin-when-cross-origin and friends). Note a
+   same-origin request can never be a downgrade: same-origin requires an
+   identical scheme, so this only ever fires for cross-origin destinations."
+  [page-url destination-url]
+  (and (= "https" (:scheme (origin/parse-url page-url)))
+       (not= "https" (:scheme (origin/parse-url destination-url)))))
+
 (defn- request-referrer
-  [page-url policy]
+  "Compute the Referer value for a request from page-url, given the real
+   destination-url and an optional explicit referrer-policy string.
+
+   \"no-referrer\" and \"origin\" are unconditional per spec (they do not
+   depend on cross-origin-ness or downgrade). \"unsafe-url\" is also
+   unconditional (always the full page-url). Anything else -- including no
+   explicit policy at all, which is the overwhelmingly common case -- falls
+   back to the real modern default, strict-origin-when-cross-origin: full
+   page-url for a same-origin destination, origin-only for a cross-origin
+   one, and nothing at all on an HTTPS -> non-HTTPS downgrade (checked first,
+   since it must suppress regardless of the same/cross-origin split).
+
+   destination-url is structurally always available at every call site in
+   this file (form action / link href are always resolved before a referrer
+   is computed), so the `nil` case below is defensive only; it suppresses
+   (safe-restrictive) rather than assuming same-origin, since \"unknown
+   destination\" is not a case the spec's default policy ever actually faces."
+  [page-url destination-url policy]
   (case (str/lower-case (str policy))
     "no-referrer" nil
     "origin" (origin/origin page-url)
-    (when policy page-url)))
+    "unsafe-url" page-url
+    (when (and page-url destination-url
+               (not (referrer-downgrade? page-url destination-url)))
+      (if (origin/same-origin? page-url destination-url)
+        page-url
+        (origin/origin page-url)))))
 
 (defn- form-submit-request
   [session result]
@@ -732,7 +765,7 @@
             action-url (if (str/blank? action)
                          page-url
                          (page-script/resolve-src page-url action))
-            referrer (request-referrer page-url referrer-policy)
+            referrer (request-referrer page-url action-url referrer-policy)
             urlencoded-body (form-query (:form/data result))
             text-body (form-text-plain (:form/data result))
             multipart-body (form-multipart (:form/data result))
@@ -821,6 +854,7 @@
   [session request]
   (when-not (link-noreferrer? request)
     (request-referrer (get-in session [:browser.session/page :browser/url])
+                      (:url request)
                       (:referrer-policy request))))
 
 (defn- link-navigation-event
@@ -849,8 +883,14 @@
      :target (:target request)
      :rel (:rel request)
      :referrer-policy (:referrer-policy request)
+     ;; rel="noreferrer" is an additional, separate suppression mechanism on
+     ;; top of any referrer-policy (a noreferrer link must never send a
+     ;; referrer even if referrerpolicy says otherwise) -- it does not
+     ;; replace honoring an explicit referrerpolicy attribute.
      :referrer (when-not noreferrer?
-                 (get-in session [:browser.session/page :browser/url]))
+                 (request-referrer (get-in session [:browser.session/page :browser/url])
+                                   (:url request)
+                                   (:referrer-policy request)))
      :opener? (not noopener?)
      :link/id (:link/id request)
      :node/id (:node/id request)}))
@@ -862,8 +902,9 @@
            :method (:method request)
            :target (:target request)
            :referrer-policy (:referrer-policy request)
-           :referrer (when (not= "no-referrer" (str/lower-case (str (:referrer-policy request))))
-                       (get-in session [:browser.session/page :browser/url]))
+           :referrer (request-referrer (get-in session [:browser.session/page :browser/url])
+                                       (:url request)
+                                       (:referrer-policy request))
            :enctype (:enctype request)
            :form/id (:form/id request)
            :submitter/id (:submitter/id request)
