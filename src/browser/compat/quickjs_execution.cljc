@@ -445,10 +445,33 @@
                    (assoc :timestamp (:timestamp position)))})))
 
 (defn- websocket-connection-snapshot
+  "Build one connection's entry of `websocket-snapshot`'s map.
+
+  Carries the drained `closed?` flag under BOTH `:closed?` (the idiomatic
+  Clojure-side predicate key -- `browser.net-websocket-test`'s
+  `quickjs-websocket-wiring-moves-real-bytes-through-apply-capability`
+  already asserts this exact key against this exact map, so it stays) AND a
+  second, plain `:closed` key with the identical value. The second key is
+  not redundant: this whole map crosses into JSON via `quickjs-wasm`'s
+  `jsonable`/`json-key` (`(name k)`, which does NOT strip a keyword's own
+  trailing `?` -- `(name :closed?)` is literally `\"closed?\"`), and the
+  webapi shim's real delivery IIFE (see `quickjs-wasm/websocket-snapshot-
+  source`'s docstring) reads the drained flag back off the JSON'd object
+  with a plain, dot-notation `__kwEntry.closed` -- a property name that can
+  never contain a `?` that way. Without this second key, `__kwEntry.closed`
+  is always `undefined` (falsy) regardless of the real connection's actual
+  state, so a genuinely, really closed connection (a real peer-initiated
+  close or a network drop -- not a `ws.close()` the SAME script already
+  called, which the webapi shim flips `readyState` for locally and
+  synchronously on its own) would never fire the script's `ws.onclose` or
+  flip its `ws.readyState` to `CLOSED` -- the terminal state would silently
+  read back as still-open forever from the script's perspective."
   [websocket-fn handle]
-  (let [drained (websocket-fn {:op :drain :handle handle})]
+  (let [drained (websocket-fn {:op :drain :handle handle})
+        closed? (boolean (:closed? drained))]
     (cond-> {:messages (vec (:messages drained))
-             :closed? (boolean (:closed? drained))}
+             :closed? closed?
+             :closed closed?}
       (:close-info drained)
       (assoc :close-code (:code (:close-info drained))
              :close-reason (:reason (:close-info drained))))))
@@ -482,9 +505,12 @@
   map, keeping every pre-existing fabricated-mode caller/test unaffected.
 
   Returns a JSON-safe map keyed by WebSocket id string: `{<id>
-  {:messages [...] :closed? bool :close-code <int> :close-reason
-  <string>}}` (`:close-code`/`:close-reason` only present once the real
-  peer has actually closed)."
+  {:messages [...] :closed? bool :closed bool :close-code <int>
+  :close-reason <string>}}` (`:closed?`/`:closed` are always the same
+  value, under two keys -- see `websocket-connection-snapshot`'s docstring
+  for why the plain `:closed` key has to be there too for the real webapi
+  shim delivery to see it at all. `:close-code`/`:close-reason` only
+  present once the real peer has actually closed)."
   [state]
   (if-let [websocket-fn (:websocket-fn state)]
     (reduce-kv

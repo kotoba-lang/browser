@@ -645,6 +645,75 @@
                                    :reason :permission/not-granted}}]
            (:capability/results state)))))
 
+(deftest quickjs-websocket-snapshot-carries-plain-closed-key-for-real-js-delivery
+  ;; Real webapi-shim delivery (quickjs_wasm.cljc's websocket delivery IIFE,
+  ;; the code that fires a still-registered `ws.onclose` / flips
+  ;; `ws.readyState` to CLOSED before the NEXT <script> tag runs) reads the
+  ;; drained close flag back off this exact snapshot map with a plain,
+  ;; dot-notation `__kwEntry.closed` -- a JS property name that can never
+  ;; carry a `?`. `quickjs-execution/websocket-snapshot`'s map only ever
+  ;; carried the flag under `:closed?` (the idiomatic Clojure-side
+  ;; predicate key, which JSON's own key transform (`(name k)`) passes
+  ;; through UNCHANGED, `?` included, as the literal JSON key `"closed?"`)
+  ;; -- so `__kwEntry.closed` was always `undefined`/falsy, and a REAL
+  ;; peer-initiated close or network drop (as opposed to a `ws.close()` the
+  ;; SAME script already called, which the shim flips `readyState` for
+  ;; locally/synchronously on its own) would never reach a script's real
+  ;; `ws.onclose` handler or its `ws.readyState` -- the terminal state
+  ;; would silently read back as still-open forever from the script's
+  ;; perspective. This proves the fix: the snapshot now ALSO carries a
+  ;; plain `:closed` key (same value), so the JS shim's `.closed` lookup
+  ;; sees it, while `:closed?` -- separately asserted by
+  ;; `browser.net-websocket-test`'s
+  ;; `quickjs-websocket-wiring-moves-real-bytes-through-apply-capability`
+  ;; against this identical map shape -- keeps reporting the same value it
+  ;; always did.
+  (let [profile (-> (profile/new-profile {:id "work"})
+                    (profile/grant-permission "wss://socket.example" :websocket/connect))
+        adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        websocket-fn (fn [{:keys [op]}]
+                       (case op
+                         :connect {:ok? true :handle {:fake/handle "socket-1"}}
+                         :drain {:messages []
+                                 :closed? true
+                                 :close-info {:code 1006 :reason "abnormal closure"}}
+                         {:ok? false :error :websocket/unsupported-op}))
+        received-payload (atom nil)
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :net-context {:profile profile
+                              :page-url "https://app.example/chat"}
+                :websocket-fn websocket-fn
+                :engine (fn [request]
+                          (reset! received-payload request)
+                          {:result :websocket
+                           :requests [{:request/id "connect"
+                                       :capability :websocket/connect
+                                       :websocket/id "websocket-1"
+                                       :url "wss://socket.example/chat"}]})})
+        state (execution/evaluate! state {:source "const ws = new WebSocket('wss://socket.example/chat')"})]
+    (is (= :open (get-in state [:websocket/connections "websocket-1" :ready-state]))
+        "the real :websocket-fn connect must have opened the sandboxed connection")
+    ;; A SECOND evaluate! call, standing in for the NEXT real <script> tag on
+    ;; the same page, computes a fresh websocket-snapshot BEFORE invoking the
+    ;; engine -- draining the real peer-initiated close this mock reports,
+    ;; exactly the way browser.net-websocket-test's real-socket wiring test
+    ;; drains a real echoed reply.
+    (let [_ (execution/evaluate! state {:source "/* second script tag */"})
+          snapshot (:websocket/snapshot @received-payload)]
+      (is (true? (get-in snapshot ["websocket-1" :closed?]))
+          (str "the pre-existing :closed? key must keep reporting the real terminal "
+               "state -- got " (pr-str snapshot)))
+      (is (true? (get-in snapshot ["websocket-1" :closed]))
+          (str "quickjs-wasm's real webapi-shim delivery IIFE reads a literal "
+               "`__kwEntry.closed` (no trailing '?') off this exact snapshot map before "
+               "firing ws.onclose / flipping ws.readyState to CLOSED. Without a plain "
+               ":closed key, that JS-side lookup is always undefined/falsy and a real "
+               "peer-initiated close would never reach the script -- got " (pr-str snapshot)))
+      (is (= 1006 (get-in snapshot ["websocket-1" :close-code])))
+      (is (= "abnormal closure" (get-in snapshot ["websocket-1" :close-reason]))))))
+
 (deftest quickjs-crypto-random-uses-sandboxed-provider
   (let [adapter (quickjs/new-adapter {:origin "https://app.example"
                                       :profile-id "work"})
