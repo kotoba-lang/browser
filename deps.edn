@@ -2,7 +2,8 @@
  :deps {io.github.kotoba-lang/dom-gpu {:local/root "../dom-gpu"}
         io.github.kotoba-lang/cssom {:local/root "../cssom"}
         io.github.kotoba-lang/htmldom {:local/root "../htmldom"}
-        io.github.kotoba-lang/quickjs {:local/root "../quickjs"}}
+        io.github.kotoba-lang/quickjs {:local/root "../quickjs"}
+        io.github.kotoba-lang/org-w3-aria {:local/root "../org-w3-aria"}}
  :aliases
  {:test {:extra-paths ["test"]
          :extra-deps {io.github.cognitect-labs/test-runner
