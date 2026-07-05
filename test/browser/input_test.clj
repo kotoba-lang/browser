@@ -18,6 +18,33 @@
     (is (= [{:action :window/focus :window-id first-id}]
            (:actions result)))))
 
+(deftest clicking-a-window-raises-it-so-it-wins-the-overlap-region-next-time
+  ;; This codebase's own z-order convention: window-node renders windows in
+  ;; :surface/windows order (later = drawn on top), and window-at's hit-test
+  ;; walks that same order in reverse. Focusing a window must ALSO raise it
+  ;; to the end of that order -- otherwise, once two windows genuinely
+  ;; overlap, whichever was opened later permanently wins the overlap
+  ;; region's hit-test forever, even after the user clicks to focus the
+  ;; other one, since focus alone never changed which window renders on top.
+  (let [s (-> (surface/empty-surface)
+              (surface/open-window {:app-id "a" :title "A" :rect [0 0 200 200]})
+              (surface/open-window {:app-id "b" :title "B" :rect [50 50 200 200]}))
+        a-id (-> s :surface/windows first :window/id)
+        ;; (10,10) is inside A only (outside B's [50,50,200,200] rect) --
+        ;; focuses A without yet exercising the overlap region.
+        after-focus-a (:surface (input/reduce-event s (input/empty-state)
+                                                    {:event/type :pointer/click :x 10 :y 10}))]
+    (is (= a-id (:surface/focus after-focus-a)))
+    (is (= a-id (:window/id (peek (:surface/windows after-focus-a))))
+        "focusing A must raise it to the end of :surface/windows (topmost)")
+    ;; (100,100) is inside BOTH A and B's rects -- before this fix, this
+    ;; would always resolve to B (still array-last despite A being
+    ;; focused); with A now correctly raised, it must resolve to A.
+    (let [after-overlap-click (:surface (input/reduce-event after-focus-a (input/empty-state)
+                                                            {:event/type :pointer/click :x 100 :y 100}))]
+      (is (= a-id (:surface/focus after-overlap-click))
+          "clicking the overlap region after A was raised must still hit A, not B"))))
+
 (deftest pointer-drag-moves-window-by-titlebar
   (let [s (-> (surface/empty-surface)
               (surface/open-window {:app-id "notes"

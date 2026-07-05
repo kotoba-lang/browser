@@ -74,9 +74,25 @@
                             (:surface/focus surface)))))
 
 (defn focus-window
+  "Focus window-id, and raise it to the end of :surface/windows (this
+   codebase's own z-order convention: window-node renders windows in
+   :surface/windows order, later = drawn on top, and window-at's hit-test
+   walks that same order in reverse to find the topmost window under a
+   point) -- without this, focus and stacking order can permanently
+   diverge: once two windows overlap, whichever was opened LATER always
+   wins the overlap region's hit-test forever, even after the user clicks
+   to focus the other one, since focus alone never changed which window
+   renders on top. Real window-manager UX always raises a window when it
+   becomes focused."
   [surface window-id]
   (if (some #(= (:window/id %) window-id) (:surface/windows surface))
-    (assoc surface :surface/focus window-id)
+    (-> surface
+        (assoc :surface/focus window-id)
+        (update :surface/windows
+                (fn [windows]
+                  (let [target (first (filter #(= (:window/id %) window-id) windows))
+                        others (remove #(= (:window/id %) window-id) windows)]
+                    (vec (concat others [target]))))))
     surface))
 
 (defn move-window
