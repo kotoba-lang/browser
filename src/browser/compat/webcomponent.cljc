@@ -8,11 +8,24 @@
   {:custom-elements/definitions {}
    :custom-elements/upgraded []})
 
+(def reserved-names
+  "Real HTML Custom Elements names explicitly reserved by the spec (pre-
+   existing SVG/MathML element names that happen to contain a hyphen,
+   carved out to avoid ambiguity) -- a customElements.define() call for
+   any of these must be rejected even though each otherwise satisfies
+   the hyphen requirement below."
+  #{"annotation-xml" "color-profile" "font-face" "font-face-src"
+    "font-face-uri" "font-face-format" "font-face-name" "missing-glyph"})
+
 (defn valid-name?
   [name]
   (and (string? name)
        (str/includes? name "-")
-       (not (str/starts-with? name "xml"))))
+       ;; Real spec: must not start with an ASCII case-insensitive match
+       ;; for "xml" (reserved by the XML specification), not just a
+       ;; lowercase-only "xml" prefix.
+       (not (str/starts-with? (str/lower-case name) "xml"))
+       (not (contains? reserved-names name))))
 
 (defn define
   [registry name definition]
