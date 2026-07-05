@@ -85,7 +85,18 @@
                           :timer/cancel
                           :timer/microtask
                           :js/call}
-               :exports #{:js/evaluate :js/module-load :js/job-drain}
+               ;; :js/job is the real per-callback dispatch capability
+               ;; browser.compat.quickjs-execution/drain-event-loop! actually
+               ;; invokes (see quickjs-wasm's context-run-task-result, which
+               ;; drives __kotobaRunTask by callback/id); :js/job-drain is
+               ;; never handled by any dispatch anywhere in this codebase
+               ;; (browser.compat.quickjs/job-drain-request builds a request
+               ;; for it, but browser.compat.quickjs-binding/drain-jobs!'s
+               ;; own caller ignores those requests entirely and dispatches
+               ;; each drained task individually via :js/job instead) -- this
+               ;; descriptor was stale, naming the unreachable capability
+               ;; instead of the one actually exercised.
+               :exports #{:js/evaluate :js/module-load :js/job}
                :capabilities #{:browser/web-compat}
                :effects #{:dom-read :dom-write :network :persistent-write}}))
 

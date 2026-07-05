@@ -21,6 +21,16 @@
     (is (= :browser.runtime/quickjs (:component/id manifest)))
     (is (:component/no-ambient-access manifest))))
 
+(deftest quickjs-runtime-descriptor-exports-the-real-dispatch-capability
+  ;; :js/job is what browser.compat.quickjs-execution/drain-event-loop!
+  ;; actually dispatches per drained timer/microtask task (see
+  ;; quickjs-wasm's context-run-task-result); :js/job-drain is never
+  ;; handled by any dispatch anywhere -- this descriptor previously named
+  ;; the unreachable capability instead of the real one.
+  (let [rt (runtime/quickjs)]
+    (is (contains? (:runtime/exports rt) :js/job))
+    (is (not (contains? (:runtime/exports rt) :js/job-drain)))))
+
 (deftest runtime-manifest-validation-rejects-ambient-or-native-imports
   (is (not (runtime/valid-manifest?
             {:component/runtime :wasm
