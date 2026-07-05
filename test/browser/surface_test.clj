@@ -63,6 +63,44 @@
     (is (= focused same))
     (is (not (some #(= (:window/id %) first-id) (:surface/windows closed))))))
 
+(deftest closing-the-focused-window-refocuses-a-remaining-window
+  ;; Real window-manager UX always transfers focus to another open window
+  ;; rather than dropping it -- and every keyboard/text/scroll action in
+  ;; apply-action that omits an explicit window-id targets
+  ;; (:surface/focus surface), so leaving focus nil here would silently
+  ;; swallow the user's next keystroke until they explicitly refocused
+  ;; something, even with another window still open.
+  (let [s (-> (surface/empty-surface)
+              (surface/open-window {:app-id "a" :title "A"})
+              (surface/open-window {:app-id "b" :title "B"}))
+        first-id (-> s :surface/windows first :window/id)
+        second-id (-> s :surface/windows second :window/id)
+        focused (surface/apply-action s {:action :window/focus :window-id first-id})
+        closed (surface/apply-action focused {:action :window/close :window-id first-id})]
+    (is (= second-id (:surface/focus closed))
+        "the remaining window B must become focused, not nil")
+    ;; A subsequent keystroke with no explicit window-id must actually land
+    ;; on the now-focused remaining window, not silently go nowhere.
+    (let [typed (surface/apply-action closed {:action :text/input :text "hi"})
+          window (first (:surface/windows typed))]
+      (is (= "hi" (:window/text-buffer window))))))
+
+(deftest closing-a-non-focused-window-leaves-focus-unchanged
+  (let [s (-> (surface/empty-surface)
+              (surface/open-window {:app-id "a" :title "A"})
+              (surface/open-window {:app-id "b" :title "B"}))
+        first-id (-> s :surface/windows first :window/id)
+        second-id (:surface/focus s)
+        closed (surface/apply-action s {:action :window/close :window-id first-id})]
+    (is (= second-id (:surface/focus closed)))))
+
+(deftest closing-the-only-window-leaves-focus-nil
+  (let [s (surface/open-window (surface/empty-surface) {:app-id "only"})
+        only-id (:surface/focus s)
+        closed (surface/apply-action s {:action :window/close :window-id only-id})]
+    (is (empty? (:surface/windows closed)))
+    (is (nil? (:surface/focus closed)))))
+
 (deftest keyboard-and-text-actions-are-recorded-on-focused-window
   (let [s (-> (surface/empty-surface)
               (surface/open-window {:app-id "editor" :title "Editor"}))

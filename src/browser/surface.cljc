@@ -55,12 +55,23 @@
         (assoc :surface/focus id))))
 
 (defn close-window
+  "Close window-id. If it was the focused window, focus the last remaining
+   window (matching open-window's own convention of always focusing the most
+   recently opened one) instead of leaving :surface/focus nil -- real
+   window-manager UX always transfers focus to another open window rather
+   than dropping it, and every input action in apply-action (keyboard/text/
+   scroll) that omits an explicit window-id targets (:surface/focus surface),
+   so leaving it nil here would silently swallow the user's next keystroke
+   until they explicitly refocused something, even with other windows still
+   open."
   [surface window-id]
-  (-> surface
-      (update :surface/windows
-              (fn [windows] (vec (remove #(= (:window/id %) window-id) windows))))
-      (update :surface/focus
-              (fn [focus] (when-not (= focus window-id) focus)))))
+  (let [remaining (vec (remove #(= (:window/id %) window-id) (:surface/windows surface)))
+        was-focused? (= (:surface/focus surface) window-id)]
+    (assoc surface
+           :surface/windows remaining
+           :surface/focus (if was-focused?
+                            (:window/id (peek remaining))
+                            (:surface/focus surface)))))
 
 (defn focus-window
   [surface window-id]
