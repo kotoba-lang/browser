@@ -1401,6 +1401,49 @@
                        (= "external-long-invalid" (second %)))
                   (get-in external-result [:document :ops])))))
 
+(deftest numeric-range-validation-blocks-submit
+  ;; The confirmed repro from the bug report: before this fix, neither
+  ;; this reducer's real form-submission-blocking validation NOR
+  ;; kotoba-lang/cssom's own :invalid/:valid CSS pseudo-class matching
+  ;; checked min/max at all -- a real, common pattern like
+  ;; <input type="number" min="1" max="10" value="15"> silently
+  ;; submitted successfully when a real browser blocks it.
+  (let [page (browser/load-html
+              {:url "kotoba://submit"
+               :html "<main><form id=\"form\"><input id=\"over\" type=\"number\" name=\"over\" min=\"1\" max=\"10\" value=\"15\"><input id=\"under\" type=\"range\" name=\"under\" min=\"1\" max=\"10\" value=\"-3\"><input id=\"ok\" type=\"number\" name=\"ok\" min=\"1\" max=\"10\" value=\"5\"><button id=\"go\">Go</button></form></main>"})
+        document (:browser/document page)
+        form (bridge/query-selector document "#form")
+        over (bridge/query-selector document "#over")
+        under (bridge/query-selector document "#under")
+        go (bridge/query-selector document "#go")
+        document (-> document
+                     (dom/add-event-listener over "invalid" "over-invalid")
+                     (dom/add-event-listener under "invalid" "under-invalid"))
+        result (document-input/reduce-event document {:event/type :pointer/click
+                                                      :node/id go})]
+    (is (= true (:invalid? result)))
+    (is (= [over under] (:invalid/control-ids result)))
+    (is (= "range-overflow" (get-in result [:document :nodes over :attrs :validation-reason])))
+    (is (= "range-underflow" (get-in result [:document :nodes under :attrs :validation-reason])))
+    (is (= [[:dom/dispatch-event
+             "over-invalid"
+             {:event/type "invalid" :target/id over :form/id form :submitter/id go :reason :range-overflow}]
+            [:dom/dispatch-event
+             "under-invalid"
+             {:event/type "invalid" :target/id under :form/id form :submitter/id go :reason :range-underflow}]]
+           (filterv #(= :dom/dispatch-event (first %))
+                    (get-in result [:document :ops]))))))
+
+(deftest numeric-range-validation-does-not-block-an-in-range-submit
+  (let [page (browser/load-html
+              {:url "kotoba://submit"
+               :html "<main><form id=\"form\"><input id=\"ok\" type=\"number\" name=\"ok\" min=\"1\" max=\"10\" value=\"5\"><button id=\"go\">Go</button></form></main>"})
+        document (:browser/document page)
+        go (bridge/query-selector document "#go")
+        result (document-input/reduce-event document {:event/type :pointer/click :node/id go})]
+    (is (= true (:submitted? result)))
+    (is (nil? (:invalid? result)))))
+
 (deftest readonly-controls-submit-data-but-do-not-block-validation
   (let [page (browser/load-html {:url "kotoba://submit"
                                  :html "<main><form id=\"form\"><input id=\"field\" name=\"q\" required readonly><textarea id=\"long\" name=\"long\" maxlength=\"4\" readonly>abcde</textarea><button id=\"go\" name=\"action\" value=\"go\">Go</button></form></main>"})

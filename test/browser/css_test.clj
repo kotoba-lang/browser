@@ -84,7 +84,7 @@
 (deftest cascade-applies-form-state-pseudo-classes
   (let [page (browser/load-html
               {:url "kotoba://css"
-               :html "<main><input id=\"disabled\" disabled><input id=\"checked\" type=\"checkbox\" checked><input id=\"hidden-required\" type=\"hidden\" required><input id=\"file-required\" type=\"file\" required value=\"/secret/path.txt\"><input id=\"required\" required><input id=\"readonly-required\" required readonly><input id=\"readonly-long\" value=\"abcde\" maxlength=\"4\" readonly><input id=\"plain\"><input id=\"readonly\" readonly><input id=\"readonly-number\" type=\"number\" readonly value=\"7\"><input id=\"invalid\" invalid><input id=\"checkbox-required\" type=\"checkbox\" required><input id=\"radio-required\" type=\"radio\" name=\"choice\" required><input id=\"radio-checked\" type=\"radio\" name=\"choice\" checked><select id=\"select-required\" required><option value=\"\">Choose</option><option value=\"go\">Go</option></select><select id=\"select-disabled-selected\" required><option value=\"locked\" selected disabled>Locked</option><option value=\"go\">Go</option></select><select id=\"select-optgroup-disabled\" required><optgroup disabled><option id=\"optgroup-locked\" value=\"locked\" selected>Locked</option></optgroup><option value=\"go\">Go</option></select><select id=\"select-multiple-empty\" multiple required><option value=\"one\">One</option><option value=\"two\">Two</option></select><select id=\"select-valid\" required><option value=\"\">Choose</option><option value=\"go\" selected>Go</option></select><fieldset disabled><legend><input id=\"legend-enabled\" value=\"ok\"></legend><input id=\"fieldset-disabled\" required></fieldset></main>"
+               :html "<main><input id=\"disabled\" disabled><input id=\"checked\" type=\"checkbox\" checked><input id=\"hidden-required\" type=\"hidden\" required><input id=\"file-required\" type=\"file\" required value=\"/secret/path.txt\"><input id=\"required\" required><input id=\"readonly-required\" required readonly><input id=\"readonly-long\" value=\"abcde\" maxlength=\"4\" readonly><input id=\"plain\"><input id=\"readonly\" readonly><input id=\"readonly-number\" type=\"number\" readonly value=\"7\"><input id=\"invalid\" invalid><input id=\"checkbox-required\" type=\"checkbox\" required><input id=\"radio-required\" type=\"radio\" name=\"choice\" required><input id=\"radio-checked\" type=\"radio\" name=\"choice\" checked><input id=\"range-overflow\" type=\"number\" min=\"1\" max=\"10\" value=\"15\"><input id=\"range-underflow\" type=\"number\" min=\"1\" max=\"10\" value=\"-3\"><input id=\"range-ok\" type=\"number\" min=\"1\" max=\"10\" value=\"5\"><input id=\"range-boundary\" type=\"number\" min=\"1\" max=\"10\" value=\"10\"><input id=\"range-input-overflow\" type=\"range\" min=\"1\" max=\"10\" value=\"15\"><input id=\"range-text-ignored\" type=\"text\" min=\"1\" max=\"10\" value=\"15\"><select id=\"select-required\" required><option value=\"\">Choose</option><option value=\"go\">Go</option></select><select id=\"select-disabled-selected\" required><option value=\"locked\" selected disabled>Locked</option><option value=\"go\">Go</option></select><select id=\"select-optgroup-disabled\" required><optgroup disabled><option id=\"optgroup-locked\" value=\"locked\" selected>Locked</option></optgroup><option value=\"go\">Go</option></select><select id=\"select-multiple-empty\" multiple required><option value=\"one\">One</option><option value=\"two\">Two</option></select><select id=\"select-valid\" required><option value=\"\">Choose</option><option value=\"go\" selected>Go</option></select><fieldset disabled><legend><input id=\"legend-enabled\" value=\"ok\"></legend><input id=\"fieldset-disabled\" required></fieldset></main>"
                :css "input { color: black }
                      input:disabled { color: gray }
                      option:disabled { color: silver }
@@ -135,6 +135,21 @@
     (is (nil? (get-in (attrs "fieldset-disabled") [:style/border-color])))
     (is (nil? (get-in (attrs "radio-required") [:style/border-color]))
         "a checked radio in the same group satisfies required")
+    (is (= "red" (get-in (attrs "range-overflow") [:style/border-color]))
+        "value=15 exceeds max=10 -- real HTML5 range-overflow, :invalid")
+    (is (= "red" (get-in (attrs "range-underflow") [:style/border-color]))
+        "value=-3 is below min=1 -- real HTML5 range-underflow, :invalid")
+    (is (nil? (get-in (attrs "range-ok") [:style/border-color]))
+        "value=5 is within [1,10] -- :valid, not :invalid")
+    (is (= 24 (get-in (attrs "range-ok") [:style/height])))
+    (is (nil? (get-in (attrs "range-boundary") [:style/border-color]))
+        "value=10 == max=10 -- the boundary itself is in range, not overflow")
+    (is (= "red" (get-in (attrs "range-input-overflow") [:style/border-color]))
+        "type=range gets the identical range-overflow check as type=number")
+    (is (nil? (get-in (attrs "range-text-ignored") [:style/border-color]))
+        "min/max are only ever a number/range constraint -- an ordinary text
+         input with the same attributes and \"out of range\" value is
+         unaffected by them")
     (is (= 24 (get-in (attrs "plain") [:style/height])))
     (is (= 24 (get-in (attrs "radio-required") [:style/height])))
     (is (= 24 (get-in (attrs "select-valid") [:style/height])))

@@ -295,6 +295,25 @@
                       (or parsed fallback))
     :else fallback))
 
+(defn- parse-number
+  "A `min`/`max`/numeric `value` as a real number for range-validation
+   purposes (see `validation-reason`'s `:range-underflow`/`:range-
+   overflow` cases) -- unlike `parse-int` above, this also accepts a
+   decimal fraction (`\"3.5\"`), since real HTML5 `<input type=\"number\">`/
+   `<input type=\"range\">` values/`min`/`max` are ordinary floating-
+   point numbers, not just integers. Mirrors kotoba-lang/cssom's own
+   identically-scoped `parse-number` (that repo's `:invalid`/`:valid` CSS
+   pseudo-class matching needs the exact same range check as this file's
+   real form-submission-blocking validation, so both were fixed together
+   -- see that repo's own docstring for why scientific notation is
+   deliberately out of scope)."
+  [value]
+  (when (some? value)
+    (let [s (str/trim (str value))]
+      (when (re-matches #"-?\d+(\.\d+)?" s)
+        #?(:clj (Double/parseDouble s)
+           :cljs (js/parseFloat s))))))
+
 (defn- state-from-node
   [node]
   (let [attrs (:attrs node)
@@ -737,13 +756,33 @@
       :else nil)))
 
 (defn- validation-reason
+  "`:range-underflow`/`:range-overflow` (real HTML5 `ValidityState`
+   property names) for `type=\"number\"`/`\"range\"`: a non-blank,
+   numerically-parseable value outside its own `min`/`max` attributes
+   (either bound optional; a non-numeric `min`/`max` is simply not
+   enforced, matching this fn's existing degrade-don't-guess treatment of
+   a non-numeric `minlength`/`maxlength`). Before this, a real, common
+   pattern like `<input type=\"number\" min=\"1\" max=\"10\" value=\"15\">`
+   was silently treated as valid at real form-submission time -- this
+   engine would let the form submit when a real browser blocks it and
+   dispatches a real `invalid` event instead. Fixed together with the
+   identical gap in kotoba-lang/cssom's own `constraint-invalid?` (that
+   repo's `:invalid`/`:valid` CSS pseudo-class matching had the exact
+   same missing check)."
   [document node-id]
   (let [node (get-in document [:nodes node-id])
         attrs (:attrs node)
         type (input-type node)
         text-value (text-value-for-validation document node-id)
         min-length (parse-int (:minlength attrs) nil)
-        max-length (parse-int (:maxlength attrs) nil)]
+        max-length (parse-int (:maxlength attrs) nil)
+        range-value (when (and (= :input (:tag node))
+                               (contains? #{"number" "range"} type)
+                               (some? text-value)
+                               (not (str/blank? text-value)))
+                     (parse-number text-value))
+        range-min (when range-value (parse-number (:min attrs)))
+        range-max (when range-value (parse-number (:max attrs)))]
     (when-not (or (disabled-control? document node-id)
                   (readonly-control? document node-id)
                   (validation-barred-control? node))
@@ -768,6 +807,12 @@
              max-length
              (> (count text-value) max-length))
         :too-long
+
+        (and range-min (< range-value range-min))
+        :range-underflow
+
+        (and range-max (> range-value range-max))
+        :range-overflow
 
         :else nil))))
 
