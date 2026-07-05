@@ -171,10 +171,25 @@
     (or (< (count labels) 2)
         (contains? public-suffix-like-domains domain))))
 
+(defn- ipv4-address?
+  [host]
+  (boolean (re-matches #"(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9]|0)\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9]|0)"
+                       (str host))))
+
 (defn- domain-matches?
+  "RFC 6265 5.1.3: a suffix match only counts when the request host is a
+  real host NAME -- if it's an IP address, only an EXACT match is a
+  domain-match, never a subdomain-style suffix. Without this, an IPv4
+  host like \"192.168.1.1\" would accept a cookie's Domain=168.1.1 as a
+  valid \"parent domain\" and that same cookie would then leak to any
+  OTHER, completely unrelated IP host sharing the numeric suffix (e.g.
+  \"10.168.1.1\") -- a real, reachable cookie leak between unrelated
+  devices on a local network, since IP-literal URLs are ordinary,
+  supported page URLs here (LAN admin panels, local dev servers, ...)."
   [host domain]
   (or (= host domain)
-      (and (str/ends-with? host (str "." domain))
+      (and (not (ipv4-address? host))
+           (str/ends-with? host (str "." domain))
            (< (count domain) (count host)))))
 
 (defn- cookie-domain

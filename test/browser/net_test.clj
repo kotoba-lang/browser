@@ -984,6 +984,80 @@
     (is (= "implicit=yes" (get-in @same-site-seen [:headers "cookie"])))
     (is (nil? (get-in @cross-site-seen [:headers "cookie"])))))
 
+(deftest cookie-domain-does-not-subdomain-match-across-unrelated-ip-hosts
+  ;; RFC 6265 5.1.3: a suffix match is only a real domain-match when the
+  ;; request host is a genuine host NAME -- if it's an IP address, only an
+  ;; EXACT match counts. Without this, an IPv4 host like "192.168.1.1"
+  ;; could accept a cookie's Domain=168.1.1 as a valid "parent domain",
+  ;; and that same cookie would then leak to any OTHER, unrelated IP host
+  ;; that happens to share the numeric suffix (e.g. "10.168.1.1") -- a
+  ;; real, reachable cross-device cookie leak on a local network, since
+  ;; IP-literal URLs are ordinary page URLs here (LAN admin panels, local
+  ;; dev servers, ...).
+  (let [p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "http://192.168.1.1" :net/fetch)
+              (profile/grant-permission "http://10.168.1.1" :net/fetch))
+        stored (net/fetch-resource
+                {:store (storage/empty-store)
+                 :profile p
+                 :page-url "http://192.168.1.1/"
+                 :fetch-fn (fn [_]
+                             {:status 200
+                              :headers {"set-cookie" "leak=secret; Domain=168.1.1; Path=/"}
+                              :body "ok"})}
+                {:url "http://192.168.1.1/set" :method :get})
+        unrelated-seen (atom nil)
+        _unrelated (net/fetch-resource
+                    {:store (:store stored)
+                     :profile p
+                     :page-url "http://10.168.1.1/"
+                     :cache? false
+                     :fetch-fn (fn [request] (reset! unrelated-seen request) {:status 200 :headers {} :body "ok"})}
+                    {:url "http://10.168.1.1/api" :method :get})
+        same-host-seen (atom nil)
+        _same-host (net/fetch-resource
+                    {:store (:store stored)
+                     :profile p
+                     :page-url "http://192.168.1.1/"
+                     :cache? false
+                     :fetch-fn (fn [request] (reset! same-host-seen request) {:status 200 :headers {} :body "ok"})}
+                    {:url "http://192.168.1.1/api" :method :get})]
+    (is (nil? (get-in @unrelated-seen [:headers "cookie"]))
+        "a cookie whose Domain attribute happens to numerically suffix-match a DIFFERENT IP host must never leak to it")
+    ;; The Set-Cookie itself is invalid (a bare IP host cannot legitimately
+    ;; claim "168.1.1" as a parent domain either -- RFC 6265 5.3 step 6
+    ;; requires the setting host to domain-match its own Domain attribute),
+    ;; so real browsers reject it entirely rather than silently narrowing
+    ;; it -- it must not even come back to the exact host that sent it.
+    (is (nil? (get-in @same-host-seen [:headers "cookie"]))
+        "a Domain attribute an IP host cannot legitimately claim must be rejected outright, not just scoped narrower")))
+
+(deftest cookie-without-domain-attribute-round-trips-normally-for-an-ip-host
+  ;; A host-only cookie (no Domain attribute at all) is always valid
+  ;; regardless of whether the host is a real name or an IP address --
+  ;; the IP-address carve-out in RFC 6265 5.1.3 only affects suffix
+  ;; (subdomain-style) matching, never plain host-only cookies.
+  (let [p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "http://192.168.1.1" :net/fetch))
+        stored (net/fetch-resource
+                {:store (storage/empty-store)
+                 :profile p
+                 :page-url "http://192.168.1.1/"
+                 :fetch-fn (fn [_]
+                             {:status 200
+                              :headers {"set-cookie" "sid=abc123; Path=/"}
+                              :body "ok"})}
+                {:url "http://192.168.1.1/api" :method :get})
+        seen (atom nil)
+        _fetched (net/fetch-resource
+                  {:store (:store stored)
+                   :profile p
+                   :page-url "http://192.168.1.1/"
+                   :cache? false
+                   :fetch-fn (fn [request] (reset! seen request) {:status 200 :headers {} :body "ok"})}
+                  {:url "http://192.168.1.1/api" :method :get})]
+    (is (= "sid=abc123" (get-in @seen [:headers "cookie"])))))
+
 (deftest credentialed-fetch-sends-profile-cookie
   (let [p (-> (profile/new-profile {:id "default"})
               (profile/grant-permission "https://app.example" :net/fetch))
