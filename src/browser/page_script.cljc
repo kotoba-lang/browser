@@ -143,11 +143,22 @@
 (defn resolve-src
   [page-url src]
   (let [src (str src)
-        src (if (str/starts-with? src "./") (subs src 2) src)]
+        ;; RFC 3986 4.2: a relative-path reference whose first segment
+        ;; contains a colon (e.g. "video:120/clip.js") is indistinguishable
+        ;; from an absolute URI with scheme "video" -- callers must prefix
+        ;; it with "./" to force relative-path interpretation. `dot-relative?`
+        ;; remembers that the caller did so, so the colon in what's left
+        ;; after stripping "./" is never mistaken for a scheme below (an
+        ;; earlier version stripped the "./" and then still ran
+        ;; `absolute-url?` on the remainder, silently defeating the very
+        ;; disambiguation "./" exists to provide).
+        dot-relative? (str/starts-with? src "./")
+        src (if dot-relative? (subs src 2) src)]
     (cond
-      (absolute-url? src) (if (has-dot-segments? src)
-                            (normalize-dot-segments src)
-                            src)
+      (and (not dot-relative?) (absolute-url? src))
+      (if (has-dot-segments? src)
+        (normalize-dot-segments src)
+        src)
       (str/starts-with? src "#")
       (str (strip-fragment page-url) src)
       (str/starts-with? src "?")
