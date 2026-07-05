@@ -4049,3 +4049,25 @@
         "a real click through the full session genuinely reveals the body")
     (is (= ["Click me"] (texts closed))
         "a second real click genuinely hides it again")))
+
+(deftest pressing-space-on-a-focused-summary-opens-its-details-through-a-full-session
+  ;; The keyboard-activation companion to the click round-trip above --
+  ;; <summary> is now focusable-control?/activatable-control?, so a real
+  ;; keyboard-only user (no mouse at all) can genuinely open/close a real
+  ;; <details> through the full session, not just a mouse-driven one.
+  (let [texts (fn [s] (->> (get-in s [:browser.session/page :browser/draw-ops]) (keep :text)))
+        session (-> (session/new-session {:host (host/recording-host)})
+                   (session/load-html!
+                    {:url "kotoba://details"
+                     :html "<details id=\"d\"><summary id=\"s\">Click me</summary><p>Body</p></details>"}))
+        summary-id (bridge/query-selector
+                    (get-in session [:browser.session/page :browser/document]) "#s")
+        opened (session/apply-document-input-event!
+                session {:event/type :key/down :node/id summary-id :key " "})
+        closed (session/apply-document-input-event!
+                opened {:event/type :key/down :node/id summary-id :key "Enter"})]
+    (is (= ["Click me"] (texts session)))
+    (is (= ["Click me" "Body"] (texts opened))
+        "Space through the full session genuinely reveals the body")
+    (is (= ["Click me"] (texts closed))
+        "Enter through the full session genuinely hides it again")))

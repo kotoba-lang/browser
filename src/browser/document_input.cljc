@@ -48,6 +48,39 @@
             node-id))
         (:nodes document)))
 
+(defn- summary-control?
+  [document node-id]
+  (= :summary (get-in document [:nodes node-id :tag])))
+
+(defn- details-parent-id
+  "The `:details` node-id `node-id` (a clicked/activated `:summary`
+   element) toggles -- but ONLY when `node-id` is itself a real, direct
+   `:summary` child of a `:details` element (real HTML5: any OTHER
+   `:summary` descendant deeper in a `<details>`'s subtree, or a
+   `:summary` with no `:details` parent at all, is not interactive by
+   default). Returns nil for anything else, so callers (the click
+   handler AND, since this cycle, `focusable-control?`/
+   `activatable-control?` for real keyboard activation) can gate the
+   whole toggle behavior on a single truthy check. Moved here (ahead of
+   `focusable-control?`, which now calls it) from its original spot right
+   after `radio-control?`, purely to avoid a forward reference -- no
+   behavior change.
+
+   Deliberately narrower than a click-anywhere-inside-<summary> ancestor
+   walk (the shape `closest-link-id` uses for `<a>`): this only ever
+   fires when the click/activation TARGET itself is the `<summary>`
+   element, not some nested child inside it (e.g. a `<span>` inside
+   `<summary>text</span></summary>`) -- the single most common
+   real-world shape (`<summary>` with no nested markup of its own),
+   matching this codebase's existing 'most common case, not full spec
+   coverage' convention (see `auto-close-tags` in the sibling htmldom
+   repo for the same kind of documented, honest cut)."
+  [document node-id]
+  (when (summary-control? document node-id)
+    (let [parent-id (parent-node-id document node-id)]
+      (when (= :details (get-in document [:nodes parent-id :tag]))
+        parent-id))))
+
 (defn- descendant-or-self?
   [document ancestor-id node-id]
   (or (= ancestor-id node-id)
@@ -101,12 +134,21 @@
       (file-input-control? node)))
 
 (defn focusable-control?
+  "A real, direct `:summary` child of a `:details` element is ALSO
+   focusable (real HTML5: `<summary>` is one of the handful of elements
+   that are focusable/tabbable by default with no `tabindex` needed at
+   all) -- deliberately checked as a separate `or` branch, not folded
+   into `disabled-control-tags`, since that set is also used for the
+   `disabled` attribute check in `disabled-control?`/`activatable-
+   control?`'s own gate, and `<summary>` has no `disabled` attribute in
+   real HTML5 at all (folding it in would wrongly imply it does)."
   [document node-id]
   (let [node (get-in document [:nodes node-id])]
-    (and (contains? disabled-control-tags (:tag node))
-         (not (hidden-input-control? node))
-         (not (file-input-control? node))
-         (not (disabled-control? document node-id)))))
+    (or (and (contains? disabled-control-tags (:tag node))
+             (not (hidden-input-control? node))
+             (not (file-input-control? node))
+             (not (disabled-control? document node-id)))
+        (boolean (details-parent-id document node-id)))))
 
 (defn readonly-control?
   [document node-id]
@@ -125,34 +167,6 @@
   (let [node (get-in document [:nodes node-id])]
     (and (= :input (:tag node))
          (= "radio" (input-type node)))))
-
-(defn- summary-control?
-  [document node-id]
-  (= :summary (get-in document [:nodes node-id :tag])))
-
-(defn- details-parent-id
-  "The `:details` node-id `node-id` (a clicked `:summary` element) toggles
-   on click -- but ONLY when `node-id` is itself a real, direct `:summary`
-   child of a `:details` element (real HTML5: any OTHER `:summary`
-   descendant deeper in a `<details>`'s subtree, or a `:summary` with no
-   `:details` parent at all, is not interactive by default). Returns nil
-   for anything else, so callers can gate the whole toggle behavior on a
-   single truthy check.
-
-   Deliberately narrower than a click-anywhere-inside-<summary> ancestor
-   walk (the shape `closest-link-id` uses for `<a>`): this only ever
-   fires when the click TARGET itself is the `<summary>` element, not
-   some nested child inside it (e.g. a `<span>` inside `<summary>text
-   </span></summary>`) -- the single most common real-world shape
-   (`<summary>` with no nested markup of its own), matching this
-   codebase's existing 'most common case, not full spec coverage'
-   convention (see `auto-close-tags` in the sibling htmldom repo for the
-   same kind of documented, honest cut)."
-  [document node-id]
-  (when (summary-control? document node-id)
-    (let [parent-id (parent-node-id document node-id)]
-      (when (= :details (get-in document [:nodes parent-id :tag]))
-        parent-id))))
 
 (defn select-control?
   [document node-id]
@@ -187,13 +201,24 @@
                   (= "button" (input-type node)))))))
 
 (defn activatable-control?
+  "A real, direct `:summary` child of a `:details` element is ALSO
+   activatable via Space/Enter (real HTML5 keyboard behavior, matching
+   its click behavior in `reduce-click-event` exactly -- both routes
+   converge on the identical toggle logic there, since the keyboard path
+   below re-dispatches through `reduce-click-event` as a synthesized
+   `:pointer/click`, not a separate implementation). `disabled-control?`
+   is a structural no-op for `:summary` either way -- it only ever
+   checks `disabled-control-tags`, which `:summary` was deliberately kept
+   OUT of (see `focusable-control?`), since `<summary>` has no real
+   `disabled` attribute at all."
   [document node-id]
   (and (not (disabled-control? document node-id))
        (or (button-control? document node-id)
            (checkbox-control? document node-id)
            (radio-control? document node-id)
            (submit-control? document node-id)
-           (reset-control? document node-id))))
+           (reset-control? document node-id)
+           (boolean (details-parent-id document node-id)))))
 
 (defn- radio-group-node-ids
   "The HTML radio button group containing node-id: same (non-empty) `name`

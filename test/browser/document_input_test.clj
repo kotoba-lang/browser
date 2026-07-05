@@ -629,6 +629,46 @@
     (is (= true (get-in result [:document :nodes one :attrs :open])))
     (is (nil? (get-in result [:document :nodes two :attrs :open])))))
 
+(deftest summary-space-and-enter-keys-toggle-parent-details-open
+  ;; Real HTML5: <summary> is focusable/tabbable by default (no tabindex
+  ;; needed) and Space/Enter toggles its parent <details> exactly like a
+  ;; click does -- before this fix, <summary> was not focusable-control?
+  ;; at all, so this engine had no keyboard-accessible path to a
+  ;; <details>/<summary> widget whatsoever, only a mouse click.
+  (let [page (browser/load-html {:url "kotoba://details"
+                                 :html "<main><details id=\"d\"><summary id=\"s\">Click me</summary><p>Body</p></details></main>"})
+        document (:browser/document page)
+        details (bridge/query-selector document "#d")
+        summary (bridge/query-selector document "#s")
+        opened (document-input/reduce-event document {:event/type :key/down
+                                                      :node/id summary
+                                                      :key " "})
+        closed (document-input/reduce-event (:document opened) {:event/type :key/down
+                                                                :node/id summary
+                                                                :key "Enter"})]
+    (is (= true (:handled? opened)))
+    (is (= true (get-in opened [:document :nodes details :attrs :open]))
+        "Space toggles it open, exactly like a click")
+    (is (= false (get-in closed [:document :nodes details :attrs :open]))
+        "Enter toggles it back closed")))
+
+(deftest clicking-a-summary-focuses-it-so-a-later-bare-keydown-still-toggles-it
+  ;; The real end-to-end flow: click to focus (no explicit node/id needed
+  ;; on the later keydown -- it resolves via document/:focus, the same
+  ;; fallback every other focusable control already relies on).
+  (let [page (browser/load-html {:url "kotoba://details"
+                                 :html "<main><details id=\"d\"><summary id=\"s\">Click me</summary><p>Body</p></details></main>"})
+        document (:browser/document page)
+        details (bridge/query-selector document "#d")
+        summary (bridge/query-selector document "#s")
+        clicked (document-input/reduce-event document {:event/type :pointer/click :node/id summary})
+        spaced (document-input/reduce-event (:document clicked) {:event/type :key/down :key " "})]
+    (is (= summary (get-in clicked [:document :focus]))
+        "a real click must focus the summary, not leave focus untouched")
+    (is (= true (:handled? spaced)))
+    (is (= false (get-in spaced [:document :nodes details :attrs :open]))
+        "the click already opened it; the focus-resolved Space toggles it back closed")))
+
 (deftest label-click-activates-associated-control
   (let [page (browser/load-html {:url "kotoba://label"
                                  :html "<main><label id=\"label\" for=\"flag\">Flag</label><input id=\"flag\" type=\"checkbox\"></main>"})
