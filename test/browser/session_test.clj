@@ -3763,6 +3763,37 @@
     (is (= (get-in s [:browser.session/audit :audit/datoms])
            (get-in snapshot [:snapshot/audit :audit/datoms])))))
 
+(deftest audit-events-stay-in-chronological-append-order-past-eight-entries
+  "Clojure promotes a map from PersistentArrayMap to PersistentHashMap once
+   it grows past 8 entries, and only the former happens to iterate in
+   insertion order. `browser.audit/events` used to group datoms by eid with
+   `group-by` (a plain hash-map), so any real session logging more than 8
+   audit events -- trivially reached by a handful of navigations, exactly
+   like this one -- got its audit trail back in an arbitrary hash-bucket
+   order instead of the order things actually happened. That silently broke
+   consumers such as `browser.browser-use/debug-state`'s
+   `:audit-events-tail`, whose whole point is showing the *most recent*
+   activity for debugging a mis-targeted browser-use action: taking a
+   `subvec` tail of a mis-ordered vector returns an arbitrary sample of
+   history, not the tail."
+  (let [h (host/recording-host)
+        s (session/new-session
+           {:host h
+            :fetch-fn (fn [{:keys [url]}]
+                        {:status 200 :body (str "<main>" url "</main>")})})
+        s (reduce (fn [s url] (session/navigate! s url))
+                  s
+                  (map #(str "kotoba://page" %) (range 1 11)))]
+    ;; 10 real navigations -> 10 :page/commit audit events, well past the
+    ;; 8-entry array-map/hash-map cutover.
+    (is (< 8 (count (get-in s [:browser.session/audit :audit/datoms])))
+        "sanity: this session must actually cross the 8-datom cutover")
+    (is (= (repeat 10 :page/commit)
+           (mapv :audit/event (audit/events (:browser.session/audit s)))))
+    (is (= (mapv #(str "kotoba://page" %) (range 1 11))
+           (mapv :url (audit/events (:browser.session/audit s))))
+        "events must come back oldest-first, matching real navigation order")))
+
 (deftest navigation-lifecycle-supports-redirect-back-forward-reload-and-error-document
   (let [h (host/recording-host)
         calls (atom [])

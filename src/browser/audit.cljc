@@ -35,13 +35,21 @@
 
 (defn events
   [audit]
-  (let [grouped (group-by second (:audit/datoms audit))]
-    (mapv (fn [[eid datoms]]
-            (reduce (fn [m [_ _ attr v]]
-                      (assoc m attr v))
-                    {:audit/id eid}
-                    datoms))
-          grouped)))
+  (->> (:audit/datoms audit)
+       ;; `append-event` always writes one event's datoms as a contiguous run
+       ;; (see `append-event`/`append-events`), so grouping consecutive runs
+       ;; with `partition-by` recovers each event while preserving the
+       ;; original append order. A `group-by` here would bucket by eid into
+       ;; a plain hash-map, whose iteration order is hash-based rather than
+       ;; chronological -- silently scrambling event order for any consumer
+       ;; (e.g. `browser.browser-use/debug-state`'s `:audit-events-tail`)
+       ;; that relies on `events` being oldest-first.
+       (partition-by second)
+       (mapv (fn [datoms]
+               (reduce (fn [m [_ _ attr v]]
+                         (assoc m attr v))
+                       {:audit/id (second (first datoms))}
+                       datoms)))))
 
 (defn replay-summary
   [audit]
