@@ -504,6 +504,71 @@
              "actually gives -- got "
              (pr-str (:notification/snapshot @received-payload))))))
 
+(deftest quickjs-history-length-snapshot-threads-seeded-value-into-engine-invocation
+  ;; history-length-snapshot is the REAL, host-computed session navigation
+  ;; depth `invocation-with-snapshots` threads into the engine invocation as
+  ;; :history/snapshot (mirrors :notification/snapshot's own precedent of
+  ;; being asserted directly against the captured engine request -- see
+  ;; quickjs-notification-permission-snapshot-reports-granted-with-profile-grant
+  ;; above). Before this fix, new-state had no :history-length injection
+  ;; point at all -- evaluate!/load-module! never threaded any such value,
+  ;; so quickjs-wasm's globalThis.history.length could only ever start from
+  ;; the hardcoded 0 literal, regardless of how many real navigations
+  ;; already happened in the session.
+  (let [adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        received-payload (atom nil)
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :history-length 3
+                :engine (fn [request]
+                          (reset! received-payload request)
+                          {:result :ok :requests []})})
+        _ (execution/evaluate! state {:source "/* probe */"})]
+    (is (= 3 (:history/snapshot @received-payload))
+        (str "expected history-length-snapshot to thread the REAL, "
+             "host-seeded :history-length (3) into the engine invocation as "
+             ":history/snapshot -- got " (pr-str (:history/snapshot @received-payload))))))
+
+(deftest quickjs-history-length-snapshot-defaults-to-zero-without-seed
+  ;; Regression guard: a state built without a :history-length option (e.g.
+  ;; a caller invoking new-state directly, or below evaluate!/load-module!)
+  ;; must keep today's default of 0, unaffected by this change -- mirrors
+  ;; run-script-geolocation-defaults-to-zero-without-host-injection's
+  ;; precedent in test/browser/session_test.clj.
+  (let [adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        received-payload (atom nil)
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :engine (fn [request]
+                          (reset! received-payload request)
+                          {:result :ok :requests []})})
+        _ (execution/evaluate! state {:source "/* probe */"})]
+    (is (= 0 (:history/snapshot @received-payload))
+        (str "expected history-length-snapshot to default to 0 when no "
+             ":history-length was ever seeded -- got "
+             (pr-str (:history/snapshot @received-payload))))))
+
+(deftest quickjs-history-length-snapshot-threads-through-load-module!-too
+  ;; evaluate! and load-module! both call invocation-with-snapshots and must
+  ;; both thread :history-length the same way (mirrors the notification
+  ;; snapshot's own dual-arity threading through both fns).
+  (let [adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        received-payload (atom nil)
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :history-length 5
+                :engine (fn [request]
+                          (reset! received-payload request)
+                          {:result "export default 1" :requests []})})
+        _ (execution/load-module! state "./mod.js" nil)]
+    (is (= 5 (:history/snapshot @received-payload))
+        (str "expected load-module! to thread the same seeded :history-length "
+             "(5) into the engine invocation as :history/snapshot -- got "
+             (pr-str (:history/snapshot @received-payload))))))
+
 (deftest quickjs-fullscreen-request-records-context-request-with-profile-grant
   (let [page (browser/load-html {:url "https://app.example/app"
                                  :html "<main id=\"app\">Fullscreen</main>"})

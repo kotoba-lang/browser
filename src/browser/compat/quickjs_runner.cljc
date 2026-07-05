@@ -315,7 +315,14 @@
   LATER script tag's `fetch-snapshot` still deliver a response a PREVIOUS
   script tag's `fetch()` call already produced. `:document` is deliberately
   excluded -- it has its own, already-working threading path (re-read from
-  `:browser.session/page` on every call)."
+  `:browser.session/page` on every call). `:history-length` (note: NOT the
+  same thing as the `:history/entries`/`:history/index` sandboxed pushState
+  model below, which IS persisted here) is also deliberately excluded --
+  `run-script!` recomputes it fresh, directly from the session's real
+  `:browser.session/navigation` entry count, on every call, which already
+  gives the identical answer within one page generation (a session's
+  navigation depth cannot change without a navigation, and a navigation
+  always bumps the generation -- see `runtime-state-for-generation`)."
   [:storage :clipboard :geolocation
    :dom/client-ids :websocket/connections :websocket/handles
    :worker/instances :worker/handles :worker/outbox
@@ -372,6 +379,17 @@
   into a script's `.then()` chain (see the \"Real fetch() response
   delivery\" section below).
 
+  Also threads the real, current `(count (:entries (:browser.session/
+  navigation session)))` into `quickjs-execution/new-state` as
+  `:history-length`, a plain integer, point-in-time snapshot (NOT persisted
+  across script tags like `:geolocation` is -- a session's navigation depth
+  cannot change within a single page generation, so recomputing it fresh
+  every call already gives the same answer) of how many real navigations
+  have actually happened in the session so far. `quickjs-execution/
+  history-length-snapshot` reads it and threads it into `quickjs-wasm` as
+  `:history/snapshot`, so `globalThis.history.length`'s STARTING value
+  reflects real session navigation depth instead of always being `0`.
+
   Returns `session` unchanged (plus a `:script/skipped` history entry) if the
   engine isn't ready yet -- see the namespace docstring."
   [session script]
@@ -392,7 +410,8 @@
                            :worker-fn (or (:browser.session/worker-fn session)
                                           (quickjs-wasm/worker-fn engine))
                            :fetch-fn (:browser.session/fetch-fn session)
-                           :geolocation (:browser.session/geolocation session)})
+                           :geolocation (:browser.session/geolocation session)
+                           :history-length (count (:entries (:browser.session/navigation session)))})
                          persisted)
             result (execution/evaluate! state (script-payload script))]
         (-> session

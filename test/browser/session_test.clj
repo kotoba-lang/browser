@@ -3962,3 +3962,46 @@
         session (geolocation-probe-session {:profile profile})]
     (is (= {:latitude 0.0 :longitude 0.0 :accuracy 0.0}
            (get-in (run-geolocation-probe! session) [:position :coords])))))
+
+(defn- run-history-length-probe!
+  [session]
+  (let [received (atom nil)
+        session (assoc session :browser.session/script-engine
+                       {:script-engine/engine (fn [request]
+                                                (reset! received request)
+                                                {:result :ok :requests []})})]
+    (quickjs-runner/run-script! session {:script/type :classic
+                                         :script/source "/* probe */"
+                                         :script/url (get-in session [:browser.session/page :browser/url])})
+    (:history/snapshot @received)))
+
+(deftest run-script-threads-real-session-navigation-depth-into-history-length-test
+  ;; Before this fix, quickjs-execution/new-state had no :history-length
+  ;; injection point at all, so run-script! never supplied one -- every real
+  ;; page load could only ever report globalThis.history.length starting
+  ;; from the hardcoded 0, regardless of how many real navigations already
+  ;; happened in the session (mirrors run-script-threads-real-session-level-
+  ;; geolocation-into-the-engine-invocation's own proof shape for
+  ;; :geolocation above).
+  (let [session (-> (session/new-session {:host (host/recording-host)})
+                    (session/load-html! {:url "https://app.example/one" :html "<main>One</main>"})
+                    (session/load-html! {:url "https://app.example/two" :html "<main>Two</main>"}))]
+    (is (= 2 (count (get-in session [:browser.session/navigation :entries])))
+        "two real page loads should have built up two real navigation entries")
+    (is (= 2 (run-history-length-probe! session))
+        "history-length should equal the real session's actual navigation depth")))
+
+(deftest run-script-history-length-tracks-additional-navigation-test
+  (let [session (-> (session/new-session {:host (host/recording-host)})
+                    (session/load-html! {:url "https://app.example/one" :html "<main>One</main>"}))]
+    (is (= 1 (run-history-length-probe! session)))
+    (let [session (session/load-html! session {:url "https://app.example/two" :html "<main>Two</main>"})]
+      (is (= 2 (run-history-length-probe! session))))))
+
+(deftest run-script-history-length-defaults-to-zero-for-a-fresh-session-without-navigation-test
+  ;; Regression guard: browser.session/new-session starts with an empty
+  ;; :browser.session/navigation (no entries) until the first commit-page!,
+  ;; so a script run before ANY page has ever committed should see 0.
+  (let [session (session/new-session {:host (host/recording-host)})]
+    (is (= 0 (count (get-in session [:browser.session/navigation :entries]))))
+    (is (= 0 (run-history-length-probe! session)))))

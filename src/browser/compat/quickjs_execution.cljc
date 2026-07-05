@@ -56,8 +56,14 @@
   needs one), so `quickjs-wasm`'s webapi shim can install it as a VM global
   before running `payload`'s script (`:notification/snapshot`) and answer
   `Notification.permission`/`Notification.requestPermission` synchronously
-  from real host state instead of always reporting the hardcoded `'default'`."
-  [call payload capability-results document storage clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot notification-snapshot]
+  from real host state instead of always reporting the hardcoded `'default'`,
+  and the real, current session-level navigation depth (already computed
+  host-side by `history-length-snapshot`, a plain integer -- see that fn),
+  so `quickjs-wasm`'s webapi shim can install it as a VM global before
+  running `payload`'s script (`:history/snapshot`) and seed
+  `globalThis.history.length`'s STARTING value from it instead of the
+  hardcoded `0` literal."
+  [call payload capability-results document storage clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot notification-snapshot history-length-snapshot]
   (let [snapshot (cond-> (dom-bridge/document-snapshot document)
                    (:script/node-id payload)
                    (assoc :current-script (:script/node-id payload)))]
@@ -70,7 +76,8 @@
                        :websocket/snapshot websocket-snapshot
                        :worker/snapshot worker-snapshot
                        :fetch/snapshot fetch-snapshot
-                       :notification/snapshot notification-snapshot)
+                       :notification/snapshot notification-snapshot
+                       :history/snapshot history-length-snapshot)
                 capability-results)))
 
 (defn- take-capability-results
@@ -729,6 +736,53 @@
       {:ok? false
        :error (:reason decision)
        :permission/decision decision})))
+
+(defn- history-length-snapshot
+  "Compute the REAL, current session-level navigation depth from `state`'s
+  `:history-length` key, host-side, BEFORE the script runs -- so
+  `invocation-with-snapshots` can hand it to `quickjs-wasm` as
+  `:history/snapshot` and the webapi shim's `globalThis.history` object can
+  seed its `length` property's STARTING value from it (see
+  `quickjs-wasm/history-length-snapshot-source`), instead of the hardcoded
+  `0` literal every fresh `globalThis.history` object used to start from
+  regardless of how many real navigations already happened in the session.
+  Mirrors `notification-permission-snapshot`'s role in the threading (a
+  plain, JSON-safe value computed once, host-side, ahead of eval), but there
+  is no `permission-decision-for` gate here -- unlike a permission, a
+  session's navigation depth isn't gated by anything the active profile
+  grants or denies, so this is a direct read, not a decision.
+
+  `:history-length` is a PLAIN INTEGER, not a live-updating atom the way
+  `:geolocation`/`:clipboard` are: `browser.compat.quickjs-runner/
+  run-script!` computes it once, fresh, from the session's real
+  `:browser.session/navigation` entry count at the moment a script starts
+  running (a session's navigation depth cannot change mid-script the way a
+  host-owned GPS position can between polls), and `new-state` just carries
+  that already-computed number through -- see this namespace's `new-state`.
+
+  Returns a plain integer, defaulting to `0` when `state` was built without
+  a `:history-length` (e.g. `new-state`'s own default, or a caller invoking
+  this engine below `evaluate!`/`load-module!` directly with a hand-built
+  state map), mirroring a fresh, never-navigated real browsing context's
+  actual `history.length`.
+
+  NOTE (deliberately out of scope, not fixed here): this only seeds the
+  STARTING value JS sees. This engine's `pushState`/`replaceState`/`go`/
+  `back`/`forward` webapi shim methods still only mutate a VM-local
+  `this.length` counter and queue `history/push-state`/`history/
+  replace-state`/`history/traverse` capability requests that `apply-capability`
+  applies against a SEPARATE, sandboxed history model of its own
+  (`history-push-state-result`/`history-replace-state-result`/
+  `history-traverse-result` above, backed by `state`'s `:history/entries`/
+  `:history/index` -- note the `:history/*` namespace there is a DIFFERENT,
+  unrelated key from this fn's `:history-length`). Neither model ever
+  updates the other, and `browser.session` never consumes those capability
+  results to actually move `:browser.session/page`/`:browser.session/
+  navigation`, so a script's own `history.pushState()`/`history.back()`
+  still cannot make the real session navigate. Unifying the two history
+  models is a separate, larger design task."
+  [state]
+  (or (:history-length state) 0))
 
 (defn- resolve-request-node-id
   [state request]
@@ -1965,7 +2019,8 @@
                                                             (websocket-snapshot state)
                                                             worker-snap
                                                             fetch-snap
-                                                            (notification-permission-snapshot state))))
+                                                            (notification-permission-snapshot state)
+                                                            (history-length-snapshot state))))
         state (record-response-errors state response)
         state (apply-requests state (:requests response))]
     (-> state
@@ -1997,7 +2052,8 @@
                                                               (websocket-snapshot state)
                                                               worker-snap
                                                               fetch-snap
-                                                              (notification-permission-snapshot state))))
+                                                              (notification-permission-snapshot state)
+                                                              (history-length-snapshot state))))
           state (record-response-errors state response)
           state (apply-requests state (:requests response))]
       (-> state
@@ -2026,7 +2082,7 @@
 
 (defn new-state
   [{:keys [binding document engine fetch-fn websocket-fn worker-fn storage clipboard geolocation
-           crypto-random-bytes crypto-random-uuids audit net-context]}]
+           crypto-random-bytes crypto-random-uuids audit net-context history-length]}]
   {:binding binding
    :document document
    :engine engine
@@ -2038,6 +2094,13 @@
    :geolocation (or geolocation (atom {:latitude 0.0
                                        :longitude 0.0
                                        :accuracy 0.0}))
+   ;; Plain integer, NOT an atom (unlike :geolocation/:clipboard) -- a
+   ;; point-in-time snapshot of the REAL session's navigation depth at the
+   ;; moment a script starts running (see `history-length-snapshot` and
+   ;; `browser.compat.quickjs-runner/run-script!`), not a live-updating host
+   ;; value. Defaults to 0, mirroring a fresh, never-navigated real browsing
+   ;; context's actual `history.length`.
+   :history-length (or history-length 0)
    :notification/requests []
    :fullscreen/element nil
    :media/streams []
