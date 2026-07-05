@@ -3192,33 +3192,41 @@
        (keyword k))))
 
 #?(:cljs
+   (defn- enum-value-key?
+     "True when `k`'s value is always an enum-like discriminator token (a
+     small fixed set of known strings, e.g. `:query-selector`/`:get`/`:exit`)
+     that MUST be keywordized for `capability-request-error`'s `=`/`case`
+     shape checks to see the same values a hand-rolled `:engine` test-double's
+     Clojure map already uses directly -- never free-form user/network data
+     (a URL, a cookie VALUE, clipboard TEXT, etc.) that has to stay a string.
+
+     `:capability` and `:dom/query` are enum-like but don't follow the naming
+     convention below, so they're listed explicitly. Every OTHER such field in
+     this namespace's webapi shim is named `<ns>/op` or `<ns>/format` --
+     `dom/op`, `clipboard/format`, `cookie/op`, `location/op`,
+     `geolocation/op`, `notification/op`, `fullscreen/op`, `media/op`,
+     `crypto/op` (verified by inspecting every `'<ns>/op'`/`'<ns>/format'`
+     field `webapi-shim-source` pushes -- none of them ever carries free
+     text), so keying off `(name k)` being exactly `op` or `format` covers all
+     of them AND any future one, without this set having to grow by one
+     explicit entry per bug report the way `:clipboard/format` first did (see
+     that fix's `quickjs_clipboard_media_promise_smoke_test.cljs`) before the
+     remaining `cookie/op`/`location/op`/`geolocation/op`/`notification/op`/
+     `fullscreen/op`/`media/op`/`crypto/op` instances of the identical bug
+     class were found and closed together (see
+     `quickjs_capability_op_field_keywordization_smoke_test.cljs`)."
+     [k]
+     (or (contains? #{:capability :dom/query} k)
+         (contains? #{"op" "format"} (name k)))))
+
+#?(:cljs
 (defn- normalize-request [request]
      (let [request (js->clj request)]
        (into {}
              (map (fn [[k v]]
                     (let [k (request-keyword k)]
                       [k (cond
-                           ;; :clipboard/format is here (not just :dom/op) so
-                           ;; that a REAL webapi-shim-sourced clipboard/read
-                           ;; or clipboard/write request's `'clipboard/format':
-                           ;; 'text'` genuinely normalizes to the keyword
-                           ;; `:text` `capability-request-error`'s
-                           ;; `:clipboard/read`/`:clipboard/write` cases
-                           ;; compare against (`(= :text (:clipboard/format
-                           ;; request))`) -- without this, EVERY real (i.e.
-                           ;; not a hand-rolled `:engine` test-double, which
-                           ;; already builds its request maps with keyword
-                           ;; values directly in Clojure) clipboard request
-                           ;; silently failed that shape check and was
-                           ;; rejected as :quickjs/invalid-capability-request
-                           ;; before ever reaching apply-capability's
-                           ;; `:clipboard/read`/`:clipboard/write` case bodies
-                           ;; -- so a real script's `writeText()` never
-                           ;; actually mutated the sandboxed clipboard store,
-                           ;; discovered while proving Bug 2's permission gate
-                           ;; against a REAL round trip (see
-                           ;; quickjs_clipboard_media_promise_smoke_test.cljs).
-                           (contains? #{:capability :dom/query :dom/op :clipboard/format} k)
+                           (enum-value-key? k)
                            (keyword v)
 
                            (and (= :request k) (map? v))
