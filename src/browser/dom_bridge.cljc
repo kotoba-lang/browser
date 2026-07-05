@@ -158,16 +158,30 @@
                      (remove (fn [[k _]]
                                (or (= :style k)
                                    (= :style-inline k)
+                                   (= :style-inline-important k)
                                    (= "style" (namespace k)))))
                      attrs))))
 
 (defn- set-style-attribute
+  "A script mutating `element.style.cssText`/`setAttribute('style', ...)`
+   goes through here, not `htmldom.core/parse-style` (that only ever runs
+   once, at initial HTML parse time) -- so it needs its OWN `!important`
+   handling to stay consistent with a page's initial inline styles (see
+   `cssom.core/resolve-style-for`'s docstring). `parse-declarations-with-
+   importance` (unlike the plain `parse-declarations` this used before)
+   reports real per-property importance, which is split back out into the
+   same `:style-inline`/`:style-inline-important` attr pair
+   `htmldom.core/apply-attrs` populates, so `cssom.core/inline-style`/
+   `inline-style-importance` can't tell the two origins apart."
   [document node-id value]
-  (let [style (css/parse-declarations value)]
+  (let [parsed (css/parse-declarations-with-importance value)
+        style (into {} (map (fn [[k v]] [k (:value v)])) parsed)
+        important (into #{} (keep (fn [[k v]] (when (:important? v) k))) parsed)]
     (-> document
         (clear-style-attrs node-id)
         (dom/set-attribute node-id :style value)
         (dom/set-attribute node-id :style-inline style)
+        (dom/set-attribute node-id :style-inline-important important)
         (dom/set-style node-id style))))
 
 (defn- remove-attribute

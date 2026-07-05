@@ -367,6 +367,35 @@
     (is (not (contains? removed-attrs :style/color)))
     (is (not (contains? removed-attrs :style/padding)))))
 
+(deftest mutation-bridge-set-style-attribute-tracks-per-property-important
+  ;; A script mutating element.style.cssText/setAttribute('style', ...)
+  ;; goes through this same dom_bridge.cljc path, not htmldom.core/parse-
+  ;; style (that only ever runs once, at initial HTML parse time) -- so it
+  ;; needs its OWN !important handling to populate :style-inline/
+  ;; :style-inline-important consistently with a page's initial inline
+  ;; styles (see cssom.core/resolve-style-for's docstring). Before this
+  ;; fix, the raw "!important" suffix leaked into :style-inline's value
+  ;; (via css/parse-declarations, which strips it correctly, but the old
+  ;; :style-inline-important attr didn't exist at all -- every mutated
+  ;; inline declaration was silently treated as non-important).
+  (let [page (browser/load-html {:url "kotoba://dom"
+                                 :html "<main><p id=\"note\">Hello</p></main>"})
+        document (:browser/document page)
+        note (bridge/query-selector document "#note")
+        styled (bridge/apply-mutation document {:dom/op :set-attribute
+                                                :node/id note
+                                                :attr "style"
+                                                :value "color: red !important; padding: 4px"})
+        attrs (get-in styled [:document :nodes note :attrs])
+        removed (bridge/apply-mutation (:document styled) {:dom/op :remove-attribute
+                                                           :node/id note
+                                                           :attr "style"})
+        removed-attrs (get-in removed [:document :nodes note :attrs])]
+    (is (= {:color "red" :padding 4} (:style-inline attrs))
+        "the real, uncorrupted values -- not \"red !important\"")
+    (is (= #{:color} (:style-inline-important attrs)))
+    (is (not (contains? removed-attrs :style-inline-important)))))
+
 (deftest mutation-bridge-focus-and-blur-updates-document-focus
   (let [page (browser/load-html {:url "kotoba://dom"
                                  :html "<main><input id=\"field\"></main>"})
