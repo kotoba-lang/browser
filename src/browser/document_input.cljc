@@ -39,6 +39,7 @@
            (not= "false" (str/lower-case v)))))
 
 (declare disabled-control?)
+(declare ancestor-form-id)
 
 (defn- parent-node-id
   [document child-id]
@@ -167,14 +168,23 @@
            (reset-control? document node-id))))
 
 (defn- radio-group-node-ids
+  "The HTML radio button group containing node-id: same (non-empty) `name`
+   *and* same owner form (https://html.spec.whatwg.org/multipage/input.html#radio-button-group).
+   A radio without a name is not part of any group and groups only with itself,
+   and same-named radios owned by different forms are independent groups."
   [document node-id]
   (let [node (get-in document [:nodes node-id])
-        group-name (get-in node [:attrs :name])]
+        group-name (get-in node [:attrs :name])
+        named? (not (str/blank? (str group-name)))
+        group-form-id (ancestor-form-id document node-id)]
     (->> (:nodes document)
          (keep (fn [[id candidate]]
                  (when (and (= :input (:tag candidate))
                             (= "radio" (str/lower-case (str (get-in candidate [:attrs :type]))))
-                            (= group-name (get-in candidate [:attrs :name]))
+                            (if named?
+                              (and (= group-name (get-in candidate [:attrs :name]))
+                                   (= group-form-id (ancestor-form-id document id)))
+                              (= id node-id))
                             (not (disabled-control? document id)))
                    id))))))
 

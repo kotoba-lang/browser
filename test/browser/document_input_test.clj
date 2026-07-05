@@ -703,6 +703,36 @@
     (is (= (:ops (:document selected))
            (:ops (:document same))))))
 
+(deftest radio-groups-are-scoped-by-owner-form-not-just-name
+  (let [page (browser/load-html {:url "kotoba://radio"
+                                 :html "<main><form id=\"form-a\"><input id=\"a-one\" type=\"radio\" name=\"mode\" checked><input id=\"a-two\" type=\"radio\" name=\"mode\"></form><form id=\"form-b\"><input id=\"b-one\" type=\"radio\" name=\"mode\" checked><input id=\"b-two\" type=\"radio\" name=\"mode\"></form></main>"})
+        document (:browser/document page)
+        a-one (bridge/query-selector document "#a-one")
+        a-two (bridge/query-selector document "#a-two")
+        b-one (bridge/query-selector document "#b-one")
+        b-two (bridge/query-selector document "#b-two")
+        selected (document-input/reduce-event document {:event/type :pointer/click
+                                                        :node/id a-two})]
+    (is (= true (:handled? selected)))
+    (is (= false (get-in selected [:document :nodes a-one :attrs :checked])))
+    (is (= true (get-in selected [:document :nodes a-two :attrs :checked])))
+    (is (= true (get-in selected [:document :nodes b-one :attrs :checked]))
+        "same-named radio owned by a different form is an independent group")
+    (is (not (true? (get-in selected [:document :nodes b-two :attrs :checked]))))))
+
+(deftest nameless-radios-are-independent-not-a-mutually-exclusive-group
+  (let [page (browser/load-html {:url "kotoba://radio"
+                                 :html "<main><input id=\"one\" type=\"radio\" checked><input id=\"two\" type=\"radio\"></main>"})
+        document (:browser/document page)
+        one (bridge/query-selector document "#one")
+        two (bridge/query-selector document "#two")
+        selected (document-input/reduce-event document {:event/type :pointer/click
+                                                        :node/id two})]
+    (is (= true (:handled? selected)))
+    (is (= true (get-in selected [:document :nodes one :attrs :checked]))
+        "a radio without a name attribute is not part of any group")
+    (is (= true (get-in selected [:document :nodes two :attrs :checked])))))
+
 (deftest focused-controls-activate-from-keyboard
   (let [page (browser/load-html {:url "kotoba://keys"
                                  :html "<main><button id=\"run\">Run</button><input id=\"input-button\" type=\"button\" value=\"Input button\"><input id=\"flag\" type=\"checkbox\"><input id=\"one\" type=\"radio\" name=\"mode\" checked><input id=\"two\" type=\"radio\" name=\"mode\"></main>"})
