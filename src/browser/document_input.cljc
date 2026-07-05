@@ -253,23 +253,38 @@
              :text/caret end
              :text/selection [start end]
              :text/composition nil}
-      (and (contains? attrs :composition)
-           (not (str/blank? (str (get attrs :composition)))))
-      (assoc :text/composition {:composition/text (str (get attrs :composition))}))))
+      ;; A real, active IME composition can legitimately have an empty
+      ;; provisional string (right after compositionstart, or after
+      ;; backspacing every composed character back to nothing while still
+      ;; composing) -- so "is composing" must be its own boolean signal
+      ;; (`:composing`), not inferred from whether `:composition`'s text
+      ;; value happens to be blank. Both a genuinely-ended composition and
+      ;; a genuinely-active-but-empty one persist `:composition ""`
+      ;; identically; only `:composing` tells them apart.
+      (true? (get attrs :composing))
+      (assoc :text/composition {:composition/text (str (get attrs :composition ""))}))))
 
 (defn- apply-state
   [document node-id state]
   (let [state (text-edit/normalize-selection state)
         [start end] (:text/selection state)]
-    (cond-> (-> document
-                (dom/set-attribute node-id :value (:text/value state))
-                (dom/set-attribute node-id :selection-start start)
-                (dom/set-attribute node-id :selection-end end))
-      (:text/composition state)
-      (dom/set-attribute node-id :composition (get-in state [:text/composition :composition/text]))
+    (-> document
+        (dom/set-attribute node-id :value (:text/value state))
+        (dom/set-attribute node-id :selection-start start)
+        (dom/set-attribute node-id :selection-end end)
+        (dom/set-attribute node-id :composition (get-in state [:text/composition :composition/text] ""))
+        (dom/set-attribute node-id :composing (some? (:text/composition state))))))
 
-      (nil? (:text/composition state))
-      (dom/set-attribute node-id :composition ""))))
+(defn- composing?
+  "Real browsers suppress an input's own \"Enter submits the form\"
+  default action for the entire span of an active IME composition
+  (matching a real KeyboardEvent's own `isComposing` flag). Checked via
+  the dedicated `:composing` boolean attribute `apply-state` maintains,
+  never via `:composition`'s text value -- that text is legitimately
+  \"\" both while genuinely still composing and once composition has
+  ended, so it cannot tell the two states apart on its own."
+  [document node-id]
+  (true? (get-in document [:nodes node-id :attrs :composing])))
 
 (defn- clear-node-validation-state
   [document node-id]
@@ -944,6 +959,7 @@
             (dom/set-attribute node-id :selection-start caret)
             (dom/set-attribute node-id :selection-end caret)
             (dom/set-attribute node-id :composition "")
+            (dom/set-attribute node-id :composing false)
             (clear-node-validation-state node-id)))
 
       (and (= :input (:tag node))
@@ -954,6 +970,7 @@
             (dom/set-attribute node-id :selection-start caret)
             (dom/set-attribute node-id :selection-end caret)
             (dom/set-attribute node-id :composition "")
+            (dom/set-attribute node-id :composing false)
             (clear-node-validation-state node-id)))
 
       (and (= :input (:tag node))
@@ -1230,7 +1247,8 @@
          (= "Enter" (:key event))
          (= :input (:tag node))
          (editable-node? document node-id)
-         (ancestor-form-id document node-id))))
+         (ancestor-form-id document node-id)
+         (not (composing? document node-id)))))
 
 (defn- reduce-scroll-event
   [document node-id event]

@@ -997,6 +997,58 @@
            (filterv #(= :dom/dispatch-event (first %))
                     (get-in textarea-enter [:document :ops]))))))
 
+(deftest enter-during-ime-composition-does-not-submit-the-form
+  ;; Real browsers never trigger a text input's "Enter submits the form"
+  ;; default action while the user is mid-IME-composition -- pressing
+  ;; Enter to confirm a composed candidate (e.g. Japanese romaji -> kanji
+  ;; conversion) must not ALSO submit the surrounding form. A real
+  ;; KeyboardEvent carries `isComposing: true` for exactly this keydown;
+  ;; this engine's own event pipeline has no such flag, so the submit
+  ;; check must instead consult the input's own live composition state.
+  (let [page (browser/load-html {:url "kotoba://ime-submit"
+                                 :html "<main><form id=\"form\"><input id=\"field\" name=\"q\" value=\"\"></form></main>"})
+        document (:browser/document page)
+        form (bridge/query-selector document "#form")
+        field (bridge/query-selector document "#field")
+        document (dom/add-event-listener document form "submit" "submit-handler")
+        composing (document-input/reduce-event document {:event/type :composition/start
+                                                          :node/id field})
+        composing (document-input/reduce-event (:document composing)
+                                               {:event/type :composition/update
+                                                :node/id field
+                                                :text "こんにちは"})
+        enter-mid-composition (document-input/reduce-event (:document composing)
+                                                            {:event/type :key/down
+                                                             :node/id field
+                                                             :key "Enter"})
+        ;; The moment composition starts, before any candidate text exists
+        ;; yet, is a real, distinct state -- its provisional string is
+        ;; genuinely "" while still fully composing, not "not composing".
+        just-started (document-input/reduce-event document {:event/type :composition/start
+                                                             :node/id field})
+        enter-just-started (document-input/reduce-event (:document just-started)
+                                                         {:event/type :key/down
+                                                          :node/id field
+                                                          :key "Enter"})
+        committed (document-input/reduce-event (:document composing)
+                                                {:event/type :composition/end
+                                                 :node/id field
+                                                 :text "こんにちは"})
+        enter-after-commit (document-input/reduce-event (:document committed)
+                                                         {:event/type :key/down
+                                                          :node/id field
+                                                          :key "Enter"})]
+    (is (nil? (:submitted? enter-mid-composition))
+        "Enter must not submit while a real, non-empty composition is active")
+    (is (= "こんにちは" (get-in (:document composing) [:nodes field :attrs :composition]))
+        "the in-progress composition text must be visible via the field's own composition attribute")
+    (is (nil? (:submitted? enter-just-started))
+        "Enter must not submit even when composition just started with no candidate text yet")
+    (is (= true (:submitted? enter-after-commit))
+        "Enter must submit normally once composition has actually ended")
+    (is (= "こんにちは" (get-in (:document committed) [:nodes field :attrs :value]))
+        "the committed text must remain the field's real value after composition ends")))
+
 (deftest image-submit-button-adds-click-coordinate-entries
   (let [page (browser/load-html {:url "kotoba://submit"
                                  :html "<main><form id=\"form\"><input id=\"field\" name=\"q\" value=\"Kotoba\"><input id=\"image\" type=\"image\" name=\"spot\" value=\"ignored\"><input id=\"nameless\" type=\"image\" value=\"ignored\"></form></main>"})
