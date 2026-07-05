@@ -70,6 +70,16 @@
      [_]
      false))
 
+#?(:cljs
+   (defn- error-value
+     [error]
+     (or (some-> ^js error .-message) error)))
+
+#?(:clj
+   (defn- error-value
+     [error]
+     error))
+
 (defn ready?
   [session]
   (execution/engine-ready? (get-in session [:browser.session/script-engine :script-engine/engine])))
@@ -167,7 +177,21 @@
 
   On the JVM this returns an updated session. In ClojureScript, if the engine
   factory returns a Promise, this returns a Promise of the updated session while
-  marking the immediate session state as pending through the pending handle."
+  marking the immediate session state as pending through the pending handle.
+
+  If that Promise REJECTS (a real, reachable case -- e.g. the WASM binary
+  fails to load), the returned Promise still resolves (never rejects) with
+  the session transitioned to :script-engine/status :error via
+  fail-start!, mirroring browser.script-scheduler/start!'s own
+  swallow-the-rejection-into-a-properly-marked-session convention. Without
+  this, a rejection would propagate as an unhandled rejection on the
+  Promise this fn itself returns, and -- independent of whether the
+  caller's own code happens to catch that -- fail-start! would never run,
+  permanently stranding the session at :script-engine/status :pending
+  (since ensure!'s own :pending case is a no-op, this would block every
+  future call to ensure! on this session from ever attempting to start a
+  new engine again, even after the caller notices the failure and wants to
+  retry)."
   [session]
   (let [m (manager session)]
     (case (:script-engine/status m)
@@ -179,7 +203,11 @@
                  (fn [engine]
                    (complete-start! session {:token token
                                              :generation generation
-                                             :engine engine})))
+                                             :engine engine}))
+                 (fn [error]
+                   (fail-start! session {:token token
+                                        :generation generation
+                                        :error (error-value error)})))
           (complete-start! session {:token token
                                     :generation generation
                                     :engine engine-or-promise}))))))
