@@ -128,32 +128,47 @@
         Binary frames are acknowledged (so the connection does not stall
         waiting for a `request` we never send) but their bytes are dropped --
         this repo's WebSocket subset only carries text, matching the
-        `webapi-shim`'s `WebSocket.prototype.send` (always `String(data)`)."
+        `webapi-shim`'s `WebSocket.prototype.send` (always `String(data)`).
+
+        Per `WebSocket.Listener.onText`'s own Javadoc contract, a real server
+        is free to split any single logical text message across multiple
+        WebSocket frames (fragmentation is normal, spec-legal RFC6455
+        behavior -- common for large payloads), and `onText` is invoked once
+        per fragment with that fragment's `data` and `last` false until the
+        final fragment, where `last` is true. `data` is only ever THAT
+        FRAGMENT's text, never the whole message -- so fragments are
+        accumulated into `buffer` across calls and only the fully assembled
+        message (the concatenation of every fragment since the last `last`)
+        is pushed onto `messages`, exactly once per logical message, when
+        `last` is finally true; `buffer` is then reset for the next message."
        [messages closed? close-info error]
-       (reify java.net.http.WebSocket$Listener
-         (onOpen [_ webSocket]
-           (.request webSocket 1))
-         (onText [_ webSocket data last]
-           (when last
-             (.add ^java.util.Queue messages (str data)))
-           (.request webSocket 1)
-           nil)
-         (onBinary [_ webSocket data last]
-           (.request webSocket 1)
-           nil)
-         (onPing [_ webSocket data]
-           (.request webSocket 1)
-           nil)
-         (onPong [_ webSocket data]
-           (.request webSocket 1)
-           nil)
-         (onClose [_ _webSocket status-code reason]
-           (reset! closed? true)
-           (reset! close-info {:code status-code :reason reason})
-           nil)
-         (onError [_ _webSocket err]
-           (reset! error {:message (.getMessage ^Throwable err)})
-           nil)))
+       (let [buffer (StringBuilder.)]
+         (reify java.net.http.WebSocket$Listener
+           (onOpen [_ webSocket]
+             (.request webSocket 1))
+           (onText [_ webSocket data last]
+             (.append buffer (str data))
+             (when last
+               (.add ^java.util.Queue messages (.toString buffer))
+               (.setLength buffer 0))
+             (.request webSocket 1)
+             nil)
+           (onBinary [_ webSocket data last]
+             (.request webSocket 1)
+             nil)
+           (onPing [_ webSocket data]
+             (.request webSocket 1)
+             nil)
+           (onPong [_ webSocket data]
+             (.request webSocket 1)
+             nil)
+           (onClose [_ _webSocket status-code reason]
+             (reset! closed? true)
+             (reset! close-info {:code status-code :reason reason})
+             nil)
+           (onError [_ _webSocket err]
+             (reset! error {:message (.getMessage ^Throwable err)})
+             nil))))
 
      (defn connect!
        "Open a REAL WebSocket connection: a real TCP socket, a real RFC6455

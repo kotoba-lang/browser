@@ -12,6 +12,11 @@
    - a bare `websocket-fn` round trip: connect, send, and receive the REAL
      echoed bytes back from the real server
    - several sends in one connection are received in order
+   - a REAL text message the server deliberately fragments across 2 (and,
+     adversarially, 3) real WebSocket frames (opcode 1 + FIN clear, then
+     continuation frame(s) opcode 0, FIN set only on the last) is
+     reassembled by `browser.net.websocket`'s `:clj` listener into the
+     complete original string, not just its final fragment
    - a real close, reported back as `:closed? true` by a later drain
    - a real connection failure (closed port) surfacing as an error map,
      never as an uncaught exception
@@ -64,7 +69,6 @@
 
 (defn- read-request-headers
   [^InputStream in]
-  (read-line-ascii in) ; request line, e.g. "GET /echo HTTP/1.1" -- unused
   (loop [headers {}]
     (let [line (read-line-ascii in)]
       (if (str/blank? line)
@@ -78,10 +82,17 @@
 
 (defn- handshake!
   "Perform the real HTTP-Upgrade handshake and return the (still-open)
-   input/output streams for framed WebSocket traffic."
+   input/output streams for framed WebSocket traffic, plus the real request
+   path (e.g. \"/echo\" or \"/echo-fragmented/3\") -- `serve-connection!`
+   below uses the path to decide whether to echo replies as a single frame
+   (the original behavior) or deliberately fragmented across several real
+   frames, so a test can pick which real wire behavior it wants to exercise
+   purely via the URL it connects to."
   [^Socket socket]
   (let [in (.getInputStream socket)
         out (.getOutputStream socket)
+        request-line (read-line-ascii in) ; e.g. "GET /echo HTTP/1.1"
+        path (second (str/split (str request-line) #"\s+"))
         headers (read-request-headers in)
         accept (accept-value (get headers "sec-websocket-key"))
         response (str "HTTP/1.1 101 Switching Protocols\r\n"
@@ -91,7 +102,7 @@
                        "\r\n")]
     (.write out (.getBytes response "US-ASCII"))
     (.flush out)
-    {:in in :out out}))
+    {:in in :out out :path path}))
 
 (defn- read-exact!
   [^InputStream in ^bytes buffer]
@@ -128,30 +139,87 @@
         {:opcode opcode :payload payload}))))
 
 (defn- write-frame!
-  "Write one unmasked RFC6455 frame (servers never mask) with FIN set."
-  [^OutputStream out opcode ^bytes payload]
-  (let [len (alength payload)]
-    (.write out (bit-or 0x80 (bit-and opcode 0x0F)))
-    (cond
-      (< len 126) (.write out len)
-      (< len 65536) (do (.write out 126)
-                         (.write out (bit-and (bit-shift-right len 8) 0xFF))
-                         (.write out (bit-and len 0xFF)))
-      :else (do (.write out 127)
-                (dotimes [i 8]
-                  (.write out (bit-and (bit-shift-right len (* 8 (- 7 i))) 0xFF)))))
-    (.write out payload)
-    (.flush out)))
+  "Write one unmasked RFC6455 frame (servers never mask). FIN is set unless
+   `fin?` is explicitly passed as false, in which case the frame is a
+   non-final fragment of a larger logical message and the caller is
+   responsible for later writing a final frame (FIN set) to complete it --
+   this is what lets `echo-fragmented!` below send one logical text message
+   as several real, separate WebSocket frames, exactly the RFC6455
+   fragmentation `browser.net.websocket`'s `:clj` listener's `onText` must
+   reassemble."
+  ([^OutputStream out opcode ^bytes payload] (write-frame! out opcode payload true))
+  ([^OutputStream out opcode ^bytes payload fin?]
+   (let [len (alength payload)]
+     (.write out (bit-or (if fin? 0x80 0x00) (bit-and opcode 0x0F)))
+     (cond
+       (< len 126) (.write out len)
+       (< len 65536) (do (.write out 126)
+                          (.write out (bit-and (bit-shift-right len 8) 0xFF))
+                          (.write out (bit-and len 0xFF)))
+       :else (do (.write out 127)
+                 (dotimes [i 8]
+                   (.write out (bit-and (bit-shift-right len (* 8 (- 7 i))) 0xFF)))))
+     (.write out payload)
+     (.flush out))))
+
+(defn- split-payload
+  "Split `payload` (bytes) into `n` non-empty, order-preserving chunks whose
+   concatenation is exactly `payload` (earlier chunks absorb any remainder
+   byte first) -- the raw material `echo-fragmented!` below turns into `n`
+   real WebSocket frames for one logical message."
+  [^bytes payload n]
+  (let [len (alength payload)
+        n (max 1 (min n (max 1 len)))
+        base (quot len n)
+        extra (rem len n)]
+    (loop [i 0 offset 0 acc []]
+      (if (= i n)
+        acc
+        (let [size (+ base (if (< i extra) 1 0))]
+          (recur (inc i) (+ offset size)
+                 (conj acc (java.util.Arrays/copyOfRange payload offset (+ offset size)))))))))
+
+(defn- echo-fragmented!
+  "Echo `payload` back as one logical text message split across `n` REAL
+   WebSocket frames on the wire: first frame opcode 1 (text) with FIN
+   clear, any middle frames opcode 0 (continuation) with FIN clear, final
+   frame opcode 0 (continuation) with FIN set -- the exact multi-frame
+   shape RFC6455 fragmentation takes, and the shape a real server sending a
+   large payload could legitimately choose to use. `n` = 1 degrades to
+   exactly the original, unfragmented `(write-frame! out 1 payload)`."
+  [^OutputStream out ^bytes payload n]
+  (if (<= n 1)
+    (write-frame! out 1 payload)
+    (let [chunks (split-payload payload n)
+          last-idx (dec (count chunks))]
+      (doseq [[i chunk] (map-indexed vector chunks)]
+        (write-frame! out (if (zero? i) 1 0) chunk (= i last-idx))))))
+
+(defn- fragment-count-for-path
+  "Parse a real request path into how many real frames `serve-connection!`
+   should split its echoed reply across: \"/echo\" (or anything not
+   matching the pattern below) -> 1, i.e. the original single-frame echo;
+   \"/echo-fragmented/<n>\" -> `n`, letting a test pick a real fragmented
+   reply purely by choosing which URL it connects to."
+  [path]
+  (if-let [[_ n] (re-matches #"/echo-fragmented/(\d+)" (str path))]
+    (max 1 (Long/parseLong ^String n))
+    1))
 
 (defn- serve-connection!
-  "Handshake, then loop echoing real text frames until a close frame or EOF."
+  "Handshake, then loop echoing real text frames until a close frame or EOF.
+   Whether an echoed reply goes out as a single real frame (the original,
+   default behavior) or is deliberately fragmented across several real
+   frames is decided once per connection from the real request path (see
+   `fragment-count-for-path`)."
   [^Socket socket]
   (try
-    (let [{:keys [in out]} (handshake! socket)]
+    (let [{:keys [in out path]} (handshake! socket)
+          fragment-count (fragment-count-for-path path)]
       (loop []
         (when-let [{:keys [opcode payload]} (read-frame in)]
           (case opcode
-            1 (do (write-frame! out 1 payload) (recur)) ; text -> echo
+            1 (do (echo-fragmented! out payload fragment-count) (recur)) ; text -> echo
             8 (write-frame! out 8 (byte-array 0))        ; close -> close reply
             9 (do (write-frame! out 0xA payload) (recur)) ; ping -> pong
             (recur)))))
@@ -239,6 +307,55 @@
         (doseq [message ["one" "two" "three"]]
           (is (:ok? (ws-fn {:op :send :handle handle :data message}))))
         (is (= ["one" "two" "three"] (drain-until-count! ws-fn handle 3 2000))))
+      (finally (stop-server! server)))))
+
+(deftest real-websocket-fragmented-reply-is-reassembled-not-truncated
+  ;; The real server (see `echo-fragmented!`/`fragment-count-for-path`)
+  ;; deliberately sends its echoed reply as TWO real, separate RFC6455
+  ;; frames: frame 1 is opcode 1 (text) with FIN CLEAR, frame 2 is opcode 0
+  ;; (continuation) with FIN SET -- exactly what a real server is allowed
+  ;; to do for any text message per RFC6455, and exactly the shape
+  ;; `WebSocket.Listener.onText`'s Javadoc describes ("this method may be
+  ;; invoked more than once if the message is fragmented"). Before the fix,
+  ;; `browser.net.websocket`'s `:clj` listener only looked at `data` when
+  ;; `last` was true, silently discarding the first frame's text and
+  ;; leaving only the second (continuation) frame's text in `messages` --
+  ;; this asserts the FULL original string comes back, not just the tail.
+  (let [server (start-server!)]
+    (try
+      (let [ws-fn (ws/websocket-fn {:connect-timeout-ms 2000})
+            connected (ws-fn {:op :connect :url (server-url server "/echo-fragmented/2")})]
+        (is (:ok? connected))
+        (let [handle (:handle connected)
+              sent (ws-fn {:op :send :handle handle :data "hello fragmented real socket"})]
+          (is (:ok? sent))
+          (let [drained (ws-fn {:op :drain :handle handle :wait-ms 2000})]
+            (is (= ["hello fragmented real socket"] (:messages drained))
+                (str "expected the two real wire frames to reassemble into the "
+                     "full original message, not just the final fragment -- got "
+                     (pr-str (:messages drained)))))))
+      (finally (stop-server! server)))))
+
+(deftest real-websocket-reply-fragmented-across-three-frames-is-reassembled
+  ;; Adversarial check that the fix accumulates fragments generally (does
+  ;; not, say, special-case exactly 2 fragments, or reset the accumulator
+  ;; off-by-one): the real server splits its echoed reply across THREE
+  ;; real frames this time (opcode 1 FIN clear, opcode 0 FIN clear, opcode
+  ;; 0 FIN set), and the reassembled message must still be the complete,
+  ;; correctly-ordered original string.
+  (let [server (start-server!)]
+    (try
+      (let [ws-fn (ws/websocket-fn {:connect-timeout-ms 2000})
+            connected (ws-fn {:op :connect :url (server-url server "/echo-fragmented/3")})]
+        (is (:ok? connected))
+        (let [handle (:handle connected)
+              message "this real message spans three real wire frames"
+              sent (ws-fn {:op :send :handle handle :data message})]
+          (is (:ok? sent))
+          (let [drained (ws-fn {:op :drain :handle handle :wait-ms 2000})]
+            (is (= [message] (:messages drained))
+                (str "expected all three real wire frames to reassemble into "
+                     "the full original message -- got " (pr-str (:messages drained)))))))
       (finally (stop-server! server)))))
 
 (deftest real-websocket-close-is-reported-by-a-later-drain
