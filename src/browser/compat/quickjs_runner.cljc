@@ -74,18 +74,18 @@
   As of this writing, `:storage`, `:clipboard`, AND `:geolocation` reads also
   round-trip back into the VM itself, not just the host-side view:
   `evaluate!`/`load-module!` (`browser.compat.quickjs-execution`) pass the
-  current `:storage`/`:clipboard` snapshots, plus a host-computed
-  `:geolocation` permission-decision + position snapshot
-  (`quickjs-execution/geolocation-snapshot`), alongside the document snapshot
-  into every `quickjs-wasm` invocation (`:document/snapshot`,
-  `:storage/snapshot`, `:clipboard/snapshot`, `:geolocation/snapshot` on the
-  request map), and `quickjs-wasm` installs all four as VM globals
-  (`globalThis.__kotobaSnapshot` / `globalThis.__kotobaStorageSnapshot` /
-  `globalThis.__kotobaClipboardSnapshot` / `globalThis.__kotobaGeolocationSnapshot`)
-  before each eval, the same way it already did for `document.*`. So
-  `localStorage.getItem`, `navigator.clipboard.readText`, AND
-  `navigator.geolocation.getCurrentPosition` genuinely return/callback the
-  real, current value synchronously -- a script that calls
+  current `:storage` snapshot, plus host-computed `:clipboard` permission-
+  decisions (read AND write, independently gated -- `quickjs-execution/
+  clipboard-snapshot`) + text and `:geolocation` permission-decision +
+  position snapshots (`quickjs-execution/geolocation-snapshot`), alongside
+  the document snapshot into every `quickjs-wasm` invocation
+  (`:document/snapshot`, `:storage/snapshot`, `:clipboard/snapshot`,
+  `:geolocation/snapshot` on the request map), and `quickjs-wasm` installs
+  all four as VM globals (`globalThis.__kotobaSnapshot` /
+  `globalThis.__kotobaStorageSnapshot` / `globalThis.__kotobaClipboardSnapshot`
+  / `globalThis.__kotobaGeolocationSnapshot`) before each eval, the same way
+  it already did for `document.*`. So `localStorage.getItem` genuinely
+  returns the real, current value synchronously -- a script that calls
   `localStorage.setItem('probe', 'x')` in one `<script>` tag makes a LATER
   `<script>` tag's `localStorage.getItem('probe')` observably return `x`
   to JS (proven via `document.title` in
@@ -96,19 +96,24 @@
   will not see its own write -- `setItem` only queues a `storage/put`
   request that the host applies via `apply-capability` *after* the script
   finishes, and the next fresh snapshot isn't installed until the next
-  `<script>` tag's `eval-dispose!`. `setItem`/`removeItem`/`writeText` and
-  the `storage/get`/`clipboard/read`/`geolocation/read` requests
-  `getItem`/`readText`/`getCurrentPosition` still queue alongside the
-  synchronous snapshot read are otherwise unchanged from before -- they keep
-  landing in `:capability/results` for the audit trail.
-  `getCurrentPosition`'s `success`/`error` callback is invoked SYNCHRONOUSLY
+  `<script>` tag's `eval-dispose!`. `setItem`/`removeItem` and the
+  `storage/get`/`clipboard/read`/`clipboard/write`/`geolocation/read`
+  requests `getItem`/`readText`/`writeText`/`getCurrentPosition` still queue
+  alongside the synchronous snapshot read/resolve are otherwise unchanged
+  from before -- they keep landing in `:capability/results` for the audit
+  trail. `getCurrentPosition`'s `success`/`error` callback and
+  `readText`/`writeText`'s returned promise are both settled SYNCHRONOUSLY
   (this engine evaluates a whole script synchronously in one pass, so there
-  is no realistic way to defer it the way a real, async/permission-prompted
-  browser would): `success` fires with the real position if permission is
-  granted and the host ever injected one, `error` fires (with a
-  `GeolocationPositionError`-shaped `{code, message}`) if permission is
-  denied or no real position was ever injected -- see
-  `quickjs-execution/geolocation-snapshot`.
+  is no realistic way to defer either the way a real, async/
+  permission-prompted browser would): `getCurrentPosition`'s `success` fires
+  with the real position if permission is granted and the host ever
+  injected one, `error` fires (with a `GeolocationPositionError`-shaped
+  `{code, message}`) if permission is denied or no real position was ever
+  injected -- see `quickjs-execution/geolocation-snapshot`. `readText`/
+  `writeText` resolve with the real clipboard text / `undefined` if their
+  respective permission (`:clipboard/read`/`:clipboard/write`) is granted,
+  or reject with a `{name, message}` error otherwise -- see
+  `quickjs-execution/clipboard-snapshot`.
 
   ## Real WebSocket I/O (opt-in via `:browser.session/websocket-fn`)
 

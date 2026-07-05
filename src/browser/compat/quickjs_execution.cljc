@@ -23,33 +23,35 @@
 
 (defn- invocation-with-snapshots
   "Build an `invocation` carrying the real document snapshot plus the real,
-  current `:storage` and `:clipboard` snapshots (deref'd from the
-  page-lifetime `quickjs-execution` atoms -- see
-  `browser.compat.quickjs-runner`'s `persistent-execution-keys`), the real,
-  current geolocation permission-decision + position snapshot (already
-  computed host-side by `geolocation-snapshot`, since unlike storage/
-  clipboard it needs more than a bare deref -- see that fn), the real,
-  current per-WebSocket-connection inbound message snapshot (computed
-  host-side by `websocket-snapshot`, by draining each open connection's
-  REAL socket -- see that fn), the real per-Worker inbound message
-  snapshot already TAKEN (consumed, not re-derived -- see `worker-snapshot`
-  below) from a previous script's real `:worker/post-message` replies, and
-  the real per-fetch-request response snapshot already TAKEN (consumed,
-  not re-derived -- see `fetch-snapshot`/`take-fetch-snapshot` below) from
-  a previous script's real `fetch()` calls, so `quickjs-wasm`'s webapi shim
-  can install all of them as VM globals before running `payload`'s script
-  (`:document/snapshot`, `:storage/snapshot`, `:clipboard/snapshot`,
-  `:geolocation/snapshot`, `:websocket/snapshot`, `:worker/snapshot`,
-  `:fetch/snapshot` respectively) and answer reads like
-  `localStorage.getItem` / `navigator.clipboard.readText` /
-  `navigator.geolocation.getCurrentPosition` synchronously from real host
-  state instead of always returning `null`/`''`/never calling back, and
-  deliver any real WebSocket/Worker messages or `fetch()` responses that
-  genuinely arrived since the script that opened the connection/worker/
-  request ran (see `websocket-snapshot`/`worker-snapshot`/`fetch-snapshot`)
-  to that connection/worker's `onmessage` or that `fetch()` call's pending
-  `.then()` chain before this script's own source runs."
-  [call payload capability-results document storage clipboard geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot]
+  current `:storage` snapshot (deref'd from the page-lifetime
+  `quickjs-execution` atom -- see `browser.compat.quickjs-runner`'s
+  `persistent-execution-keys`), the real, current clipboard
+  permission-decisions + text snapshot (already computed host-side by
+  `clipboard-snapshot`, since unlike storage it needs more than a bare
+  deref -- see that fn), the real, current geolocation permission-decision +
+  position snapshot (already computed host-side by `geolocation-snapshot`,
+  for the same reason), the real, current per-WebSocket-connection inbound
+  message snapshot (computed host-side by `websocket-snapshot`, by draining
+  each open connection's REAL socket -- see that fn), the real per-Worker
+  inbound message snapshot already TAKEN (consumed, not re-derived -- see
+  `worker-snapshot` below) from a previous script's real
+  `:worker/post-message` replies, and the real per-fetch-request response
+  snapshot already TAKEN (consumed, not re-derived -- see
+  `fetch-snapshot`/`take-fetch-snapshot` below) from a previous script's
+  real `fetch()` calls, so `quickjs-wasm`'s webapi shim can install all of
+  them as VM globals before running `payload`'s script (`:document/snapshot`,
+  `:storage/snapshot`, `:clipboard/snapshot`, `:geolocation/snapshot`,
+  `:websocket/snapshot`, `:worker/snapshot`, `:fetch/snapshot` respectively)
+  and answer reads like `localStorage.getItem` / `navigator.clipboard.
+  readText`/`writeText` / `navigator.geolocation.getCurrentPosition`
+  synchronously from real host state instead of always returning
+  `null`/`''`/never calling back, and deliver any real WebSocket/Worker
+  messages or `fetch()` responses that genuinely arrived since the script
+  that opened the connection/worker/request ran (see
+  `websocket-snapshot`/`worker-snapshot`/`fetch-snapshot`) to that
+  connection/worker's `onmessage` or that `fetch()` call's pending `.then()`
+  chain before this script's own source runs."
+  [call payload capability-results document storage clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot]
   (let [snapshot (cond-> (dom-bridge/document-snapshot document)
                    (:script/node-id payload)
                    (assoc :current-script (:script/node-id payload)))]
@@ -57,7 +59,7 @@
                 (assoc payload
                        :document/snapshot snapshot
                        :storage/snapshot (some-> storage deref)
-                       :clipboard/snapshot (some-> clipboard deref)
+                       :clipboard/snapshot clipboard-snapshot
                        :geolocation/snapshot geolocation-snapshot
                        :websocket/snapshot websocket-snapshot
                        :worker/snapshot worker-snapshot
@@ -296,6 +298,75 @@
        :capability capability
        :profile/id nil
        :reason :permission/no-profile})))
+
+(defn- clipboard-read-result
+  [state request]
+  (let [decision (permission-decision-for state request :clipboard/read)]
+    (if (= :allow (:permission/decision decision))
+      {:ok? true
+       :result {:text (or (:text @(:clipboard state)) "")}
+       :permission/decision decision}
+      {:ok? false
+       :error (:reason decision)
+       :permission/decision decision})))
+
+(defn- clipboard-write-result
+  [state request]
+  (let [decision (permission-decision-for state request :clipboard/write)]
+    (if (= :allow (:permission/decision decision))
+      {:ok? true
+       :permission/decision decision}
+      {:ok? false
+       :error (:reason decision)
+       :permission/decision decision})))
+
+(defn- clipboard-snapshot
+  "Compute the REAL, current clipboard permission decisions (for BOTH
+  `:clipboard/read` and `:clipboard/write`) plus the real, current clipboard
+  text from `state`'s persisted `:clipboard` atom and the active profile's
+  permission grants, host-side, BEFORE the script runs -- so
+  `invocation-with-snapshots` can hand it to `quickjs-wasm` as
+  `:clipboard/snapshot` and the webapi shim's real
+  `navigator.clipboard.readText`/`writeText` can synchronously
+  resolve/reject the promise each returns with it (this engine evaluates a
+  whole script synchronously in one pass, so there is no realistic way to
+  defer that settlement the way a real, async/permission-prompted browser
+  would -- see `quickjs-wasm/webapi-shim-source`'s clipboard shim). Mirrors
+  `geolocation-snapshot` exactly, one coherent map carrying both the
+  permission decisions and the value together (clipboard needs two
+  decisions, not one, since read and write are gated independently).
+
+  Uses the SAME `permission-decision-for` gate `apply-capability`'s
+  `:clipboard/read`/`:clipboard/write` cases apply (via
+  `clipboard-read-result`/`clipboard-write-result`) when they process the
+  queued `clipboard/read`/`clipboard/write` capability requests AFTER the
+  script runs for the audit trail -- with an empty `request` map, since the
+  real `navigator.clipboard` JS shim never sets a custom `:origin` on either
+  request either, so the two decisions always agree.
+
+  Returns a single, JSON-safe map: `{:text \"...\" :read {:granted bool
+  :error \"...\"} :write {:granted bool :error \"...\"}}` (`:error` only
+  present when `:granted` is false, a short human-readable message mirroring
+  `geolocation-snapshot`'s error-message building)."
+  [state]
+  (let [read-decision (permission-decision-for state {} :clipboard/read)
+        write-decision (permission-decision-for state {} :clipboard/write)
+        read-granted? (= :allow (:permission/decision read-decision))
+        write-granted? (= :allow (:permission/decision write-decision))
+        text (or (:text (some-> (:clipboard state) deref)) "")
+        denial-message (fn [action decision]
+                          (str "User denied Clipboard " action " ("
+                               (subs (str (or (:reason decision) :permission/not-granted)) 1)
+                               ")"))]
+    {:text text
+     :read (if read-granted?
+             {:granted true}
+             {:granted false
+              :error (denial-message "read" read-decision)})
+     :write (if write-granted?
+              {:granted true}
+              {:granted false
+               :error (denial-message "write" write-decision)})}))
 
 (defn- geolocation-result
   [state request]
@@ -1350,17 +1421,34 @@
                               (nil? error) (dissoc :error)))))
 
     :clipboard/read
-    (let [result {:text (or (:text @(:clipboard state)) "")}]
-      (-> state
-          (assoc :last-result result)
-          (record-result {:ok? true :result result})))
+    (let [clipboard-result (clipboard-read-result state request)
+          ok? (:ok? clipboard-result)
+          result (:result clipboard-result)
+          error (:error clipboard-result)
+          decision (:permission/decision clipboard-result)]
+      (cond-> state
+        true (assoc :last-result result)
+        error (assoc :last-error error)
+        true (record-result (cond-> {:ok? ok?
+                                     :result result
+                                     :error error
+                                     :permission/decision decision}
+                              (nil? error) (dissoc :error)))))
 
     :clipboard/write
-    (do
-      (swap! (:clipboard state) assoc :text (:text request))
-      (-> state
-          (assoc :last-result true)
-          (record-result {:ok? true :result true})))
+    (let [clipboard-result (clipboard-write-result state request)
+          ok? (:ok? clipboard-result)
+          error (:error clipboard-result)
+          decision (:permission/decision clipboard-result)
+          _ (when ok? (swap! (:clipboard state) assoc :text (:text request)))]
+      (cond-> state
+        true (assoc :last-result ok?)
+        error (assoc :last-error error)
+        true (record-result (cond-> {:ok? ok?
+                                     :result ok?
+                                     :error error
+                                     :permission/decision decision}
+                              (nil? error) (dissoc :error)))))
 
     :window/open
     (let [result (window-open-result request)]
@@ -1785,7 +1873,7 @@
                                                             capability-results
                                                             (:document state)
                                                             (:storage state)
-                                                            (:clipboard state)
+                                                            (clipboard-snapshot state)
                                                             (geolocation-snapshot state)
                                                             (websocket-snapshot state)
                                                             worker-snap
@@ -1816,7 +1904,7 @@
                                                               capability-results
                                                               (:document state)
                                                               (:storage state)
-                                                              (:clipboard state)
+                                                              (clipboard-snapshot state)
                                                               (geolocation-snapshot state)
                                                               (websocket-snapshot state)
                                                               worker-snap
