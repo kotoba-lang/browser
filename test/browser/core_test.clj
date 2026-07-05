@@ -464,3 +464,37 @@
         refreshed (browser/refresh-page page {})]
     (is (= "#ff0000" (box-color refreshed))
         "refresh-page must still evaluate @media against the real 375px viewport")))
+
+(def ^:private color-scheme-css
+  "#box { background: #ffffff } @media (prefers-color-scheme: dark) { #box { background: #000000 } }")
+
+(deftest load-html-evaluates-prefers-color-scheme-against-a-real-host-color-scheme
+  ;; Before cssom.core supported prefers-color-scheme at all, this feature
+  ;; always defaulted to matching regardless of the actual host preference
+  ;; -- a real page's light AND dark @media variants (the single most
+  ;; common real-world usage of this feature) would both apply
+  ;; simultaneously. This proves the real host-injected :color-scheme
+  ;; genuinely reaches cssom's cascade through browser.core.
+  (let [light (browser/load-html {:url "kotoba://theme"
+                                  :color-scheme "light"
+                                  :css color-scheme-css
+                                  :html "<main><div id=\"box\">Themed</div></main>"})
+        dark (browser/load-html {:url "kotoba://theme"
+                                 :color-scheme "dark"
+                                 :css color-scheme-css
+                                 :html "<main><div id=\"box\">Themed</div></main>"})
+        default (browser/load-html {:url "kotoba://theme"
+                                    :css color-scheme-css
+                                    :html "<main><div id=\"box\">Themed</div></main>"})]
+    (is (= "#ffffff" (box-color light)) "a real light color-scheme must not match the dark-only media query")
+    (is (= "#000000" (box-color dark)) "a real dark color-scheme must match its own media query")
+    (is (= "#ffffff" (box-color default)) "omitting :color-scheme behaves like a real light-mode host")))
+
+(deftest refresh-page-preserves-real-color-scheme-for-media-query-evaluation
+  (let [page (browser/load-html {:url "kotoba://theme"
+                                 :color-scheme "dark"
+                                 :css color-scheme-css
+                                 :html "<main><div id=\"box\">Themed</div></main>"})
+        refreshed (browser/refresh-page page {})]
+    (is (= "#000000" (box-color refreshed))
+        "refresh-page must still evaluate prefers-color-scheme against the real dark color-scheme")))

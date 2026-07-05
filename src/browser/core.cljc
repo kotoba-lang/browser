@@ -8,9 +8,10 @@
             [kotoba.wasm.dom :as dom]))
 
 (defn render-document
-  [{:keys [document css-rules viewport theme] :or {viewport [800 600]}}]
+  [{:keys [document css-rules viewport theme color-scheme] :or {viewport [800 600]}}]
   (let [document (cond-> document
-                   (seq css-rules) (css/apply-cascade css-rules {:viewport-width (first viewport)}))
+                   (seq css-rules) (css/apply-cascade css-rules {:viewport-width (first viewport)
+                                                                 :color-scheme color-scheme}))
         [ops document] (dom/consume-ops document)
         tree (dom/tree document)
         draw-ops (layout/draw-ops tree {:width (first viewport)
@@ -22,15 +23,16 @@
      :browser/draw-ops draw-ops}))
 
 (defn refresh-page
-  [page {:keys [document viewport theme] :as opts}]
+  [page {:keys [document viewport theme color-scheme] :as opts}]
   (merge page
          (render-document {:document (or document (:browser/document page))
                            :css-rules (:browser/css-rules page)
                            :viewport (or viewport (:browser/viewport page))
-                           :theme (or theme (:browser/theme page))})))
+                           :theme (or theme (:browser/theme page))
+                           :color-scheme (or color-scheme (:browser/color-scheme page))})))
 
 (defn load-html
-  [{:keys [url html css viewport theme] :or {viewport [800 600]}}]
+  [{:keys [url html css viewport theme color-scheme] :or {viewport [800 600]}}]
   (let [rules (css/parse-rules css)
         document (assoc (html/parse-into-document html)
                         :url url
@@ -38,10 +40,12 @@
         base-href (dom-bridge/document-base-href document)
         document (cond-> document
                    base-href (assoc :base-uri (page-script/resolve-src url base-href))
-                   (seq rules) (css/apply-cascade rules {:viewport-width (first viewport)}))
+                   (seq rules) (css/apply-cascade rules {:viewport-width (first viewport)
+                                                         :color-scheme color-scheme}))
         rendered (render-document {:document document
                                    :viewport viewport
-                                   :theme theme})]
+                                   :theme theme
+                                   :color-scheme color-scheme})]
     {:browser/url url
      :browser/document (:browser/document rendered)
      :browser/tree (:browser/tree rendered)
@@ -49,6 +53,7 @@
      :browser/css-rules rules
      :browser/viewport viewport
      :browser/theme theme
+     :browser/color-scheme color-scheme
      :browser/ops (:browser/ops rendered)
      :browser/draw-ops (:browser/draw-ops rendered)}))
 
@@ -56,10 +61,10 @@
   "Navigate through an injected fetch capability.
 
   fetch-fn receives {:url ... :method :get} and returns {:status n :body html}."
-  [{:keys [url fetch-fn viewport theme]}]
+  [{:keys [url fetch-fn viewport theme color-scheme]}]
   (let [{:keys [status body] :as response} (fetch-fn {:url url :method :get})]
     (if (<= 200 (or status 0) 299)
-      (assoc (load-html {:url url :html body :viewport viewport :theme theme})
+      (assoc (load-html {:url url :html body :viewport viewport :theme theme :color-scheme color-scheme})
              :browser/response response)
       {:browser/url url
        :browser/response response

@@ -4005,3 +4005,23 @@
   (let [session (session/new-session {:host (host/recording-host)})]
     (is (= 0 (count (get-in session [:browser.session/navigation :entries]))))
     (is (= 0 (run-history-length-probe! session)))))
+
+(deftest new-session-threads-a-real-host-color-scheme-into-media-query-evaluation
+  ;; browser.core/cssom.core support prefers-color-scheme, but that's dead
+  ;; without a real host-injection point at the session level too --
+  ;; proves session/new-session's :color-scheme reaches load-html!'s own
+  ;; cascade, not just browser.core's own lower-level opts.
+  (let [css "#box { background: #ffffff } @media (prefers-color-scheme: dark) { #box { background: #000000 } }"
+        box-color (fn [session]
+                    (some #(when (and (= :rect (:draw/op %)) (= :div (:tag %))) (:color %))
+                          (get-in session [:browser.session/page :browser/draw-ops])))
+        dark-session (-> (session/new-session {:host (host/recording-host) :color-scheme "dark"})
+                        (session/load-html! {:url "kotoba://theme" :css css
+                                             :html "<main><div id=\"box\">Themed</div></main>"}))
+        light-session (-> (session/new-session {:host (host/recording-host) :color-scheme "light"})
+                         (session/load-html! {:url "kotoba://theme" :css css
+                                              :html "<main><div id=\"box\">Themed</div></main>"}))]
+    (is (= "#000000" (box-color dark-session))
+        "a real dark-color-scheme session must match its own page's prefers-color-scheme: dark rule")
+    (is (= "#ffffff" (box-color light-session))
+        "a real light-color-scheme session must NOT match a dark-only media query")))

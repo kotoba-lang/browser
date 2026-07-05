@@ -64,13 +64,14 @@
   default keeps doing that job, exactly as it already does today for direct
   `new-state` callers; `browser.compat.quickjs-runner/run-script!` is what
   threads `:browser.session/geolocation` into every `new-state` call."
-  [{:keys [host viewport theme fetch-fn websocket-fn worker-fn geolocation surface account profile input audit
+  [{:keys [host viewport theme color-scheme fetch-fn websocket-fn worker-fn geolocation surface account profile input audit
            persistence-provider store chrome navigation history page script-runner
            script-engine engine-factory dispose-engine-fn] :as opts}]
   (let [{:keys [profile store audit chrome surface navigation history page] :as opts} (restore opts)]
   {:browser.session/host host
    :browser.session/viewport (or viewport [800 600])
    :browser.session/theme theme
+   :browser.session/color-scheme color-scheme
    :browser.session/fetch-fn fetch-fn
    :browser.session/websocket-fn websocket-fn
    :browser.session/worker-fn worker-fn
@@ -453,7 +454,8 @@
   (let [page (browser/refresh-page (:browser.session/page session)
                                    {:document document
                                     :viewport (:browser.session/viewport session)
-                                    :theme (:browser.session/theme session)})
+                                    :theme (:browser.session/theme session)
+                                    :color-scheme (:browser.session/color-scheme session)})
         batch (host/commit! (:browser.session/host session) (:browser/ops page))]
     (-> session
         (assoc :browser.session/page page
@@ -557,7 +559,8 @@
                            :html html
                            :css css
                            :viewport (:browser.session/viewport session)
-                           :theme (:browser.session/theme session)}))
+                           :theme (:browser.session/theme session)
+                           :color-scheme (:browser.session/color-scheme session)}))
       (run-page-scripts!)))
 
 (defn navigate!
@@ -592,7 +595,8 @@
                (assoc (browser/load-html {:url url
                                           :html (:body response)
                                           :viewport (:browser.session/viewport session)
-                                          :theme (:browser.session/theme session)})
+                                          :theme (:browser.session/theme session)
+                                          :color-scheme (:browser.session/color-scheme session)})
                       :browser/response response)
                {:browser/url url
                 :browser/response response
@@ -609,7 +613,8 @@
                                                 (name (:browser/error page))
                                                 "</p></main>")
                                      :viewport (:browser.session/viewport session)
-                                     :theme (:browser.session/theme session)})
+                                     :theme (:browser.session/theme session)
+                                     :color-scheme (:browser.session/color-scheme session)})
                  :browser.session/navigation (assoc (:browser.session/navigation session)
                                                     :redirects redirects))
           (audit! (audit/navigation-error-event {:url url
@@ -982,7 +987,8 @@
           (commit-page! (assoc (browser/load-html {:url (:url request)
                                                    :html (:body response)
                                                    :viewport (:browser.session/viewport session)
-                                                   :theme (:browser.session/theme session)})
+                                                   :theme (:browser.session/theme session)
+                                                   :color-scheme (:browser.session/color-scheme session)})
                                :browser/response response)))
 
       :else
