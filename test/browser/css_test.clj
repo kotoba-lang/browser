@@ -34,8 +34,17 @@
     (is (= "red" (get-in lead [:attrs :style/color])) "id specificity wins over descendant class")
     (is (= 1 (get-in lead [:attrs :style/padding])))
     (is (= 2 (get-in lead [:attrs :style/margin])))
-    (is (nil? (get-in lead [:attrs :style/border])) "child combinator should not match nested p")
-    (is (= "loose" (get-in loose [:attrs :style/border])))))
+    (is (nil? (get-in lead [:attrs :style/border-color])) "child combinator should not match nested p")
+    ;; "loose" is a deliberately made-up, non-real border value -- this
+    ;; test only cares about `main > .note`'s specificity, not real
+    ;; border semantics -- but cssom.core now expands the `border`
+    ;; shorthand into its real longhands (:border-width/:border-style/
+    ;; :border-color), so an unrecognized single token like "loose"
+    ;; (matching neither a width nor a border-style keyword) falls
+    ;; through to the shorthand's own catch-all "anything else is the
+    ;; color" rule, landing on :border-color, not a bare :style/border
+    ;; key that no longer exists at all.
+    (is (= "loose" (get-in loose [:attrs :style/border-color])))))
 
 (deftest cascade-applies-attribute-selectors-and-important-precedence
   (let [page (browser/load-html
