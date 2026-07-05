@@ -445,9 +445,11 @@
     (is (str/includes? source "globalThis.Notification = function(title, options)"))
     (is (str/includes? source "capability: 'notification/show'"))
     (is (str/includes? source "request['notification/options'] = options"))
-    (is (str/includes? source "globalThis.Notification.permission = 'default'"))
+    (is (str/includes? source "globalThis.Notification.permission = (globalThis.__kotobaNotificationSnapshot && globalThis.__kotobaNotificationSnapshot.permission) || 'default'"))
     (is (str/includes? source "globalThis.Notification.requestPermission = function(callback)"))
-    (is (str/includes? source "capability: 'notification/request-permission'"))))
+    (is (str/includes? source "capability: 'notification/request-permission'"))
+    (is (str/includes? source "var permission = (globalThis.__kotobaNotificationSnapshot && globalThis.__kotobaNotificationSnapshot.permission) || 'default'")
+        "requestPermission's callback/return value must read the REAL, host-computed permission decision off globalThis.__kotobaNotificationSnapshot (installed by notification-permission-snapshot-source BEFORE this shim runs) instead of always reporting the hardcoded 'default' literal regardless of what was actually granted.")))
 
 (deftest quickjs-wasm-webapi-shim-exposes-fullscreen-capability
   (let [source quickjs-wasm/webapi-shim-source]

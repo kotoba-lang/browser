@@ -50,8 +50,14 @@
   that opened the connection/worker/request ran (see
   `websocket-snapshot`/`worker-snapshot`/`fetch-snapshot`) to that
   connection/worker's `onmessage` or that `fetch()` call's pending `.then()`
-  chain before this script's own source runs."
-  [call payload capability-results document storage clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot]
+  chain before this script's own source runs, and the real, current
+  notification permission decision (already computed host-side by
+  `notification-permission-snapshot`, the same reason `geolocation-snapshot`
+  needs one), so `quickjs-wasm`'s webapi shim can install it as a VM global
+  before running `payload`'s script (`:notification/snapshot`) and answer
+  `Notification.permission`/`Notification.requestPermission` synchronously
+  from real host state instead of always reporting the hardcoded `'default'`."
+  [call payload capability-results document storage clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot notification-snapshot]
   (let [snapshot (cond-> (dom-bridge/document-snapshot document)
                    (:script/node-id payload)
                    (assoc :current-script (:script/node-id payload)))]
@@ -63,7 +69,8 @@
                        :geolocation/snapshot geolocation-snapshot
                        :websocket/snapshot websocket-snapshot
                        :worker/snapshot worker-snapshot
-                       :fetch/snapshot fetch-snapshot)
+                       :fetch/snapshot fetch-snapshot
+                       :notification/snapshot notification-snapshot)
                 capability-results)))
 
 (defn- take-capability-results
@@ -663,6 +670,44 @@
   Mirrors `take-worker-snapshot`'s `[value state]` shape."
   [state]
   [(fetch-snapshot state) (assoc state :net/fetch-responses {})])
+
+(defn- notification-permission-snapshot
+  "Compute the REAL, current notification permission decision from the
+  active profile's permission grants, host-side, BEFORE the script runs --
+  so `invocation-with-snapshots` can hand it to `quickjs-wasm` as
+  `:notification/snapshot` and the webapi shim's real
+  `Notification.permission`/`Notification.requestPermission` can
+  synchronously reflect/return it (this engine evaluates a whole script
+  synchronously in one pass, so there is no realistic way to defer that
+  settlement the way a real, async/permission-prompted browser would -- see
+  `quickjs-wasm/notification-permission-snapshot-source`). Mirrors
+  `geolocation-snapshot` exactly, just for a single permission string instead
+  of a permission+position pair.
+
+  Uses the SAME `permission-decision-for` gate `apply-capability`'s
+  `:notification/request-permission`/`:notification/show` cases apply (via
+  `notification-permission-result`/`notification-show-result` below) when
+  they process the queued `notification/request-permission`/`notification/
+  show` capability requests AFTER the script runs for the audit trail --
+  with an empty `request` map, since the real `Notification` JS shim never
+  sets a custom `:origin` on either request either (mirroring
+  `geolocation-snapshot`'s own empty-map reasoning: no real caller ever sets
+  a custom `:origin` on this capability's snapshot path), so the two
+  decisions always agree.
+
+  Returns a single, JSON-safe (plain string, no keywords) map: `{:permission
+  \"granted\"}` or `{:permission \"denied\"}` -- the real W3C Notifications
+  API `NotificationPermission` values this engine can ever actually produce.
+  Unlike a real browser, this engine's `permission-decision-for` always
+  returns a definite `:allow`/`:deny` decision (there is no user-facing
+  prompt left pending), so there is no real \"default\" (not-yet-decided)
+  case here; `\"default\"` is only ever produced by the JS shim's OWN
+  fallback when no real snapshot was computed at all (see
+  `quickjs-wasm/notification-permission-snapshot-source`)."
+  [state]
+  (let [decision (permission-decision-for state {} :notification/show)
+        granted? (= :allow (:permission/decision decision))]
+    {:permission (if granted? "granted" "denied")}))
 
 (defn- notification-permission-result
   [state request]
@@ -1919,7 +1964,8 @@
                                                             (geolocation-snapshot state)
                                                             (websocket-snapshot state)
                                                             worker-snap
-                                                            fetch-snap)))
+                                                            fetch-snap
+                                                            (notification-permission-snapshot state))))
         state (record-response-errors state response)
         state (apply-requests state (:requests response))]
     (-> state
@@ -1950,7 +1996,8 @@
                                                               (geolocation-snapshot state)
                                                               (websocket-snapshot state)
                                                               worker-snap
-                                                              fetch-snap)))
+                                                              fetch-snap
+                                                              (notification-permission-snapshot state))))
           state (record-response-errors state response)
           state (apply-requests state (:requests response))]
       (-> state

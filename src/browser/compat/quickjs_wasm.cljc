@@ -2888,14 +2888,15 @@
         globalThis.__kotobaRequests.push(request);
         this.title = String(title);
       };
-      globalThis.Notification.permission = 'default';
+      globalThis.Notification.permission = (globalThis.__kotobaNotificationSnapshot && globalThis.__kotobaNotificationSnapshot.permission) || 'default';
       globalThis.Notification.requestPermission = function(callback) {
         globalThis.__kotobaRequests.push({
           capability: 'notification/request-permission',
           'notification/op': 'request-permission'
         });
-        if (typeof callback === 'function') callback('default');
-        return 'default';
+        var permission = (globalThis.__kotobaNotificationSnapshot && globalThis.__kotobaNotificationSnapshot.permission) || 'default';
+        if (typeof callback === 'function') callback(permission);
+        return permission;
       };
       globalThis.WebSocket = function(url, protocols) {
         var socketId = 'websocket-' + globalThis.__kotobaNextWebSocketId;
@@ -3490,18 +3491,43 @@
           ";")))
 
 #?(:cljs
+   (defn- notification-permission-snapshot-source
+     "JS source that installs the real, current notification permission
+     decision (`quickjs-execution/notification-permission-snapshot`, computed
+     host-side from the active profile's permission grants -- and the SAME
+     `permission-decision-for` gate `apply-capability`'s
+     `:notification/request-permission`/`:notification/show` cases use) as
+     `globalThis.__kotobaNotificationSnapshot`, so the webapi shim's
+     `Notification.permission`/`Notification.requestPermission` can
+     synchronously reflect/return the REAL permission decision instead of the
+     hardcoded `'default'` literal. Mirrors `geolocation-snapshot-source`,
+     but simpler -- there is only ever a single permission string here, no
+     position/error pair, since `notification-permission-snapshot` never has
+     anything else to report. Defaults to `{:permission \"default\"}` when no
+     real snapshot was computed (e.g. a caller invoking this engine below
+     `quickjs-execution/evaluate!`/`load-module!`, which always supplies a
+     real one), mirroring a real, unconfigured `Notification.permission`'s
+     actual default value."
+     [notification-snapshot]
+     (str "globalThis.__kotobaNotificationSnapshot = "
+          (js/JSON.stringify (clj->js (jsonable (or notification-snapshot
+                                                     {:permission "default"}))))
+          ";")))
+
+#?(:cljs
    (defn- dump-result
      ([module source url modules]
-      (dump-result module source url modules nil false nil nil nil nil nil nil nil))
+      (dump-result module source url modules nil false nil nil nil nil nil nil nil nil))
      ([module source url modules module-provider module?]
-      (dump-result module source url modules module-provider module? nil nil nil nil nil nil nil))
-     ([module source url modules module-provider module? document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot]
+      (dump-result module source url modules module-provider module? nil nil nil nil nil nil nil nil))
+     ([module source url modules module-provider module? document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot notification-snapshot]
       (let [^js runtime (.newRuntime ^js module #js {:moduleLoader (module-loader modules module-provider)})
             ^js vm (.newContext runtime)
             _ (eval-dispose! vm (snapshot-source document-snapshot) "kotoba://quickjs/document-snapshot.js")
             _ (eval-dispose! vm (storage-snapshot-source storage-snapshot) "kotoba://quickjs/storage-snapshot.js")
             _ (eval-dispose! vm (clipboard-snapshot-source clipboard-snapshot) "kotoba://quickjs/clipboard-snapshot.js")
             _ (eval-dispose! vm (geolocation-snapshot-source geolocation-snapshot) "kotoba://quickjs/geolocation-snapshot.js")
+            _ (eval-dispose! vm (notification-permission-snapshot-source notification-snapshot) "kotoba://quickjs/notification-snapshot.js")
             _ (eval-dispose! vm (websocket-snapshot-source websocket-snapshot) "kotoba://quickjs/websocket-snapshot.js")
             _ (eval-dispose! vm (worker-snapshot-source worker-snapshot) "kotoba://quickjs/worker-snapshot.js")
             _ (eval-dispose! vm (fetch-snapshot-source fetch-snapshot) "kotoba://quickjs/fetch-snapshot.js")
@@ -3531,20 +3557,21 @@
            context))))
 
 #?(:cljs
-   (defn- install-document-shim! [vm document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot]
+   (defn- install-document-shim! [vm document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot notification-snapshot]
      (eval-dispose! vm (snapshot-source document-snapshot) "kotoba://quickjs/document-snapshot.js")
      (eval-dispose! vm (storage-snapshot-source storage-snapshot) "kotoba://quickjs/storage-snapshot.js")
      (eval-dispose! vm (clipboard-snapshot-source clipboard-snapshot) "kotoba://quickjs/clipboard-snapshot.js")
      (eval-dispose! vm (geolocation-snapshot-source geolocation-snapshot) "kotoba://quickjs/geolocation-snapshot.js")
+     (eval-dispose! vm (notification-permission-snapshot-source notification-snapshot) "kotoba://quickjs/notification-snapshot.js")
      (eval-dispose! vm (websocket-snapshot-source websocket-snapshot) "kotoba://quickjs/websocket-snapshot.js")
      (eval-dispose! vm (worker-snapshot-source worker-snapshot) "kotoba://quickjs/worker-snapshot.js")
      (eval-dispose! vm (fetch-snapshot-source fetch-snapshot) "kotoba://quickjs/fetch-snapshot.js")
      (eval-dispose! vm webapi-shim-source "kotoba://quickjs/webapi-shim.js")))
 
 #?(:cljs
-   (defn- context-eval-result [context source url module? document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot]
+   (defn- context-eval-result [context source url module? document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot notification-snapshot]
      (let [vm (:vm context)
-           _ (install-document-shim! vm document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot)
+           _ (install-document-shim! vm document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot notification-snapshot)
            response (eval-result vm source url module?)
            requests (dump-requests vm)]
        (assoc response :requests requests))))
@@ -3799,7 +3826,8 @@
                                                           (:geolocation/snapshot request)
                                                           (:websocket/snapshot request)
                                                           (:worker/snapshot request)
-                                                          (:fetch/snapshot request))
+                                                          (:fetch/snapshot request)
+                                                          (:notification/snapshot request))
 
                                      :js/module-load
                                      (if-let [source (resolve-module-source modules module-provider (:specifier request))]
@@ -3813,7 +3841,8 @@
                                                             (:geolocation/snapshot request)
                                                             (:websocket/snapshot request)
                                                             (:worker/snapshot request)
-                                                            (:fetch/snapshot request))
+                                                            (:fetch/snapshot request)
+                                                            (:notification/snapshot request))
                                        {:error :quickjs/module-not-found
                                         :specifier (:specifier request)
                                         :requests []})

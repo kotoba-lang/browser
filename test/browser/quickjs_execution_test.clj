@@ -453,6 +453,57 @@
            (:capability/results state)))
     (is (= :permission/not-granted (:last-error state)))))
 
+(deftest quickjs-notification-permission-snapshot-reports-granted-with-profile-grant
+  ;; notification-permission-snapshot is the REAL, host-side-computed
+  ;; permission decision `invocation-with-snapshots` threads into the engine
+  ;; invocation as :notification/snapshot (mirrors :geolocation/snapshot's
+  ;; :websocket/snapshot's own precedent of being asserted directly against
+  ;; the captured engine request -- see
+  ;; quickjs-websocket-snapshot-carries-plain-closed-key-for-real-js-delivery).
+  ;; Before this fix there was no such snapshot at all: `Notification.
+  ;; permission`/`requestPermission`'s callback could only ever report the
+  ;; hardcoded literal 'default', regardless of what the profile actually
+  ;; granted.
+  (let [profile (-> (profile/new-profile {:id "work"})
+                    (profile/grant-permission "https://app.example" :notification/show))
+        adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        received-payload (atom nil)
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :net-context {:profile profile
+                              :page-url "https://app.example/app"}
+                :engine (fn [request]
+                          (reset! received-payload request)
+                          {:result :notifications :requests []})})
+        _ (execution/evaluate! state {:source "/* probe */"})]
+    (is (= {:permission "granted"}
+           (:notification/snapshot @received-payload))
+        (str "expected notification-permission-snapshot to report the REAL "
+             ":allow decision the granted profile permission actually gives, "
+             "not the engine's hardcoded 'default' -- got "
+             (pr-str (:notification/snapshot @received-payload))))))
+
+(deftest quickjs-notification-permission-snapshot-reports-denied-without-profile-grant
+  (let [profile (profile/new-profile {:id "work"})
+        adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        received-payload (atom nil)
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :net-context {:profile profile
+                              :page-url "https://app.example/app"}
+                :engine (fn [request]
+                          (reset! received-payload request)
+                          {:result :notifications :requests []})})
+        _ (execution/evaluate! state {:source "/* probe */"})]
+    (is (= {:permission "denied"}
+           (:notification/snapshot @received-payload))
+        (str "expected notification-permission-snapshot to report the REAL "
+             ":deny decision a profile that never granted :notification/show "
+             "actually gives -- got "
+             (pr-str (:notification/snapshot @received-payload))))))
+
 (deftest quickjs-fullscreen-request-records-context-request-with-profile-grant
   (let [page (browser/load-html {:url "https://app.example/app"
                                  :html "<main id=\"app\">Fullscreen</main>"})
