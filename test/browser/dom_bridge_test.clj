@@ -16,6 +16,24 @@
     (is (= 2 (count buttons)))
     (is (= "go" (get-in document [:nodes go :attrs :id])))))
 
+(deftest get-element-by-id-matches-the-literal-id-attribute-not-a-css-selector
+  ;; Real document.getElementById(id) is a literal, unescaped match against
+  ;; the id attribute's exact string value -- never CSS selector parsing.
+  ;; An id containing a CSS-special character (a period here) is common in
+  ;; real-world HTML (e.g. ids mirroring backend field names like
+  ;; "2fa.token") and must still be found, unlike (query-selector (str "#" id))
+  ;; which would misinterpret the period as a class-selector separator.
+  (let [page (browser/load-html {:url "kotoba://dom"
+                                 :html "<main><input id=\"2fa.token\" value=\"otp\"><input id=\"a:b\" value=\"colon\"></main>"})
+        document (:browser/document page)
+        dotted (bridge/get-element-by-id document "2fa.token")
+        coloned (bridge/get-element-by-id document "a:b")]
+    (is (some? dotted))
+    (is (= "2fa.token" (get-in document [:nodes dotted :attrs :id])))
+    (is (some? coloned))
+    (is (= "a:b" (get-in document [:nodes coloned :attrs :id])))
+    (is (nil? (bridge/get-element-by-id document "does-not-exist")))))
+
 (deftest query-selector-supports-descendant-and-child-combinators
   (let [page (browser/load-html {:url "kotoba://dom"
                                  :html "<main id=\"root\"><section><p id=\"nested\" class=\"note\">Nested</p></section><p id=\"direct\" class=\"note\">Direct</p></main>"})

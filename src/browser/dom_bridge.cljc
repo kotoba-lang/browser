@@ -31,8 +31,17 @@
   (first (query-selector-all document selector)))
 
 (defn get-element-by-id
+  "Real document.getElementById(id) semantics: a literal, unescaped match
+   against the id attribute's exact string value -- never CSS selector
+   parsing. Deliberately NOT implemented as (query-selector (str \"#\" id)):
+   an id containing any CSS-special character (a period, a colon, a space,
+   a leading digit, ...) -- all common in real-world HTML, e.g. id=\"2fa.token\"
+   -- would silently fail to match, or worse, match something else entirely,
+   once concatenated into a selector string without escaping, exactly the
+   real getElementById(id) vs. querySelector('#' + id) gotcha real browsers
+   avoid by never parsing id as a selector in the first place."
   [document id]
-  (query-selector document (str "#" id)))
+  (:node/id (first (filter #(= (str id) (get-in % [:attrs :id])) (element-nodes document)))))
 
 (defn title-node-id
   [document]
