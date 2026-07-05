@@ -22,12 +22,22 @@
   (or (:attrs node) {}))
 
 (defn- truthy?
+  "Real HTML boolean-attribute presence: `true` (this repo's own htmldom
+  parser's value for a bare attribute like `disabled`), the empty string
+  (`disabled=\"\"`), or any other non-blank value that isn't literally
+  \"false\" -- this last case is what actually determines a boolean
+  attribute written in the common XHTML-compatible explicit form
+  (`disabled=\"disabled\"`, `checked=\"checked\"`, `selected=\"selected\"`,
+  `hidden=\"hidden\"`), which the previous version of this fn never
+  recognized. Mirrors htmldom.core's own private `truthy-attr?`, which
+  already gets this right for htmldom's own internal default-value
+  computation (e.g. an <option selected=\"selected\">'s selectedness)."
   [value]
   (or (= true value)
       (= "" value)
-      (= "true" value)
-      (and (keyword? value)
-           (= (name value) (str value)))))
+      (and (string? value)
+           (not (str/blank? value))
+           (not= "false" (str/lower-case value)))))
 
 (defn- text-content
   [document node-id]

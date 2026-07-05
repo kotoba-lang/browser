@@ -375,6 +375,37 @@
     (is (= semantic (:semantic-tree snapshot)))
     (is (seq a11y))))
 
+(deftest kotoba-browser-use-recognizes-xhtml-style-explicit-boolean-attribute-values
+  ;; Real HTML permits writing a boolean attribute two ways: the bare form
+  ;; (`hidden`, `checked`) and the explicit XHTML-compatible form
+  ;; (`hidden="hidden"`, `checked="checked"`) -- both are equally valid and
+  ;; equally common (many templating engines and older codebases emit only
+  ;; the explicit form). This engine's own htmldom parser and the
+  ;; browser-use adapter must agree on both -- an LLM agent driving this
+  ;; browser via browser-use must never be shown a genuinely hidden/
+  ;; disabled/selected element as if it were visible/enabled/unselected
+  ;; just because the page happened to spell the attribute the explicit way.
+  (let [browser (kotoba-browser/kotoba-browser
+                 {:start-url "https://app.example/prefs"
+                  :html (str "<main>"
+                             "<div hidden=\"hidden\">Secret</div>"
+                             "<button disabled=\"disabled\">Save</button>"
+                             "<input type=\"checkbox\" checked=\"checked\">"
+                             "<select><option value=\"basic\">Basic</option>"
+                             "<option value=\"advanced\" selected=\"selected\">Advanced</option></select>"
+                             "</main>")})
+        state (kotoba-browser/get-state browser)
+        semantic (:semantic-tree state)
+        elements (:elements state)]
+    (is (not (str/includes? (pr-str semantic) "Secret"))
+        "an explicit hidden=\"hidden\" element must be excluded from the semantic tree, same as bare hidden")
+    (is (= "true" (get-in (first (filter #(= "button" (:tag %)) elements)) [:attrs :disabled]))
+        "an explicit disabled=\"disabled\" button must report :disabled \"true\", same as bare disabled")
+    (is (= "true" (get-in (first (filter #(= "input" (:tag %)) elements)) [:attrs :checked]))
+        "an explicit checked=\"checked\" checkbox must report :checked \"true\", same as bare checked")
+    (is (= "advanced" (get-in (first (filter #(= "select" (:tag %)) elements)) [:attrs :value]))
+        "an explicit selected=\"selected\" option must be reported as the select's real current value")))
+
 (deftest browser-use-recipe-runs-against-kotoba-browser-without-browser-use-changes
   (let [calls (atom [])
         browser (kotoba-browser/kotoba-browser
