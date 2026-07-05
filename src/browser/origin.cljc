@@ -14,7 +14,21 @@
         (if (str/starts-with? rest "//")
           (let [without-slashes (subs rest 2)
                 slash (.indexOf without-slashes "/")
-                authority (if (neg? slash) without-slashes (subs without-slashes 0 slash))
+                authority-with-userinfo (if (neg? slash) without-slashes (subs without-slashes 0 slash))
+                ;; Strip any "userinfo@" prefix before the host (WHATWG URL:
+                ;; everything up to the LAST "@" in the authority is
+                ;; userinfo, never part of the host) -- without this, a URL
+                ;; like "https://victim.com@attacker.com/" (a real, network-
+                ;; reachable shape: a malicious/compromised server can return
+                ;; it verbatim in a redirect Location header) produces the
+                ;; origin "https://victim.com@attacker.com" instead of the
+                ;; real "https://attacker.com" per RFC 6454 (origin excludes
+                ;; userinfo), silently breaking cookie/permission-store
+                ;; lookups keyed by host for any such URL.
+                at (.lastIndexOf authority-with-userinfo "@")
+                authority (if (neg? at)
+                            authority-with-userinfo
+                            (subs authority-with-userinfo (inc at)))
                 path (if (neg? slash) "/" (subs without-slashes slash))]
             {:url s
              :scheme scheme
