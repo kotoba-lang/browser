@@ -226,10 +226,14 @@
 
 (defn- cookie-same-site-matches?
   [page-url request-url same-site]
-  (case (str/lower-case (str same-site))
-    "strict" (same-site? page-url request-url)
-    "lax" (same-site? page-url request-url)
-    true))
+  ;; RFC 6265bis: a cookie with no SameSite attribute (nil here) defaults to
+  ;; Lax, not None. Only an *explicit* SameSite=None opts a cookie into being
+  ;; sent on cross-site requests; every other value (missing, "lax",
+  ;; "strict", or an unrecognized token) must still satisfy the same-site
+  ;; check, matching real browsers' Lax-by-default CSRF mitigation.
+  (if (= "none" (str/lower-case (str same-site)))
+    true
+    (same-site? page-url request-url)))
 
 (defn- cookie-secure-matches?
   [request-url secure?]

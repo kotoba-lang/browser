@@ -176,7 +176,21 @@
                                   (storage/put-value p
                                                      "https://api.example/data"
                                                      net/cookie-key
-                                                     {"sid" "abc"}))
+                                                     {"sid" "abc"})
+                                  ;; app.example and api.example are different
+                                  ;; sites, so this cross-site credentialed
+                                  ;; cookie must be marked SameSite=None
+                                  ;; (+ Secure) to ever be sent — a cookie
+                                  ;; with no SameSite defaults to Lax and
+                                  ;; must NOT cross sites.
+                                  (storage/put-value p
+                                                     "https://api.example/data"
+                                                     net/cookie-same-site-key
+                                                     {"sid" "none"})
+                                  (storage/put-value p
+                                                     "https://api.example/data"
+                                                     net/cookie-secure-key
+                                                     {"sid" true}))
                        :profile p
                        :page-url "https://app.example/page"
                        :credentials :include
@@ -920,6 +934,56 @@
     (is (= "strict=yes" (get-in @same-site-seen [:headers "cookie"])))
     (is (nil? (get-in @cross-site-seen [:headers "cookie"])))))
 
+(deftest cookie-header-defaults-samesite-to-lax-when-omitted
+  ;; RFC 6265bis: a Set-Cookie with no SameSite attribute must behave as
+  ;; SameSite=Lax, i.e. it must NOT be attached to a cross-site subresource
+  ;; request (only an explicit SameSite=None cookie may be). This is the
+  ;; default browsers shipped specifically to blunt CSRF/cross-site cookie
+  ;; leakage for the (extremely common) case where a site never sets
+  ;; SameSite explicitly.
+  (let [p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "https://app.example.com" :net/fetch)
+              (profile/grant-permission "https://api.example.com" :net/fetch))
+        stored (net/fetch-resource
+                {:store (storage/empty-store)
+                 :profile p
+                 :page-url "https://app.example.com/login"
+                 :fetch-fn (fn [_]
+                             {:status 200
+                              :headers {"set-cookie" "implicit=yes; Domain=example.com; Path=/"}
+                              :body "ok"})}
+                {:url "https://app.example.com/login" :method :get})
+        same-site-seen (atom nil)
+        _same-site (net/fetch-resource
+                    {:store (:store stored)
+                     :profile p
+                     :page-url "https://app.example.com/page"
+                     :credentials :include
+                     :cache? false
+                     :fetch-fn (fn [request]
+                                 (reset! same-site-seen request)
+                                 {:status 200
+                                  :headers {"access-control-allow-origin" "https://app.example.com"
+                                            "access-control-allow-credentials" "true"}
+                                  :body "ok"})}
+                    {:url "https://api.example.com/data" :method :get})
+        cross-site-seen (atom nil)
+        _cross-site (net/fetch-resource
+                     {:store (:store stored)
+                      :profile p
+                      :page-url "https://other.test/page"
+                      :credentials :include
+                      :cache? false
+                      :fetch-fn (fn [request]
+                                  (reset! cross-site-seen request)
+                                  {:status 200
+                                   :headers {"access-control-allow-origin" "https://other.test"
+                                             "access-control-allow-credentials" "true"}
+                                   :body "ok"})}
+                     {:url "https://api.example.com/data" :method :get})]
+    (is (= "implicit=yes" (get-in @same-site-seen [:headers "cookie"])))
+    (is (nil? (get-in @cross-site-seen [:headers "cookie"])))))
+
 (deftest credentialed-fetch-sends-profile-cookie
   (let [p (-> (profile/new-profile {:id "default"})
               (profile/grant-permission "https://app.example" :net/fetch))
@@ -941,7 +1005,13 @@
   (let [p (-> (profile/new-profile {:id "default"})
               (profile/grant-permission "https://api.example" :net/fetch))
         store (-> (storage/empty-store)
-                  (storage/put-value p "https://api.example/data" net/cookie-key {"sid" "abc"}))
+                  (storage/put-value p "https://api.example/data" net/cookie-key {"sid" "abc"})
+                  ;; app.example and api.example are different sites, so this
+                  ;; cross-site credentialed cookie must be marked
+                  ;; SameSite=None (+ Secure) to ever be sent — a cookie with
+                  ;; no SameSite defaults to Lax and must NOT cross sites.
+                  (storage/put-value p "https://api.example/data" net/cookie-same-site-key {"sid" "none"})
+                  (storage/put-value p "https://api.example/data" net/cookie-secure-key {"sid" true}))
         wildcard-seen (atom nil)
         wildcard (net/fetch-resource
                   {:store store
