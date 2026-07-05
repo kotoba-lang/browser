@@ -347,6 +347,43 @@
            (:capability/results state)))
     (is (= :permission/not-granted (:last-error state)))))
 
+(deftest quickjs-geolocation-read-granted-without-real-position-reports-unavailable
+  ;; A granted geolocation permission with no real position ever injected
+  ;; (the :geolocation atom holds no :latitude/:longitude -- e.g. a real
+  ;; GPS not yet locked on) must report :geolocation/position-unavailable
+  ;; via the :capability/results audit trail, matching the real,
+  ;; script-visible navigator.geolocation.getCurrentPosition error path
+  ;; (geolocation-snapshot's own has-position? gate reports the identical
+  ;; POSITION_UNAVAILABLE outcome) -- not a false :ok? true success with an
+  ;; empty {:coords {}} result.
+  (let [profile (-> (profile/new-profile {:id "work"})
+                    (profile/grant-permission "https://app.example" :geolocation/read))
+        adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        position (atom {})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :net-context {:profile profile
+                              :page-url "https://app.example/map"}
+                :geolocation position
+                :engine (fn [_]
+                          {:result :geo
+                           :requests [{:request/id "geo"
+                                       :capability :geolocation/read
+                                       :geolocation/op :current-position}]})})
+        state (execution/evaluate! state {:source "navigator.geolocation.getCurrentPosition(ok)"})]
+    (is (= [{:capability :geolocation/read
+             :request/id "geo"
+             :ok? false
+             :result nil
+             :error :geolocation/position-unavailable
+             :permission/decision {:permission/decision :allow
+                                   :origin "https://app.example"
+                                   :capability :geolocation/read
+                                   :profile/id "work"}}]
+           (:capability/results state)))
+    (is (= :geolocation/position-unavailable (:last-error state)))))
+
 (deftest quickjs-notification-permission-and-show-use-profile-grant
   (let [profile (-> (profile/new-profile {:id "work"})
                     (profile/grant-permission "https://app.example" :notification/show))

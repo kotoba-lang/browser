@@ -373,14 +373,30 @@
   (let [decision (permission-decision-for state request :geolocation/read)]
     (if (= :allow (:permission/decision decision))
       (let [position @(:geolocation state)
-            coords (select-keys position [:latitude :longitude :accuracy :altitude
-                                          :altitudeAccuracy :heading :speed])
-            result (cond-> {:coords coords}
-                     (:timestamp position)
-                     (assoc :timestamp (:timestamp position)))]
-        {:ok? true
-         :result result
-         :permission/decision decision})
+            has-position? (and (map? position)
+                               (contains? position :latitude)
+                               (contains? position :longitude))]
+        (if has-position?
+          (let [coords (select-keys position [:latitude :longitude :accuracy :altitude
+                                              :altitudeAccuracy :heading :speed])
+                result (cond-> {:coords coords}
+                         (:timestamp position)
+                         (assoc :timestamp (:timestamp position)))]
+            {:ok? true
+             :result result
+             :permission/decision decision})
+          ;; Mirrors geolocation-snapshot's own has-position? gate (the one
+          ;; the real JS-visible navigator.geolocation delivery uses) -- a
+          ;; granted permission with no real position injected (the
+          ;; :geolocation atom holds no :latitude/:longitude) is a real
+          ;; POSITION_UNAVAILABLE, not a success. Without this, the
+          ;; :capability/results audit trail recorded :ok? true with an
+          ;; empty {:coords {}} result in exactly the state where the real
+          ;; script-visible snapshot reports an error, an internal
+          ;; audit-log/actual-outcome mismatch.
+          {:ok? false
+           :error :geolocation/position-unavailable
+           :permission/decision decision}))
       {:ok? false
        :error (:reason decision)
        :permission/decision decision})))
