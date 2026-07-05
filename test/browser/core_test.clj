@@ -420,3 +420,47 @@
     (is (not (contains? attrs :style/color)) "stale class-derived color is cleared")
     (is (not (contains? attrs :style/margin)) "stale class-derived margin is cleared")
     (is (= 4 (count (filter :border? (:browser/draw-ops refreshed)))))))
+
+(def ^:private media-query-css
+  "#box { background: #0000ff } @media (max-width: 600px) { #box { background: #ff0000 } }")
+
+(defn- box-color
+  [page]
+  (some #(when (and (= :rect (:draw/op %)) (= :div (:tag %))) (:color %))
+        (:browser/draw-ops page)))
+
+(deftest load-html-evaluates-at-media-max-width-against-the-real-session-viewport
+  ;; Before this fix, browser.core called cssom.core/apply-cascade with no
+  ;; :viewport-width opt at all -- @media (min-width:.../max-width:...)
+  ;; ALWAYS evaluated against cssom.core's own hardcoded 800px default,
+  ;; completely ignoring the real :viewport this same fn already threads
+  ;; into layout/draw-ops (:width (first viewport)). Confirmed via direct
+  ;; REPL reproduction before touching source: a real 375px-viewport
+  ;; session's @media (max-width: 600px) rule never applied, even though
+  ;; 375 <= 600 makes it a real match -- responsive/mobile-specific CSS was
+  ;; silently broken for any session whose viewport wasn't exactly 800px.
+  (let [mobile (browser/load-html {:url "kotoba://responsive"
+                                   :viewport [375 667]
+                                   :css media-query-css
+                                   :html "<main><div id=\"box\">Mobile</div></main>"})
+        desktop (browser/load-html {:url "kotoba://responsive"
+                                    :viewport [1200 800]
+                                    :css media-query-css
+                                    :html "<main><div id=\"box\">Desktop</div></main>"})]
+    (is (= "#ff0000" (box-color mobile))
+        "a real 375px viewport must match @media (max-width: 600px)")
+    (is (= "#0000ff" (box-color desktop))
+        "a real 1200px viewport must NOT match @media (max-width: 600px)")))
+
+(deftest refresh-page-preserves-real-viewport-for-media-query-evaluation
+  ;; refresh-page (a real mutation/re-cascade path, e.g. a script mutating
+  ;; the DOM) must keep evaluating @media against the SAME real viewport
+  ;; the page was originally loaded with, not silently fall back to the
+  ;; hardcoded default either.
+  (let [page (browser/load-html {:url "kotoba://responsive"
+                                 :viewport [375 667]
+                                 :css media-query-css
+                                 :html "<main><div id=\"box\">Mobile</div></main>"})
+        refreshed (browser/refresh-page page {})]
+    (is (= "#ff0000" (box-color refreshed))
+        "refresh-page must still evaluate @media against the real 375px viewport")))

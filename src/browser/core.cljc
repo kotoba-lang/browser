@@ -10,7 +10,7 @@
 (defn render-document
   [{:keys [document css-rules viewport theme] :or {viewport [800 600]}}]
   (let [document (cond-> document
-                   (seq css-rules) (css/apply-cascade css-rules))
+                   (seq css-rules) (css/apply-cascade css-rules {:viewport-width (first viewport)}))
         [ops document] (dom/consume-ops document)
         tree (dom/tree document)
         draw-ops (layout/draw-ops tree {:width (first viewport)
@@ -38,7 +38,7 @@
         base-href (dom-bridge/document-base-href document)
         document (cond-> document
                    base-href (assoc :base-uri (page-script/resolve-src url base-href))
-                   (seq rules) (css/apply-cascade rules))
+                   (seq rules) (css/apply-cascade rules {:viewport-width (first viewport)}))
         rendered (render-document {:document document
                                    :viewport viewport
                                    :theme theme})]
