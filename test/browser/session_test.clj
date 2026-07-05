@@ -3259,7 +3259,12 @@
             "localStorage.setItem('loaded', 'yes');"]
            (mapv :script/source (remove :script/lifecycle-event @scripts))))
     (is (= [nil true] (mapv :script/cache-hit? (remove :script/lifecycle-event @scripts))))
-    (is (= "localStorage.setItem('loaded', 'yes');"
+    ;; The per-origin storage slot holds a map keyed by the full script url
+    ;; (not the bare source string) -- necessary so a second, different
+    ;; script on the SAME origin gets its own cache entry instead of
+    ;; colliding with this one (see script-src-cache-does-not-collide-
+    ;; across-different-scripts-on-the-same-origin below).
+    (is (= {"https://app.example/app.js" "localStorage.setItem('loaded', 'yes');"}
            (storage/get-value (:browser.session/store s2)
                               (:browser.session/profile s2)
                               "https://app.example/app.js"
@@ -3268,6 +3273,44 @@
            (->> (:browser.session/history s2)
                 (filter #(contains? #{:script/fetch :script/cache-hit :script/run} (:event %)))
                 (mapv :event))))))
+
+(deftest script-src-cache-does-not-collide-across-different-scripts-on-the-same-origin
+  ;; browser.storage keys every value by ORIGIN only (correct for
+  ;; origin-scoped data like cookies) -- but the script-source cache used
+  ;; a single fixed storage key for EVERY script, so two different
+  ;; scripts served from the same origin (an extremely common real page
+  ;; shape -- multiple <script src> tags from one CDN) collided: the
+  ;; second script's cache lookup returned the FIRST script's cached
+  ;; source instead of its own, and would have actually EXECUTED the
+  ;; wrong code.
+  (let [h (host/recording-host)
+        p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "https://cdn.example" :net/fetch))
+        scripts (atom [])
+        s (session/new-session
+           {:host h
+            :profile p
+            :store (storage/empty-store)
+            :fetch-fn (fn [{:keys [url]}]
+                        (case url
+                          "https://cdn.example/lib-a.js"
+                          {:status 200 :body "// lib A"}
+                          "https://cdn.example/lib-b.js"
+                          {:status 200 :body "// lib B, totally different"}
+                          {:status 404 :body "missing"}))
+            :script-runner (fn [session script]
+                             (when (and (:script/source script)
+                                        (not (:script/lifecycle-event script)))
+                               (swap! scripts conj script))
+                             session)})
+        html (str "<main>"
+                  "<script src=\"https://cdn.example/lib-a.js\"></script>"
+                  "<script src=\"https://cdn.example/lib-b.js\"></script>"
+                  "</main>")
+        _s1 (session/load-html! s {:url "https://cdn.example/page" :html html})]
+    (is (= [{:script/url "https://cdn.example/lib-a.js" :script/source "// lib A"}
+            {:script/url "https://cdn.example/lib-b.js" :script/source "// lib B, totally different"}]
+           (mapv #(select-keys % [:script/url :script/source]) @scripts)))))
 
 (deftest script-src-resolves-against-document-base-uri
   (let [h (host/recording-host)

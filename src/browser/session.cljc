@@ -186,24 +186,35 @@
       (update :browser.session/history conj {:event :script-engine/dispose})))
 
 (defn- script-cache-source
+  "browser.storage keys every value by ORIGIN only (correct for
+  origin-scoped data like cookies), so script-source-storage-key alone
+  is not enough to tell two different scripts on the SAME origin apart
+  -- a map keyed by the full script url, stored under that one
+  per-origin slot, is (mirroring how cookie-variants already
+  disambiguates multiple cookies within one origin's storage slot)."
   [session url]
   (when (and (:browser.session/store session)
              (:browser.session/profile session))
-    (storage/get-value (:browser.session/store session)
-                       (:browser.session/profile session)
-                       url
-                       page-script/script-source-storage-key)))
+    (get (storage/get-value (:browser.session/store session)
+                            (:browser.session/profile session)
+                            url
+                            page-script/script-source-storage-key)
+         (str url))))
 
 (defn- cache-script-source
   [session url source]
   (if (and (:browser.session/store session)
            (:browser.session/profile session))
     (update session :browser.session/store
-            storage/put-value
-            (:browser.session/profile session)
-            url
-            page-script/script-source-storage-key
-            source)
+            (fn [store]
+              (let [profile (:browser.session/profile session)
+                    by-url (or (storage/get-value store profile url page-script/script-source-storage-key)
+                               {})]
+                (storage/put-value store
+                                   profile
+                                   url
+                                   page-script/script-source-storage-key
+                                   (assoc by-url (str url) source)))))
     session))
 
 (defn- navigation-cookie-header
