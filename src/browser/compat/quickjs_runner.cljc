@@ -57,6 +57,15 @@
   `<script>` tag and to the `DOMContentLoaded`/`load` lifecycle dispatch
   within the same page load.
 
+  `:geolocation`'s ultimate source is now real, too: `run-script!` threads
+  `:browser.session/geolocation` (see `browser.session/new-session`'s
+  docstring -- a host-owned atom a real embedding application supplies and
+  updates externally, e.g. from a real GPS driver) into every
+  `quickjs-execution/new-state` call, so a real host-supplied position is
+  what `geolocation-snapshot` reads, not `new-state`'s own zeroed
+  `{:latitude 0.0 :longitude 0.0 :accuracy 0.0}` default (which still
+  applies, unchanged, for a session built without a `:geolocation` option).
+
   The persisted slice is stored on the session under
   `:browser.session/quickjs-runtime-state`, tagged with the
   `:browser.session/page-generation` it belongs to (mirroring how
@@ -382,7 +391,8 @@
                            :websocket-fn (:browser.session/websocket-fn session)
                            :worker-fn (or (:browser.session/worker-fn session)
                                           (quickjs-wasm/worker-fn engine))
-                           :fetch-fn (:browser.session/fetch-fn session)})
+                           :fetch-fn (:browser.session/fetch-fn session)
+                           :geolocation (:browser.session/geolocation session)})
                          persisted)
             result (execution/evaluate! state (script-payload script))]
         (-> session

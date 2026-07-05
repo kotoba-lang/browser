@@ -49,7 +49,22 @@
     opts))
 
 (defn new-session
-  [{:keys [host viewport theme fetch-fn websocket-fn worker-fn surface account profile input audit
+  "Build a new browser session map from host-supplied `opts`.
+
+  `:fetch-fn`/`:websocket-fn`/`:worker-fn`/`:geolocation` are the host-injection
+  points a real embedding application supplies when constructing a session.
+  The first three are FUNCTIONS, called fresh each time a real I/O capability
+  is exercised. `:geolocation` is different in shape: it is an ATOM the host
+  owns and updates externally (e.g. a real GPS driver `swap!`s it whenever the
+  device moves) -- matching the exact shape `browser.compat.quickjs-execution/
+  new-state`'s own `:geolocation` key already expects and every existing test
+  already constructs by hand. This fn does NOT default `:geolocation` to a
+  fresh atom when none is supplied -- `new-state`'s own
+  `(or geolocation (atom {:latitude 0.0 :longitude 0.0 :accuracy 0.0}))`
+  default keeps doing that job, exactly as it already does today for direct
+  `new-state` callers; `browser.compat.quickjs-runner/run-script!` is what
+  threads `:browser.session/geolocation` into every `new-state` call."
+  [{:keys [host viewport theme fetch-fn websocket-fn worker-fn geolocation surface account profile input audit
            persistence-provider store chrome navigation history page script-runner
            script-engine engine-factory dispose-engine-fn] :as opts}]
   (let [{:keys [profile store audit chrome surface navigation history page] :as opts} (restore opts)]
@@ -59,6 +74,7 @@
    :browser.session/fetch-fn fetch-fn
    :browser.session/websocket-fn websocket-fn
    :browser.session/worker-fn worker-fn
+   :browser.session/geolocation geolocation
    :browser.session/script-runner script-runner
    :browser.session/script-engine (or script-engine
                                       (script-engine/empty-manager

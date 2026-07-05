@@ -1,6 +1,7 @@
 (ns browser.session-test
   (:require [browser.account :as account]
             [browser.audit :as audit]
+            [browser.compat.quickjs-runner :as quickjs-runner]
             [browser.core :as browser]
             [browser.dom-bridge :as bridge]
             [browser.net :as net]
@@ -3813,3 +3814,77 @@
              :status 302}]
            (get-in navigated [:browser.session/navigation :redirects])))
     (is (= "Done" (-> navigated :browser.session/page :browser/document kotoba.wasm.dom/text-content)))))
+
+(defn- geolocation-probe-session
+  [opts]
+  (-> (session/new-session (merge {:host (host/recording-host)} opts))
+      (session/load-html! {:url "https://app.example/map" :html "<main>Map</main>"})))
+
+(defn- run-geolocation-probe!
+  [session]
+  (let [received (atom nil)
+        session (assoc session :browser.session/script-engine
+                       {:script-engine/engine (fn [request]
+                                                (reset! received request)
+                                                {:result :ok :requests []})})]
+    (quickjs-runner/run-script! session {:script/type :classic
+                                         :script/source "/* probe */"
+                                         :script/url "https://app.example/map"})
+    (:geolocation/snapshot @received)))
+
+(deftest run-script-threads-real-session-level-geolocation-into-the-engine-invocation
+  ;; Before this fix, browser.session/new-session had no :geolocation
+  ;; injection point at all (unlike :fetch-fn/:websocket-fn/:worker-fn), so
+  ;; browser.compat.quickjs-runner/run-script! never supplied one to
+  ;; quickjs-execution/new-state -- every real page load could only ever
+  ;; report the (0.0, 0.0, 0.0) default, regardless of what a host
+  ;; application wanted to simulate. This proves a real, host-owned
+  ;; geolocation atom, threaded through session/new-session, actually
+  ;; reaches the real geolocation-snapshot computation run-script! feeds
+  ;; the engine invocation.
+  (let [position (atom {:latitude 35.6812 :longitude 139.7671 :accuracy 12.5})
+        profile (-> (profile/new-profile {:id "work"})
+                    (profile/grant-permission "https://app.example" :geolocation/read))
+        session (geolocation-probe-session {:profile profile :geolocation position})]
+    (is (= {:granted true
+            :position {:coords {:latitude 35.6812 :longitude 139.7671 :accuracy 12.5}}}
+           (run-geolocation-probe! session)))))
+
+(deftest run-script-geolocation-reflects-live-host-updates-within-a-page
+  ;; The host owns the atom and may swap! it at any time (e.g. a real GPS
+  ;; driver as the device moves) -- a later script tag within the SAME page
+  ;; load must see the new value, not a value snapshotted once at session
+  ;; construction.
+  (let [position (atom {:latitude 1.0 :longitude 2.0 :accuracy 5.0})
+        profile (-> (profile/new-profile {:id "work"})
+                    (profile/grant-permission "https://app.example" :geolocation/read))
+        session (geolocation-probe-session {:profile profile :geolocation position})
+        first-snapshot (run-geolocation-probe! session)]
+    (is (= {:latitude 1.0 :longitude 2.0 :accuracy 5.0}
+           (get-in first-snapshot [:position :coords])))
+    (reset! position {:latitude 9.0 :longitude 8.0 :accuracy 1.0})
+    (is (= {:latitude 9.0 :longitude 8.0 :accuracy 1.0}
+           (get-in (run-geolocation-probe! session) [:position :coords])))))
+
+(deftest run-script-geolocation-reflects-live-host-updates-across-navigation
+  (let [position (atom {:latitude 1.0 :longitude 2.0 :accuracy 5.0})
+        profile (-> (profile/new-profile {:id "work"})
+                    (profile/grant-permission "https://app.example" :geolocation/read))
+        session (geolocation-probe-session {:profile profile :geolocation position})]
+    (is (= {:latitude 1.0 :longitude 2.0 :accuracy 5.0}
+           (get-in (run-geolocation-probe! session) [:position :coords])))
+    (reset! position {:latitude 9.0 :longitude 8.0 :accuracy 1.0})
+    (let [navigated (session/load-html! session {:url "https://app.example/map2" :html "<main>Map 2</main>"})]
+      (is (= {:latitude 9.0 :longitude 8.0 :accuracy 1.0}
+             (get-in (run-geolocation-probe! navigated) [:position :coords]))))))
+
+(deftest run-script-geolocation-defaults-to-zero-without-host-injection
+  ;; Regression guard: a session built without a :geolocation option must
+  ;; keep today's default (quickjs-execution/new-state's own zeroed
+  ;; {:latitude 0.0 :longitude 0.0 :accuracy 0.0}), unaffected by this
+  ;; change.
+  (let [profile (-> (profile/new-profile {:id "work"})
+                    (profile/grant-permission "https://app.example" :geolocation/read))
+        session (geolocation-probe-session {:profile profile})]
+    (is (= {:latitude 0.0 :longitude 0.0 :accuracy 0.0}
+           (get-in (run-geolocation-probe! session) [:position :coords])))))
