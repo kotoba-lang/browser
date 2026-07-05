@@ -2773,20 +2773,59 @@
         }
       };
       globalThis.navigator.clipboard = {
+        /* Real navigator.clipboard.readText()/writeText() are
+           Promise-returning (Promise<string>/Promise<void> respectively --
+           see MDN). Both this permission decision AND the clipboard text are
+           already known host-side, synchronously, before this script even
+           starts running (globalThis.__kotobaClipboardSnapshot -- see
+           quickjs-execution/clipboard-snapshot, the SAME permission-gated,
+           host-computed-before-eval pattern navigator.geolocation.
+           getCurrentPosition's __kotobaGeolocationSnapshot already
+           established), so -- exactly like that snapshot's success/error
+           callback dispatch -- there is nothing left to wait for: the
+           returned deferred is resolved/rejected IMMEDIATELY, synchronously,
+           in this same call, not left pending for some later delivery
+           mechanism the way fetch()'s thenable is. The request is still
+           queued either way, so a denied call still shows up in the real
+           host-side audit trail (:capability/results), mirroring
+           getCurrentPosition's request-still-queued-even-when-denied
+           discipline. */
         readText: function() {
           globalThis.__kotobaRequests.push({
             capability: 'clipboard/read',
             'clipboard/format': 'text'
           });
           var snapshot = globalThis.__kotobaClipboardSnapshot || {};
-          return snapshot.text != null ? String(snapshot.text) : '';
+          var read = snapshot.read || { granted: true };
+          var deferred = __kotobaMakeDeferred();
+          if (read.granted) {
+            deferred.resolve(snapshot.text != null ? String(snapshot.text) : '');
+          } else {
+            deferred.reject({
+              name: 'NotAllowedError',
+              message: read.error || 'Read permission denied'
+            });
+          }
+          return deferred.promise;
         },
         writeText: function(text) {
+          var snapshot = globalThis.__kotobaClipboardSnapshot || {};
+          var write = snapshot.write || { granted: true };
+          var deferred = __kotobaMakeDeferred();
           globalThis.__kotobaRequests.push({
             capability: 'clipboard/write',
             'clipboard/format': 'text',
             text: String(text)
           });
+          if (write.granted) {
+            deferred.resolve(undefined);
+          } else {
+            deferred.reject({
+              name: 'NotAllowedError',
+              message: write.error || 'Write permission denied'
+            });
+          }
+          return deferred.promise;
         }
       };
       globalThis.navigator.geolocation = {
@@ -2808,13 +2847,36 @@
         }
       };
       globalThis.navigator.mediaDevices = {
+        /* Real getUserMedia() returns Promise<MediaStream> (MDN). This
+           engine has no real camera/microphone capture pipeline at all --
+           unlike clipboard/geolocation, there is no real device data to
+           synchronously know host-side before the script runs, and (unlike
+           Bug 2's clipboard fix) media permission-gating stays exactly where
+           it already lived pre-fix: apply-capability's :media/capture case
+           (media-capture-result), processed post-hoc for the host-side audit
+           trail only -- mirroring WebSocket/Worker's existing
+           fire-and-forget-from-the-calling-script's-perspective precedent,
+           not geolocation's synchronous success/error dispatch. So this
+           always RESOLVES (never rejects) with a placeholder, clearly
+           simulated MediaStream-shaped object -- a policy-correct
+           SIMULATION (this repo never claims real media capture), just
+           correctly Promise-shaped now instead of a bare object a real
+           `.then()`/`await` caller would crash on. */
         getUserMedia: function(constraints) {
           globalThis.__kotobaRequests.push({
             capability: 'media/capture',
             'media/op': 'get-user-media',
             'media/constraints': constraints || {}
           });
-          return { capability: 'media/capture' };
+          var deferred = __kotobaMakeDeferred();
+          deferred.resolve({
+            capability: 'media/capture',
+            simulated: true,
+            getTracks: function() { return []; },
+            getVideoTracks: function() { return []; },
+            getAudioTracks: function() { return []; }
+          });
+          return deferred.promise;
         }
       };
       globalThis.Notification = function(title, options) {
@@ -3136,7 +3198,27 @@
              (map (fn [[k v]]
                     (let [k (request-keyword k)]
                       [k (cond
-                           (contains? #{:capability :dom/query :dom/op} k)
+                           ;; :clipboard/format is here (not just :dom/op) so
+                           ;; that a REAL webapi-shim-sourced clipboard/read
+                           ;; or clipboard/write request's `'clipboard/format':
+                           ;; 'text'` genuinely normalizes to the keyword
+                           ;; `:text` `capability-request-error`'s
+                           ;; `:clipboard/read`/`:clipboard/write` cases
+                           ;; compare against (`(= :text (:clipboard/format
+                           ;; request))`) -- without this, EVERY real (i.e.
+                           ;; not a hand-rolled `:engine` test-double, which
+                           ;; already builds its request maps with keyword
+                           ;; values directly in Clojure) clipboard request
+                           ;; silently failed that shape check and was
+                           ;; rejected as :quickjs/invalid-capability-request
+                           ;; before ever reaching apply-capability's
+                           ;; `:clipboard/read`/`:clipboard/write` case bodies
+                           ;; -- so a real script's `writeText()` never
+                           ;; actually mutated the sandboxed clipboard store,
+                           ;; discovered while proving Bug 2's permission gate
+                           ;; against a REAL round trip (see
+                           ;; quickjs_clipboard_media_promise_smoke_test.cljs).
+                           (contains? #{:capability :dom/query :dom/op :clipboard/format} k)
                            (keyword v)
 
                            (and (= :request k) (map? v))
@@ -3248,15 +3330,31 @@
 
 #?(:cljs
    (defn- clipboard-snapshot-source
-     "JS source that installs the real, current `:clipboard` snapshot (from
-     the persisted `quickjs-execution` runtime state -- see
-     `browser.compat.quickjs-runner`'s `persistent-execution-keys`) as
+     "JS source that installs the real, current clipboard permission
+     decisions + text (`quickjs-execution/clipboard-snapshot`, computed
+     host-side from the persisted `:clipboard` atom -- see
+     `browser.compat.quickjs-runner`'s `persistent-execution-keys` -- and the
+     SAME `permission-decision-for` gate `apply-capability`'s
+     `:clipboard/read`/`:clipboard/write` cases use) as
      `globalThis.__kotobaClipboardSnapshot`, so the webapi shim's
-     `navigator.clipboard.readText` can read it synchronously instead of
-     always returning `''`. Mirrors `snapshot-source`/`storage-snapshot-source`."
+     `navigator.clipboard.readText`/`writeText` can synchronously
+     resolve/reject the promise each returns with the REAL permission
+     decision and clipboard text instead of always granting unconditionally.
+     Mirrors `snapshot-source`/`storage-snapshot-source`/
+     `geolocation-snapshot-source`, but -- like geolocation's -- the shape is
+     necessarily a bit richer than storage's raw value: clipboard is
+     permission-gated (independently for read and write), so this is ONE
+     coherent map carrying the permission decisions and the text together,
+     not a bolted-on second snapshot. Defaults to an all-granted, empty-text
+     snapshot when no real snapshot was computed (e.g. a caller invoking this
+     engine below `quickjs-execution/evaluate!`/`load-module!`, which always
+     supplies a real one)."
      [clipboard]
      (str "globalThis.__kotobaClipboardSnapshot = "
-          (js/JSON.stringify (clj->js (jsonable (or clipboard {:text ""}))))
+          (js/JSON.stringify (clj->js (jsonable (or clipboard
+                                                     {:text ""
+                                                      :read {:granted true}
+                                                      :write {:granted true}}))))
           ";")))
 
 #?(:cljs

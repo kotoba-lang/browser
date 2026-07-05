@@ -122,10 +122,15 @@
 
 (deftest quickjs-clipboard-capability-uses-sandboxed-store
   (let [clipboard (atom {:text "before"})
+        profile (-> (profile/new-profile {:id "work"})
+                    (profile/grant-permission "kotoba://quickjs" :clipboard/read)
+                    (profile/grant-permission "kotoba://quickjs" :clipboard/write))
         adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
-                                      :profile-id "default"})
+                                      :profile-id "work"})
         state (execution/new-state
                {:binding (binding/empty-binding adapter)
+                :net-context {:profile profile
+                              :page-url "kotoba://quickjs"}
                 :clipboard clipboard
                 :engine (fn [_]
                           {:result :clipboard
@@ -136,16 +141,75 @@
                                        :capability :clipboard/write
                                        :clipboard/format :text
                                        :text "after"}]})})
-        state (execution/evaluate! state {:source "navigator.clipboard.writeText('after')"})]
+        state (execution/evaluate! state {:source "navigator.clipboard.writeText('after')"})
+        decision {:permission/decision :allow
+                  :origin "kotoba://quickjs"
+                  :capability nil
+                  :profile/id "work"}]
     (is (= {:text "after"} @clipboard))
     (is (= [{:capability :clipboard/read
              :request/id "read-before"
              :ok? true
-             :result {:text "before"}}
+             :result {:text "before"}
+             :permission/decision (assoc decision :capability :clipboard/read)}
             {:capability :clipboard/write
              :request/id "write-after"
              :ok? true
-            :result true}]
+             :result true
+             :permission/decision (assoc decision :capability :clipboard/write)}]
+           (:capability/results state)))))
+
+(deftest quickjs-clipboard-read-denies-without-profile-grant
+  (let [clipboard (atom {:text "secret"})
+        adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :clipboard clipboard
+                :engine (fn [_]
+                          {:result :clipboard
+                           :requests [{:request/id "read-denied"
+                                       :capability :clipboard/read
+                                       :clipboard/format :text}]})})
+        state (execution/evaluate! state {:source "navigator.clipboard.readText()"})]
+    (is (= [{:capability :clipboard/read
+             :request/id "read-denied"
+             :ok? false
+             :result nil
+             :error :permission/no-profile
+             :permission/decision {:permission/decision :deny
+                                  :origin "kotoba://quickjs"
+                                  :capability :clipboard/read
+                                  :profile/id nil
+                                  :reason :permission/no-profile}}]
+           (:capability/results state)))))
+
+(deftest quickjs-clipboard-write-denies-without-profile-grant-and-does-not-mutate-store
+  (let [clipboard (atom {:text "unchanged"})
+        adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :clipboard clipboard
+                :engine (fn [_]
+                          {:result :clipboard
+                           :requests [{:request/id "write-denied"
+                                       :capability :clipboard/write
+                                       :clipboard/format :text
+                                       :text "attempted-overwrite"}]})})
+        state (execution/evaluate! state {:source "navigator.clipboard.writeText('attempted-overwrite')"})]
+    (is (= {:text "unchanged"} @clipboard)
+        "a denied write must not mutate the sandboxed clipboard store")
+    (is (= [{:capability :clipboard/write
+             :request/id "write-denied"
+             :ok? false
+             :result false
+             :error :permission/no-profile
+             :permission/decision {:permission/decision :deny
+                                  :origin "kotoba://quickjs"
+                                  :capability :clipboard/write
+                                  :profile/id nil
+                                  :reason :permission/no-profile}}]
            (:capability/results state)))))
 
 (deftest quickjs-window-open-records-context-request
