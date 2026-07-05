@@ -126,6 +126,34 @@
     (and (= :input (:tag node))
          (= "radio" (input-type node)))))
 
+(defn- summary-control?
+  [document node-id]
+  (= :summary (get-in document [:nodes node-id :tag])))
+
+(defn- details-parent-id
+  "The `:details` node-id `node-id` (a clicked `:summary` element) toggles
+   on click -- but ONLY when `node-id` is itself a real, direct `:summary`
+   child of a `:details` element (real HTML5: any OTHER `:summary`
+   descendant deeper in a `<details>`'s subtree, or a `:summary` with no
+   `:details` parent at all, is not interactive by default). Returns nil
+   for anything else, so callers can gate the whole toggle behavior on a
+   single truthy check.
+
+   Deliberately narrower than a click-anywhere-inside-<summary> ancestor
+   walk (the shape `closest-link-id` uses for `<a>`): this only ever
+   fires when the click TARGET itself is the `<summary>` element, not
+   some nested child inside it (e.g. a `<span>` inside `<summary>text
+   </span></summary>`) -- the single most common real-world shape
+   (`<summary>` with no nested markup of its own), matching this
+   codebase's existing 'most common case, not full spec coverage'
+   convention (see `auto-close-tags` in the sibling htmldom repo for the
+   same kind of documented, honest cut)."
+  [document node-id]
+  (when (summary-control? document node-id)
+    (let [parent-id (parent-node-id document node-id)]
+      (when (= :details (get-in document [:nodes parent-id :tag]))
+        parent-id))))
+
 (defn select-control?
   [document node-id]
   (= :select (get-in document [:nodes node-id :tag])))
@@ -355,6 +383,12 @@
   {:event/type event-type
    :target/id node-id
    :checked checked})
+
+(defn- toggle-event
+  [node-id open?]
+  {:event/type "toggle"
+   :target/id node-id
+   :open open?})
 
 (defn- composition-event
   [node-id event-type state]
@@ -1188,6 +1222,9 @@
                            (not (truthy-attr? (get-in document [:nodes node-id :attrs :checked]))))
                 radio-changed? (and radio?
                                     (not (truthy-attr? (get-in document [:nodes node-id :attrs :checked]))))
+                details-id (and (not disabled?) (details-parent-id document node-id))
+                details-open? (when details-id
+                                (not (truthy-attr? (get-in document [:nodes details-id :attrs :open]))))
                 previous-focus (:focus document)
                 document (cond-> (if focusable?
                                    (focus-editable document node-id)
@@ -1203,6 +1240,8 @@
                            radio-changed? (clear-node-validation-state node-id)
                            radio-changed? (dom/dispatch-event node-id "input" (checked-event node-id "input" true))
                            radio-changed? (dom/dispatch-event node-id "change" (checked-event node-id "change" true))
+                           details-id (dom/set-attribute details-id :open details-open?)
+                           details-id (dom/dispatch-event details-id "toggle" (toggle-event details-id details-open?))
                            click-listener? (dispatch-pointer-event node-id "click" event))
                 submit-result (when (and (not disabled?)
                                          (submit-control? document node-id))
@@ -1222,6 +1261,7 @@
                                             focusable?
                                             checkbox?
                                             radio?
+                                            details-id
                                             (:submitted? submit-result)
                                             (:invalid? submit-result)
                                             (:reset? reset-result)

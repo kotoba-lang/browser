@@ -578,6 +578,57 @@
     (is (nil? (get-in typed [:document :nodes flag :attrs :value])))
     (is (= false (get-in unchecked [:document :nodes flag :attrs :checked])))))
 
+(deftest summary-click-toggles-parent-details-open-and-dispatches-toggle
+  ;; Real HTML5: clicking a <summary> toggles its parent <details>'s real
+  ;; `open` attribute and dispatches a real `toggle` event -- before this
+  ;; feature, this engine had no notion of it at all, so a <details> could
+  ;; never be opened/closed by a user at all, only by an author directly
+  ;; writing/removing the `open` attribute in the source HTML.
+  (let [page (browser/load-html {:url "kotoba://details"
+                                 :html "<main><details id=\"d\"><summary id=\"s\">Click me</summary><p>Body</p></details></main>"})
+        document (:browser/document page)
+        details (bridge/query-selector document "#d")
+        summary (bridge/query-selector document "#s")
+        document (dom/add-event-listener document details "toggle" "toggle-handler")
+        opened (document-input/reduce-event document {:event/type :pointer/click
+                                                      :node/id summary})
+        closed (document-input/reduce-event (:document opened) {:event/type :pointer/click
+                                                                :node/id summary})]
+    (is (= true (:handled? opened)))
+    (is (= true (get-in opened [:document :nodes details :attrs :open])))
+    (is (= [[:dom/dispatch-event "toggle-handler"
+             {:event/type "toggle" :target/id details :open true}]]
+           (take-last 1 (get-in opened [:document :ops]))))
+    (is (= false (get-in closed [:document :nodes details :attrs :open]))
+        "a second click toggles it back closed")))
+
+(deftest summary-click-with-no-details-parent-is-not-handled
+  ;; Real HTML5: only a <summary> that is the DIRECT child of a real
+  ;; <details> element is interactive by default -- a stray <summary>
+  ;; elsewhere on the page must not toggle anything (there's no `open`
+  ;; attribute concept without a real <details> parent to hold it).
+  (let [page (browser/load-html {:url "kotoba://details"
+                                 :html "<main><summary id=\"stray\">Not inside details</summary></main>"})
+        document (:browser/document page)
+        stray (bridge/query-selector document "#stray")
+        result (document-input/reduce-event document {:event/type :pointer/click
+                                                      :node/id stray})]
+    (is (= false (:handled? result)))))
+
+(deftest second-summary-click-does-not-toggle-a-different-details
+  ;; Two independent <details> on the same page -- clicking one's summary
+  ;; must not affect the other's open state at all.
+  (let [page (browser/load-html
+              {:url "kotoba://details"
+               :html "<main><details id=\"one\"><summary id=\"s1\">One</summary><p>A</p></details><details id=\"two\"><summary id=\"s2\">Two</summary><p>B</p></details></main>"})
+        document (:browser/document page)
+        one (bridge/query-selector document "#one")
+        two (bridge/query-selector document "#two")
+        s1 (bridge/query-selector document "#s1")
+        result (document-input/reduce-event document {:event/type :pointer/click :node/id s1})]
+    (is (= true (get-in result [:document :nodes one :attrs :open])))
+    (is (nil? (get-in result [:document :nodes two :attrs :open])))))
+
 (deftest label-click-activates-associated-control
   (let [page (browser/load-html {:url "kotoba://label"
                                  :html "<main><label id=\"label\" for=\"flag\">Flag</label><input id=\"flag\" type=\"checkbox\"></main>"})

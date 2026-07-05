@@ -4025,3 +4025,27 @@
         "a real dark-color-scheme session must match its own page's prefers-color-scheme: dark rule")
     (is (= "#ffffff" (box-color light-session))
         "a real light-color-scheme session must NOT match a dark-only media query")))
+
+(deftest clicking-a-real-summary-opens-and-closes-its-details-through-a-full-session
+  ;; cssom.layout supports <details>/<summary> default disclosure hiding,
+  ;; and browser.document-input supports toggling it on click, but neither
+  ;; is worth anything without proving the full real round-trip: a real
+  ;; session's click -> a real DOM mutation -> a real re-cascade/re-layout
+  ;; -> content actually appearing/disappearing in real draw-ops.
+  (let [texts (fn [s] (->> (get-in s [:browser.session/page :browser/draw-ops]) (keep :text)))
+        session (-> (session/new-session {:host (host/recording-host)})
+                   (session/load-html!
+                    {:url "kotoba://details"
+                     :html "<details id=\"d\"><summary id=\"s\">Click me</summary><p>Body</p></details>"}))
+        summary-id (bridge/query-selector
+                    (get-in session [:browser.session/page :browser/document]) "#s")
+        opened (session/apply-document-input-event!
+                session {:event/type :pointer/click :node/id summary-id})
+        closed (session/apply-document-input-event!
+                opened {:event/type :pointer/click :node/id summary-id})]
+    (is (= ["Click me"] (texts session))
+        "closed by default -- a real session's initial load-html! genuinely hides the body")
+    (is (= ["Click me" "Body"] (texts opened))
+        "a real click through the full session genuinely reveals the body")
+    (is (= ["Click me"] (texts closed))
+        "a second real click genuinely hides it again")))
