@@ -188,21 +188,19 @@
 ;; `media-capture-result` to actually produce a stream (otherwise it's
 ;; correctly denied for an unrelated, legitimate reason).
 ;;
-;; NOTE on a SEPARATE, pre-existing, out-of-scope bug this test uncovered:
-;; `normalize-request` only keywordizes ONE level of nested map keys, and
-;; only under the `:request`/`:event` top-level keys (see that `cond`'s other
-;; two clauses) -- `:media/constraints`'s own nested JS object (`{video:
-;; true}`) is NOT one of those two, so `js->clj` leaves ITS keys as raw
-;; STRINGS (`{"video" true}`), and `media-required-capabilities`'s `(:video
-;; constraints)`/`(:audio constraints)` keyword lookups always come back nil
-;; against a string-keyed map -- so a REAL getUserMedia() call always hits
-;; `media-capture-result`'s `(empty? capabilities)` branch
-;; (`:media/no-tracks-requested`) regardless of what constraints the script
-;; actually passed, independent of (and unfixed by) this change's `:media/op`
-;; keywordization fix. This is a genuinely different bug (nested non-
-;; `:request`/`:event` map keywordization, not an enum `/op`/`/format` field)
-;; -- flagged here, deliberately NOT fixed in this change to keep this diff
-;; scoped to the `/op`/`/format` bug class this task set out to close.
+;; This test USED TO document a SEPARATE, then-out-of-scope bug: prior to
+;; `normalize-request`'s `nested-keywordize-key?` fix,
+;; `:media/constraints`'s own nested JS object (`{video: true}`) was left
+;; with raw STRING keys (`{"video" true}`) by `js->clj`, so
+;; `media-required-capabilities`'s `(:video constraints)`/`(:audio
+;; constraints)` keyword lookups always came back nil and a REAL
+;; getUserMedia() call always hit `media-capture-result`'s `(empty?
+;; capabilities)` branch (`:media/no-tracks-requested`) regardless of what
+;; constraints the script actually passed -- even with a real `:media/camera`
+;; grant in place, as asserted here. That bug is now closed (see
+;; `quickjs_media_constraints_nested_key_keywordization_smoke_test.cljs` for
+;; the dedicated granted-succeeds/denied-still-denies proof), so this test
+;; now asserts the CORRECT, fixed outcome: a genuine `:ok? true` stream.
 ;; -----------------------------------------------------------------------
 
 (deftest quickjs-media-capture-genuinely-reaches-real-case-test
@@ -218,18 +216,23 @@
       (fn [after]
         (let [media-results (results-for after :media/capture)]
           (println "media/capture round-trip: real :capability/results ->" (pr-str media-results))
-          (is (= [{:capability :media/capture :request/id nil :ok? false :result nil
-                   :error :media/no-tracks-requested
-                   :permission/decisions []}]
+          (is (= [{:capability :media/capture :request/id nil :ok? true
+                   :result {:stream/id "media-stream-1"
+                            :tracks [{:kind :video
+                                      :capability :media/camera
+                                      :constraints true}]}
+                   :permission/decisions [{:permission/decision :allow
+                                           :origin origin
+                                           :capability :media/camera
+                                           :profile/id "media-op"}]}]
                  media-results)
               (str "expected the real <script> tag's getUserMedia({video: true}) call to genuinely "
-                   "reach apply-capability's :media/capture case (proven by getting a REAL "
-                   ":media/no-tracks-requested domain error, not :quickjs/invalid-capability-request "
-                   "-- 'media/op': 'get-user-media' now keywordizes correctly). "
-                   ":media/no-tracks-requested itself comes from a SEPARATE, pre-existing, "
-                   "out-of-scope bug this test uncovered (nested :media/constraints keys stay "
-                   "strings -- see this deftest's preceding comment), not from the fix under test "
-                   "-- got " (pr-str media-results)))))
+                   "reach apply-capability's :media/capture case AND genuinely succeed (proven by "
+                   "getting a REAL :ok? true stream result, not :quickjs/invalid-capability-request "
+                   "-- 'media/op': 'get-user-media' keywordizes correctly -- and not "
+                   ":media/no-tracks-requested -- ':media/constraints' own nested keys now "
+                   "keywordize correctly too, see `nested-keywordize-key?`) -- got "
+                   (pr-str media-results)))))
       :done done})))
 
 ;; -----------------------------------------------------------------------

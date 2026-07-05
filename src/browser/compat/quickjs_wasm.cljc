@@ -3220,6 +3220,52 @@
          (contains? #{"op" "format"} (name k)))))
 
 #?(:cljs
+   (defn- keywordize-map-keys
+     "Convert every key of map `m` to a keyword, leaving each value
+     untouched (i.e. only ONE level deep -- a nested map VALUE, if any,
+     stays exactly as `js->clj` produced it). Shared by every
+     `nested-keywordize-key?` field below so they don't each hand-roll the
+     same `(into {} (map ...))` shape."
+     [m]
+     (into {} (map (fn [[k v]] [(keyword k) v])) m)))
+
+#?(:cljs
+   (defn- nested-keywordize-key?
+     "True when `k`'s value, if itself a map, is always a webapi-shim-
+     constructed map with a small, fixed, spec-bounded key set whose OWN
+     keys some `apply-capability`/`quickjs-execution` consumer destructures
+     by KEYWORD -- `:request`'s RequestInit-shaped map (`method`/`headers`/
+     `body`/...), `:event`'s internal `{event/type, default-prevented?}`
+     map, and `:media/constraints`'s MediaStreamConstraints-shaped
+     `{video, audio}` map that `quickjs-execution/media-required-
+     capabilities`'s `(:video constraints)`/`(:audio constraints)` keyword
+     lookups need keywordized the exact same way `:request`/`:event`'s
+     consumers already did -- never a map whose OWN keys are free-form data
+     the page script itself chose.
+
+     This deliberately does NOT generalize to 'keywordize every nested
+     map's keys, always': verified (by inspecting every nested-map-valued
+     field `webapi-shim-source` pushes) counter-examples exist in this exact
+     namespace -- `history.pushState`/`replaceState`'s `:state` and
+     `Worker`/`BroadcastChannel` `postMessage`'s `:message` are passed
+     through byte-for-byte (`capability-request-error`'s `:history/push-
+     state`/`:history/replace-state`/`:worker/post-message`/`:broadcast/
+     post-message` cases only ever `contains?`-check them, never destructure
+     a nested key), because their whole POINT is to let the page author
+     stash an arbitrary JSON-shaped payload of THEIR OWN choosing. Silently
+     retyping those maps' keys to keywords would be a correctness bug in
+     the other direction: it would not round-trip a page's own `pushState({
+     myKey: 1})`/`postMessage({myKey: 1})` payload keys byte-for-byte. So,
+     unlike `enum-value-key?`'s `/op`/`/format` suffix rule (verified safe
+     for EVERY such field, present and future), this stays an explicit,
+     verified allow-list rather than a naming-convention rule -- there is no
+     naming convention in this webapi shim that distinguishes a fixed-shape
+     internal map from an arbitrary user payload, so inventing one here
+     would risk silently keywordizing a future arbitrary-payload field."
+     [k]
+     (contains? #{:request :event :media/constraints} k)))
+
+#?(:cljs
 (defn- normalize-request [request]
      (let [request (js->clj request)]
        (into {}
@@ -3229,17 +3275,8 @@
                            (enum-value-key? k)
                            (keyword v)
 
-                           (and (= :request k) (map? v))
-                           (into {}
-                                 (map (fn [[request-k request-v]]
-                                        [(keyword request-k) request-v]))
-                                 v)
-
-                           (and (= :event k) (map? v))
-                           (into {}
-                                 (map (fn [[event-k event-v]]
-                                        [(keyword event-k) event-v]))
-                                 v)
+                           (and (nested-keywordize-key? k) (map? v))
+                           (keywordize-map-keys v)
 
                            :else v)])))
              request))))
