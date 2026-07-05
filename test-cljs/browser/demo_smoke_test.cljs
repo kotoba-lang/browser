@@ -303,19 +303,27 @@
   [page]
   (mapv :text (filter #(= :text (:draw/op %)) (:browser/draw-ops page))))
 
-(defn- text-immediately-before
-  "The :text draw-op string immediately preceding the first draw-op whose
-   :text is exactly `marker` in `texts` (the page's full, real, ordered
-   `:draw/op :text` sequence -- what the WebGL canvas actually paints) --
-   proves a ::before generated-content box was really painted right before
-   its real sibling's own real text, in real document order. Mirrors
+(defn- merged-marker+text
+  "The single `:draw/op :text` draw-op string that IS `marker` (a resolved
+   ::before generated-content prefix, e.g. \"1. \" or \"live: \") merged
+   directly onto its real anchor sibling's own real text (`anchor-text`),
+   or nil if no such combined draw-op was painted.
+
+   cssom.layout now MERGES generated-content text with an adjacent real
+   text-node sibling onto the same draw-op line (fixed in kotoba-lang/cssom
+   so `::before`/`::after` `content: attr()`/`counter()` shares a paint
+   line with its real sibling instead of stacking as its own separate
+   line), so the real painted draw-ops carry ONE combined entry like
+   \"1. Real HTML parsed...\" rather than two separate adjacent entries
+   (\"1. \" then \"Real HTML parsed...\"). This proves the merge really
+   happened in this pipeline's own real painted output. Mirrors
    cssom.layout-test's own adjacency checks (e.g. `(mapv :text text-ops)`
    compared against an exact expected ordered list), scoped to a known
    anchor instead of the whole page's exact list so this test stays
    robust to unrelated content elsewhere on the page."
-  [texts marker]
-  (when-let [idx (index-of-text texts marker)]
-    (when (pos? idx) (nth texts (dec idx)))))
+  [texts marker anchor-text]
+  (let [combined (str marker anchor-text)]
+    (when (index-of-text texts combined) combined)))
 
 (deftest browser-demo-real-websocket-worker-fetch-proofs-test
   (async done
@@ -515,10 +523,22 @@
                          "four real sibling <li>s must be numbered sequentially purely by CSS counters")
                      (is (= step-texts (mapv #(element-text doc %) step-ids))
                          "each real <li>'s own real text must be untouched by its ::before rule")
-                     (is (= "live: " (text-immediately-before texts "Kotoba engine"))
-                         "the real painted draw-ops (what the WebGL canvas actually renders) must carry the resolved ::before text immediately before the real element's own real text")
+                     (is (= "live: Kotoba engine" (merged-marker+text texts "live: " "Kotoba engine"))
+                         (str "the real painted draw-ops (what the WebGL canvas actually renders) must carry a "
+                              "single merged draw-op combining the resolved ::before text directly onto the "
+                              "real element's own real text (cssom.layout merges generated content onto the "
+                              "same draw-op as its adjacent real text-node sibling)"))
                      (doseq [[expected-number step-text] (map vector ["1. " "2. " "3. " "4. "] step-texts)]
-                       (is (= expected-number (text-immediately-before texts step-text))
-                           (str "expected " (pr-str expected-number) " painted immediately before " (pr-str step-text)))))))
+                       (is (= (str expected-number step-text) (merged-marker+text texts expected-number step-text))
+                           (str "expected a single merged draw-op combining " (pr-str expected-number)
+                                " with " (pr-str step-text) " (cssom.layout merges each ::before counter() "
+                                "prefix onto the same draw-op as its own <li>'s real text)")))
+                     (let [combined-order (into [(str "live: " "Kotoba engine")]
+                                                 (map str ["1. " "2. " "3. " "4. "] step-texts))
+                           idxs (map #(index-of-text texts %) combined-order)]
+                       (is (every? some? idxs)
+                           "every merged draw-op above must actually be found in the real painted draw-ops")
+                       (is (apply < idxs)
+                           "the merged draw-ops must appear in real document order (badge, then steps 1-4)")))))
           (.catch fail!)
           (.finally cleanup!)))))
