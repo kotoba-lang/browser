@@ -423,6 +423,7 @@
              :previousElementSibling :nextElementSibling :nodeName :localName :namespaceURI
              :ownerDocument :isConnected :contains :toggleAttribute
              :dataset.delete :style.getPropertyValue :style.removeProperty
+             :scrollTop :scrollLeft
              :focus :blur :form :labels :control :htmlFor
              :href :src :alt :async :defer :complete
              :options :selectedOptions :selectedIndex :selected

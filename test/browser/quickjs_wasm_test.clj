@@ -356,6 +356,15 @@
     (is (str/includes? source "this.removeChild(oldChild)"))
     (is (str/includes? source "return oldChild"))))
 
+(deftest quickjs-wasm-webapi-shim-exposes-scroll-position
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "get scrollTop()"))
+    (is (str/includes? source "set scrollTop(value)"))
+    (is (str/includes? source "get scrollLeft()"))
+    (is (str/includes? source "set scrollLeft(value)"))
+    (is (str/includes? source "this.setAttribute('scroll-top', Math.max(0, Number(value) || 0))"))
+    (is (str/includes? source "this.setAttribute('scroll-left', Math.max(0, Number(value) || 0))"))))
+
 (deftest quickjs-wasm-webapi-shim-exposes-attribute-convenience-methods
   (let [source quickjs-wasm/webapi-shim-source]
     (is (str/includes? source "toggleAttribute: function(name, force)"))

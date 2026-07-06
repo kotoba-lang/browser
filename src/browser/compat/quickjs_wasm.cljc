@@ -1540,6 +1540,26 @@
           set selectionEnd(value) {
             this.setSelectionRange(this.selectionStart, Number(value));
           },
+          get scrollTop() {
+            // The real host-bridged half of this already exists --
+            // document_input.cljc's reduce-scroll-event writes the exact
+            // same 'scroll-top' attr on every real wheel event, and
+            // cssom.layout already reads it back to clip/offset scrollable
+            // content at paint time -- only this JS-facing read/write
+            // surface was missing.
+            var value = __kotobaParseNumber(__kotobaAttr(__kotobaNodeById(__kotobaRefNodeId(ref)), 'scroll-top'));
+            return Number.isNaN(value) ? 0 : value;
+          },
+          set scrollTop(value) {
+            this.setAttribute('scroll-top', Math.max(0, Number(value) || 0));
+          },
+          get scrollLeft() {
+            var value = __kotobaParseNumber(__kotobaAttr(__kotobaNodeById(__kotobaRefNodeId(ref)), 'scroll-left'));
+            return Number.isNaN(value) ? 0 : value;
+          },
+          set scrollLeft(value) {
+            this.setAttribute('scroll-left', Math.max(0, Number(value) || 0));
+          },
           get parentNode() {
             var node = __kotobaNodeById(__kotobaRefNodeId(ref));
             return node && node['parent/id'] != null ? __kotobaElement({ nodeId: node['parent/id'] }) : null;

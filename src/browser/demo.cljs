@@ -316,6 +316,20 @@
    "<div style=\"background:#4fb3a6; width:80; height:40; color:#121724\">C visible</div>"
    "</div>"
    "</section>"
+   "<section id=\"scroll-position-proof\" style=\"display:flex; flex-direction:column; gap:8\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "Real element.scrollTop/scrollLeft below -- previously entirely "
+   "missing, even though the real host-bridged half (wheel-driven scroll "
+   "state + clipped rendering) already existed."
+   "</p>"
+   "<div id=\"scroll-box\" style=\"overflow:hidden; height:60; width:200; background:#16202f; border-width:2; border-color:#4fb3a6\">"
+   "<p style=\"color:#e6ebf5; font-size:13\">line one</p>"
+   "<p style=\"color:#e6ebf5; font-size:13\">line two</p>"
+   "<p style=\"color:#e6ebf5; font-size:13\">line three</p>"
+   "<p style=\"color:#e6ebf5; font-size:13\">line four SCROLL_TARGET</p>"
+   "</div>"
+   "<div id=\"scroll-position-result\">scroll-position proof: pending...</div>"
+   "</section>"
    "<section style=\"display:flex; flex-direction:row; gap:12px\">"
    "<div style=\"display:flex; flex-direction:column; background:#16202f; border-width:2; border-color:#4fb3a6; padding:10; width:220\">"
    "<p style=\"color:#9fb0c9; font-size:13\">"
@@ -424,6 +438,13 @@
    "rlBtn.removeEventListener('click', rlHandlerA);"
    "rlBtn.click();"
    "rlResult.textContent = 'remove-listener proof: ' + rlLog.join(',');"
+   "</script>"
+   "<script>"
+   "var scrollBox = document.getElementById('scroll-box');"
+   "var scrollResult = document.getElementById('scroll-position-result');"
+   "scrollBox.scrollTop = 40;"
+   "scrollResult.textContent = 'scroll-position proof: scrollTop=' + scrollBox.scrollTop + "
+   "', scrollLeft=' + scrollBox.scrollLeft;"
    "</script>"
    "<script>"
    "var w = new Worker(" (pr-str worker-url) ");"
@@ -691,6 +712,7 @@
                  constraint-invalid-proof (element-text doc "constraint-invalid-result")
                  duplicate-attribute-proof (element-text doc "dup-attr-result")
                  remove-listener-proof (element-text doc "remove-listener-result")
+                 scroll-position-proof (element-text doc "scroll-position-result")
                  status-badge-proof (pseudo-content doc "status-badge")
                  step-proofs (mapv #(pseudo-content doc %)
                                    ["step-1" "step-2" "step-3" "step-4"])]
@@ -705,6 +727,7 @@
              (js/console.log "browser.demo: #constraint-invalid-result ->" (pr-str constraint-invalid-proof))
              (js/console.log "browser.demo: #dup-attr-result ->" (pr-str duplicate-attribute-proof))
              (js/console.log "browser.demo: #remove-listener-result ->" (pr-str remove-listener-proof))
+             (js/console.log "browser.demo: #scroll-position-result ->" (pr-str scroll-position-proof))
              (js/console.log "browser.demo: real ::before generated content ->"
                               "#status-badge:" (pr-str status-badge-proof)
                               "#step-counter lis:" (pr-str step-proofs))
