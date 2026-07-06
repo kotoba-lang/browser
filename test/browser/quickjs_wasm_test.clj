@@ -192,6 +192,22 @@
     (is (str/includes? source "if (tag === 'input' && __kotobaTypeMismatch(type, value)) return 'typeMismatch';"))
     (is (str/includes? source "typeMismatch: reason === 'typeMismatch',"))))
 
+(deftest quickjs-wasm-webapi-shim-exposes-step-mismatch-validation
+  ;; Real HTML5 step attribute constraint validation -- previously an
+  ;; honest, documented scope-cut everywhere (`stepMismatch: false`
+  ;; hardcoded). Confirmed via a real CLJS/QuickJS smoke test
+  ;; (quickjs-step-mismatch-smoke-test) that a real
+  ;; `<input type="number" step="2" value="3">` now correctly reports
+  ;; `matches(':invalid')`/`checkValidity() === false`/`.validity.
+  ;; stepMismatch === true`, all previously unreachable from JS at all.
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "function __kotobaStepMismatch(type, value, node)"))
+    (is (str/includes? source "if (type !== 'number' && type !== 'range') return false;"))
+    (is (str/includes? source "if (rawStep != null && String(rawStep).toLowerCase() === 'any') return false;"))
+    (is (str/includes? source "var step = (!Number.isNaN(parsedStep) && parsedStep > 0) ? parsedStep : 1;"))
+    (is (str/includes? source "if (tag === 'input' && __kotobaStepMismatch(type, value, node)) return 'stepMismatch';"))
+    (is (str/includes? source "stepMismatch: reason === 'stepMismatch',"))))
+
 (deftest quickjs-wasm-webapi-shim-exposes-scoped-element-query-selectors
   (let [source quickjs-wasm/webapi-shim-source]
     (is (str/includes? source "function __kotobaScopedQuerySelectorAllIds(rootId, selector)"))

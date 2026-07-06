@@ -1573,6 +1573,78 @@
     (is (= true (:submitted? result)))
     (is (nil? (:invalid? result)))))
 
+(deftest step-mismatch-validation-blocks-submit
+  ;; The confirmed repro from the bug report: before this fix, NEITHER
+  ;; this reducer's real form-submission-blocking validation NOR
+  ;; kotoba-lang/cssom's own :invalid/:valid CSS pseudo-class matching NOR
+  ;; the JS-facing __kotobaValidityState checked step at all -- a real
+  ;; <input type="number" step="2" value="3"> silently submitted
+  ;; successfully when a real browser blocks it.
+  (let [page (browser/load-html
+              {:url "kotoba://submit"
+               :html "<main><form id=\"form\"><input id=\"mismatch\" type=\"number\" name=\"mismatch\" step=\"2\" value=\"3\"><input id=\"ok\" type=\"number\" name=\"ok\" step=\"2\" value=\"4\"><button id=\"go\">Go</button></form></main>"})
+        document (:browser/document page)
+        form (bridge/query-selector document "#form")
+        mismatch (bridge/query-selector document "#mismatch")
+        go (bridge/query-selector document "#go")
+        document (dom/add-event-listener document mismatch "invalid" "mismatch-invalid")
+        result (document-input/reduce-event document {:event/type :pointer/click
+                                                      :node/id go})]
+    (is (= true (:invalid? result)))
+    (is (= [mismatch] (:invalid/control-ids result)))
+    (is (= "step-mismatch" (get-in result [:document :nodes mismatch :attrs :validation-reason])))
+    (is (= [[:dom/dispatch-event
+             "mismatch-invalid"
+             {:event/type "invalid" :target/id mismatch :form/id form :submitter/id go :reason :step-mismatch}]]
+           (filterv #(= :dom/dispatch-event (first %))
+                    (get-in result [:document :ops]))))))
+
+(deftest step-match-does-not-block-submit
+  (let [page (browser/load-html
+              {:url "kotoba://submit"
+               :html "<main><form id=\"form\"><input id=\"ok\" type=\"number\" name=\"ok\" step=\"2\" value=\"4\"><button id=\"go\">Go</button></form></main>"})
+        document (:browser/document page)
+        go (bridge/query-selector document "#go")
+        result (document-input/reduce-event document {:event/type :pointer/click :node/id go})]
+    (is (= true (:submitted? result)))
+    (is (nil? (:invalid? result)))))
+
+(deftest default-step-rejects-a-fractional-value-and-blocks-submit
+  ;; A genuinely common surprise, matching real browsers: with no step
+  ;; attribute at all, the default step is 1, so a fractional value is
+  ;; real HTML5 INVALID.
+  (let [page (browser/load-html
+              {:url "kotoba://submit"
+               :html "<main><form id=\"form\"><input id=\"field\" type=\"number\" name=\"field\" value=\"3.5\"><button id=\"go\">Go</button></form></main>"})
+        document (:browser/document page)
+        go (bridge/query-selector document "#go")
+        field (bridge/query-selector document "#field")
+        result (document-input/reduce-event document {:event/type :pointer/click :node/id go})]
+    (is (= true (:invalid? result)))
+    (is (= "step-mismatch" (get-in result [:document :nodes field :attrs :validation-reason])))))
+
+(deftest step-any-disables-the-check-and-does-not-block-submit
+  (let [page (browser/load-html
+              {:url "kotoba://submit"
+               :html "<main><form id=\"form\"><input id=\"field\" type=\"number\" name=\"field\" step=\"any\" value=\"3.5\"><button id=\"go\">Go</button></form></main>"})
+        document (:browser/document page)
+        go (bridge/query-selector document "#go")
+        result (document-input/reduce-event document {:event/type :pointer/click :node/id go})]
+    (is (= true (:submitted? result)))
+    (is (nil? (:invalid? result)))))
+
+(deftest blank-numeric-value-does-not-force-step-mismatch-and-does-not-block-submit
+  ;; step-mismatch is not required's concern -- a blank, non-required
+  ;; numeric value must not be blocked by its own step.
+  (let [page (browser/load-html
+              {:url "kotoba://submit"
+               :html "<main><form id=\"form\"><input id=\"field\" type=\"number\" name=\"field\" step=\"2\" value=\"\"><button id=\"go\">Go</button></form></main>"})
+        document (:browser/document page)
+        go (bridge/query-selector document "#go")
+        result (document-input/reduce-event document {:event/type :pointer/click :node/id go})]
+    (is (= true (:submitted? result)))
+    (is (nil? (:invalid? result)))))
+
 (deftest readonly-controls-submit-data-but-do-not-block-validation
   (let [page (browser/load-html {:url "kotoba://submit"
                                  :html "<main><form id=\"form\"><input id=\"field\" name=\"q\" required readonly><textarea id=\"long\" name=\"long\" maxlength=\"4\" readonly>abcde</textarea><button id=\"go\" name=\"action\" value=\"go\">Go</button></form></main>"})

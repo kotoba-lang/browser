@@ -536,6 +536,33 @@
         }
         return false;
       }
+      function __kotobaStepMismatch(type, value, node) {
+        // Real HTML5 step-mismatch -- mirrors cssom.core's own
+        // identically-scoped step-invalid?/browser.document-input's own
+        // step-invalid? exactly (fixed together for the same reason
+        // patternMismatch/typeMismatch above were). Real default step is
+        // 1, a genuinely common surprise -- type=number with no step
+        // attribute at all still requires an integer value -- and
+        // step=any disables the check entirely. A step present but not
+        // itself a valid positive number falls back to that same
+        // default of 1, matching real HTML5's own defined fallback
+        // (deliberately different from min/max, which have nothing
+        // sensible to fall back to and so are simply dropped when
+        // malformed).
+        if (type !== 'number' && type !== 'range') return false;
+        if (value.trim() === '') return false;
+        var n = __kotobaParseNumber(value);
+        if (Number.isNaN(n)) return false;
+        var rawStep = __kotobaAttr(node, 'step');
+        if (rawStep != null && String(rawStep).toLowerCase() === 'any') return false;
+        var parsedStep = __kotobaParseNumber(rawStep);
+        var step = (!Number.isNaN(parsedStep) && parsedStep > 0) ? parsedStep : 1;
+        var base = __kotobaParseNumber(__kotobaAttr(node, 'min'));
+        if (Number.isNaN(base)) base = 0;
+        var steps = (n - base) / step;
+        var frac = steps - Math.floor(steps);
+        return frac > 1e-9 && frac < (1 - 1e-9);
+      }
       function __kotobaCompilePattern(pattern) {
         // Malformed `pattern` degrades to NOT enforced (returns null),
         // matching this fn's own existing min/max/minlength/maxlength
@@ -590,6 +617,7 @@
         if (patternRegex && !patternRegex.test(value)) return 'patternMismatch';
         if (!Number.isNaN(rangeValue) && !Number.isNaN(rangeMin) && rangeValue < rangeMin) return 'rangeUnderflow';
         if (!Number.isNaN(rangeValue) && !Number.isNaN(rangeMax) && rangeValue > rangeMax) return 'rangeOverflow';
+        if (tag === 'input' && __kotobaStepMismatch(type, value, node)) return 'stepMismatch';
         return null;
       }
       function __kotobaConstraintInvalid(node) {
@@ -617,13 +645,13 @@
         // Real ValidityState always exposes every flag (false when not
         // applicable), so JS reading e.g. validity.stepMismatch on a
         // control this engine never flags gets a real `false`, not
-        // `undefined`. Only the 7 reasons browser.document-input's own
+        // `undefined`. Only the 8 reasons browser.document-input's own
         // validation-reason already computes are ever real (`valueMissing`/
         // `tooShort`/`tooLong`/`typeMismatch`/`patternMismatch`/
-        // `rangeUnderflow`/`rangeOverflow`) -- `stepMismatch`/`badInput`/
-        // `customError` are an honest, documented scope-cut (no `step`
-        // support, no `setCustomValidity()` exist anywhere in this engine
-        // yet), always `false`. Unlike the :invalid/:valid CSS pseudo-class
+        // `rangeUnderflow`/`rangeOverflow`/`stepMismatch`) -- `badInput`/
+        // `customError` are an honest, documented scope-cut (no
+        // `setCustomValidity()` exists anywhere in this engine yet),
+        // always `false`. Unlike the :invalid/:valid CSS pseudo-class
         // match (which also consults the historical, form-submission-time
         // `invalid` attr set by browser.document-input's dispatch-invalid-
         // events), .validity is real HTML5 semantics: always the LIVE,
@@ -638,7 +666,7 @@
           tooLong: reason === 'tooLong',
           rangeUnderflow: reason === 'rangeUnderflow',
           rangeOverflow: reason === 'rangeOverflow',
-          stepMismatch: false,
+          stepMismatch: reason === 'stepMismatch',
           badInput: false,
           customError: false,
           valid: reason === null

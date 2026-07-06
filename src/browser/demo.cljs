@@ -452,6 +452,16 @@
    "<input id=\"type-mismatch-target\" type=\"email\" value=\"not-an-email\">"
    "<div id=\"type-mismatch-result\">type-mismatch proof: pending...</div>"
    "</section>"
+   "<section id=\"step-mismatch-proof\" style=\"display:flex; flex-direction:column; gap:8\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "Real HTML5 step attribute below -- previously an honest, documented "
+   "scope-cut everywhere (stepMismatch always false). This step=2 field's "
+   "own real validity against a value not reachable via that step is read "
+   "back by script below."
+   "</p>"
+   "<input id=\"step-mismatch-target\" type=\"number\" step=\"2\" value=\"3\">"
+   "<div id=\"step-mismatch-result\">step-mismatch proof: pending...</div>"
+   "</section>"
    "<section id=\"font-family-proof\" style=\"display:flex; flex-direction:column; gap:8\">"
    "<p style=\"color:#9fb0c9; font-size:13\">"
    "Real CSS font-family below -- previously read from NOWHERE at all, "
@@ -722,6 +732,13 @@
    "tmResult.textContent = 'type-mismatch proof: checkValidity()=' + tmTarget.checkValidity() + "
    "', validity.typeMismatch=' + tmTarget.validity.typeMismatch + "
    "', matches(:invalid)=' + tmTarget.matches(':invalid');"
+   "</script>"
+   "<script>"
+   "var smTarget = document.getElementById('step-mismatch-target');"
+   "var smResult = document.getElementById('step-mismatch-result');"
+   "smResult.textContent = 'step-mismatch proof: checkValidity()=' + smTarget.checkValidity() + "
+   "', validity.stepMismatch=' + smTarget.validity.stepMismatch + "
+   "', matches(:invalid)=' + smTarget.matches(':invalid');"
    "</script>"
    "<script>"
    "var w = new Worker(" (pr-str worker-url) ");"
@@ -1000,6 +1017,7 @@
                  select-proof (element-text doc "select-result")
                  pattern-proof (element-text doc "pattern-result")
                  type-mismatch-proof (element-text doc "type-mismatch-result")
+                 step-mismatch-proof (element-text doc "step-mismatch-result")
                  status-badge-proof (pseudo-content doc "status-badge")
                  step-proofs (mapv #(pseudo-content doc %)
                                    ["step-1" "step-2" "step-3" "step-4"])]
@@ -1025,6 +1043,7 @@
              (js/console.log "browser.demo: #select-result ->" (pr-str select-proof))
              (js/console.log "browser.demo: #pattern-result ->" (pr-str pattern-proof))
              (js/console.log "browser.demo: #type-mismatch-result ->" (pr-str type-mismatch-proof))
+             (js/console.log "browser.demo: #step-mismatch-result ->" (pr-str step-mismatch-proof))
              (js/console.log "browser.demo: real ::before generated content ->"
                               "#status-badge:" (pr-str status-badge-proof)
                               "#step-counter lis:" (pr-str step-proofs))

@@ -791,6 +791,44 @@
          "url" (not (re-matches url-format-pattern value))
          false)))
 
+(def ^:private step-mismatch-tolerance
+  "Mirrors kotoba-lang/cssom's own identically-scoped `step-mismatch-
+   tolerance` -- a small, fixed epsilon rather than real HTML5's own
+   precise-decimal step-validity algorithm, since `parse-number` already
+   only accepts plain decimal strings (no scientific notation, an
+   existing honest scope-cut), an honest, documented simplification."
+  1e-9)
+
+(defn- step-invalid?
+  "Real HTML5 step-mismatch: `type=\"number\"`/`\"range\"` with a non-blank,
+   numerically-parseable value that isn't `step-base + n*step` for some
+   integer `n` -- previously read NOWHERE at all (an honest, documented
+   scope-cut in this repo's own JS-facing `__kotobaValidityState`:
+   `stepMismatch: false` hardcoded), mirrors kotoba-lang/cssom's own
+   identically-scoped `step-invalid?` exactly (fixed together for the
+   same reason `range-invalid?`/`pattern-invalid?`/`type-mismatch?`
+   above were). Real HTML5's own default `step` is `1` (NOT 'no
+   constraint' -- `<input type=\"number\" value=\"3.5\">` with no `step`
+   attribute at all is real HTML5 INVALID), and a real, legal
+   `step=\"any\"` disables the check entirely. A `step` present but not
+   itself a valid positive number falls back to that same default of
+   `1` -- deliberately DIFFERENT from `min`/`max`'s own degrade-don't-
+   guess convention, since real HTML5 step genuinely has a defined
+   default to fall back to."
+  [type value attrs]
+  (and (contains? #{"number" "range"} type)
+       (not (str/blank? value))
+       (when-let [n (parse-number value)]
+         (let [raw-step (:step attrs)]
+           (when-not (and raw-step (= "any" (str/lower-case (str raw-step))))
+             (let [parsed-step (parse-number raw-step)
+                   step (if (and parsed-step (pos? parsed-step)) parsed-step 1.0)
+                   base (or (parse-number (:min attrs)) 0.0)
+                   steps (/ (- n base) step)
+                   frac (mod steps 1)]
+               (and (> frac step-mismatch-tolerance)
+                    (< frac (- 1 step-mismatch-tolerance)))))))))
+
 (defn- compile-pattern
   "Compiles a real HTML5 `pattern` attribute value into a `re-pattern`, or
    `nil` if it isn't a legal regex -- a malformed `pattern` is simply NOT
@@ -836,7 +874,12 @@
    BEFORE `:pattern-mismatch` since a real, wrong-FORMAT value is a more
    fundamental problem than merely not matching an author's own custom
    `pattern` (also legal on `email`/`url`), matching real ValidityState's
-   own IDL property ordering."
+   own IDL property ordering.
+
+   `:step-mismatch` (see `step-invalid?`) is checked LAST, after
+   `:range-underflow`/`:range-overflow`, matching real ValidityState's
+   own IDL property order (`stepMismatch` is declared after
+   `rangeOverflow` in the real interface)."
   [document node-id]
   (let [node (get-in document [:nodes node-id])
         attrs (:attrs node)
@@ -895,6 +938,11 @@
 
         (and range-max (> range-value range-max))
         :range-overflow
+
+        (and (= :input (:tag node))
+             (some? text-value)
+             (step-invalid? type text-value attrs))
+        :step-mismatch
 
         :else nil))))
 
