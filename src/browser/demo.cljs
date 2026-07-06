@@ -294,6 +294,15 @@
    "<div id=\"dup-attr-source\" class=\"box-first\" class=\"box-second\" style=\"display:none\">source (hidden, read by script below)</div>"
    "<div id=\"dup-attr-result\">duplicate-attribute proof: pending...</div>"
    "</section>"
+   "<section id=\"remove-listener-proof\" style=\"display:flex; flex-direction:column; gap:8\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "Real removeEventListener below -- previously the WASM host ABI had no "
+   "case for this op at all, crashing the entire real commit the instant "
+   "a real page called it."
+   "</p>"
+   "<button id=\"remove-listener-button\">Auto-clicked twice by script</button>"
+   "<div id=\"remove-listener-result\">remove-listener proof: pending...</div>"
+   "</section>"
    "<section style=\"display:flex; flex-direction:row; gap:12px\">"
    "<div style=\"display:flex; flex-direction:column; background:#16202f; border-width:2; border-color:#4fb3a6; padding:10; width:220\">"
    "<p style=\"color:#9fb0c9; font-size:13\">"
@@ -389,6 +398,19 @@
    "var dupResult = document.getElementById('dup-attr-result');"
    "dupResult.textContent = 'duplicate-attribute proof: class=\"' + "
    "dupSource.getAttribute('class') + '\"';"
+   "</script>"
+   "<script>"
+   "var rlBtn = document.getElementById('remove-listener-button');"
+   "var rlResult = document.getElementById('remove-listener-result');"
+   "var rlLog = [];"
+   "function rlHandlerA() { rlLog.push('A'); }"
+   "function rlHandlerB() { rlLog.push('B'); }"
+   "rlBtn.addEventListener('click', rlHandlerA);"
+   "rlBtn.addEventListener('click', rlHandlerB);"
+   "rlBtn.click();"
+   "rlBtn.removeEventListener('click', rlHandlerA);"
+   "rlBtn.click();"
+   "rlResult.textContent = 'remove-listener proof: ' + rlLog.join(',');"
    "</script>"
    "<script>"
    "var w = new Worker(" (pr-str worker-url) ");"
@@ -655,6 +677,7 @@
                  fetch-proof (element-text doc "fetch-proof")
                  constraint-invalid-proof (element-text doc "constraint-invalid-result")
                  duplicate-attribute-proof (element-text doc "dup-attr-result")
+                 remove-listener-proof (element-text doc "remove-listener-result")
                  status-badge-proof (pseudo-content doc "status-badge")
                  step-proofs (mapv #(pseudo-content doc %)
                                    ["step-1" "step-2" "step-3" "step-4"])]
@@ -668,6 +691,7 @@
              (js/console.log "browser.demo: #fetch-proof ->" (pr-str fetch-proof))
              (js/console.log "browser.demo: #constraint-invalid-result ->" (pr-str constraint-invalid-proof))
              (js/console.log "browser.demo: #dup-attr-result ->" (pr-str duplicate-attribute-proof))
+             (js/console.log "browser.demo: #remove-listener-result ->" (pr-str remove-listener-proof))
              (js/console.log "browser.demo: real ::before generated content ->"
                               "#status-badge:" (pr-str status-badge-proof)
                               "#step-counter lis:" (pr-str step-proofs))
