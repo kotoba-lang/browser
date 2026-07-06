@@ -3685,6 +3685,175 @@
     (is (= (mapv :url (get-in s [:browser.session/navigation :entries]))
            (mapv :url (get-in same-again [:browser.session/navigation :entries]))))))
 
+(deftest script-history-back-within-bridged-region-moves-the-real-navigation-index
+  ;; The third and final sibling to the pushState/replaceState bridging
+  ;; above: a script's history.back() call moves the SANDBOX's own
+  ;; :history/index without changing :history/entries at all (no growth,
+  ;; no content change) -- so neither bridge-pushed-history-entries nor
+  ;; bridge-replaced-history-entry fires for it, confirmed via direct
+  ;; REPL reproduction that the session's own navigation index stayed
+  ;; stuck on the LAST pushed entry before this fix, even though the
+  ;; sandbox itself correctly tracked the traversal.
+  (let [h (host/recording-host)
+        s (-> (session/new-session {:host h})
+              (session/load-html! {:url "https://app.example/start" :html "<main>hi</main>"})
+              (session/commit-script-state!
+               {:history/entries [{:url "/one" :title "One" :state nil}]
+                :history/index 0})
+              (session/commit-script-state!
+               {:history/entries [{:url "/one" :title "One" :state nil}
+                                   {:url "/two" :title "Two" :state nil}]
+                :history/index 1}))
+        went-back (session/commit-script-state!
+                   s {:history/entries [{:url "/one" :title "One" :state nil}
+                                        {:url "/two" :title "Two" :state nil}]
+                      :history/index 0})]
+    (is (= 1 (get-in went-back [:browser.session/navigation :index]))
+        "the real navigation index moves back to /one, matching the sandbox's own traversal")
+    (is (= "/one" (get-in went-back [:browser.session/page :browser/url])))
+    (is (= "hi" (-> went-back :browser.session/page :browser/document dom/text-content))
+        "traversal within the bridged region never re-commits the document")))
+
+(deftest script-history-forward-within-bridged-region-moves-the-real-navigation-index
+  ;; Uses THREE pushed entries so the forward target (/two, nav index 2)
+  ;; differs from the "last pushed entry" value (/three, nav index 3) a
+  ;; totally-missing bridge would leave the session stuck at -- if this
+  ;; test only used two pushed entries, forwarding all the way back to
+  ;; the last one would coincidentally match that stuck value even with
+  ;; no traverse-bridging at all, defeating the point of the assertion.
+  (let [h (host/recording-host)
+        s (-> (session/new-session {:host h})
+              (session/load-html! {:url "https://app.example/start" :html "<main>hi</main>"})
+              (session/commit-script-state!
+               {:history/entries [{:url "/one" :title "One" :state nil}]
+                :history/index 0})
+              (session/commit-script-state!
+               {:history/entries [{:url "/one" :title "One" :state nil}
+                                   {:url "/two" :title "Two" :state nil}]
+                :history/index 1})
+              (session/commit-script-state!
+               {:history/entries [{:url "/one" :title "One" :state nil}
+                                   {:url "/two" :title "Two" :state nil}
+                                   {:url "/three" :title "Three" :state nil}]
+                :history/index 2})
+              (session/commit-script-state!
+               {:history/entries [{:url "/one" :title "One" :state nil}
+                                   {:url "/two" :title "Two" :state nil}
+                                   {:url "/three" :title "Three" :state nil}]
+                :history/index 0}))
+        went-forward (session/commit-script-state!
+                      s {:history/entries [{:url "/one" :title "One" :state nil}
+                                           {:url "/two" :title "Two" :state nil}
+                                           {:url "/three" :title "Three" :state nil}]
+                         :history/index 1})]
+    (is (= 2 (get-in went-forward [:browser.session/navigation :index])))
+    (is (= "/two" (get-in went-forward [:browser.session/page :browser/url])))))
+
+(deftest script-history-traverse-outside-the-bridged-region-does-not-bridge
+  ;; The honest, documented limitation: a sandbox index that doesn't
+  ;; correspond to this session's own already-bridged region (here,
+  ;; simulated by :history/entries shrinking back to a count that no
+  ;; longer matches script-history-bridged-count, the same signal a
+  ;; fresh page generation's reset sandbox would produce) must leave the
+  ;; real navigation stack untouched rather than guess -- crossing into
+  ;; real, distinct navigation entries needs entry-provenance tagging
+  ;; this cycle deliberately does not add.
+  (let [h (host/recording-host)
+        s (-> (session/new-session {:host h})
+              (session/load-html! {:url "https://app.example/start" :html "<main>hi</main>"})
+              (session/commit-script-state!
+               {:history/entries [{:url "/one" :title "One" :state nil}]
+                :history/index 0})
+              (session/commit-script-state!
+               {:history/entries [{:url "/one" :title "One" :state nil}
+                                   {:url "/two" :title "Two" :state nil}]
+                :history/index 1}))
+        mismatched (session/commit-script-state!
+                    s {:history/entries [{:url "/one" :title "One" :state nil}]
+                       :history/index 0})]
+    (is (= (get-in s [:browser.session/navigation :entries])
+           (get-in mismatched [:browser.session/navigation :entries])))
+    (is (= (get-in s [:browser.session/navigation :index])
+           (get-in mismatched [:browser.session/navigation :index])))))
+
+(deftest script-history-traverse-with-no-index-change-is-a-no-op
+  (let [h (host/recording-host)
+        s (-> (session/new-session {:host h})
+              (session/load-html! {:url "https://app.example/start" :html "<main>hi</main>"})
+              (session/commit-script-state!
+               {:history/entries [{:url "/one" :title "One" :state nil}]
+                :history/index 0})
+              (session/commit-script-state!
+               {:history/entries [{:url "/one" :title "One" :state nil}
+                                   {:url "/two" :title "Two" :state nil}]
+                :history/index 1}))
+        repeated (session/commit-script-state!
+                  s {:history/entries [{:url "/one" :title "One" :state nil}
+                                       {:url "/two" :title "Two" :state nil}]
+                     :history/index 1})]
+    (is (= s repeated))))
+
+(deftest run-script-real-history-traverse-capability-request-bridges-through-the-full-pipeline
+  ;; Same end-to-end proof as pushState/replaceState's own full-pipeline
+  ;; tests above: a fake :script-engine/engine returning a REAL
+  ;; :history/traverse CAPABILITY REQUEST (the exact shape a real
+  ;; QuickJS VM's own globalThis.history.back() call produces) run
+  ;; through the REAL run-script! -> quickjs-execution/evaluate! ->
+  ;; history-traverse-result pipeline, proving the bridge added by this
+  ;; fix reaches all the way from a real capability request to this
+  ;; session's own real navigation stack.
+  ;; Two real pushes, then back() -- NOT one push then back(), because the
+  ;; sandbox's own :history/entries model has no representation at all
+  ;; for "before the first push" (history-traverse-result bounds-checks
+  ;; target-index >= 0, so requesting delta -1 from sandbox index 0 is
+  ;; rejected by the sandbox itself, :traversed? false, an out-of-bounds
+  ;; case already covered by quickjs-execution-test's own quickjs-history-
+  ;; traverse-bounds-without-ambient-navigation) -- exactly the crossing-
+  ;; into-real-navigation-entries case this cycle deliberately defers.
+  (let [h (host/recording-host)
+        s (-> (session/new-session {:host h})
+              (session/load-html! {:url "https://app.example/start" :html "<main>hi</main>"}))
+        s (assoc s :browser.session/script-engine
+                 {:script-engine/engine
+                  (fn [_]
+                    {:result :ok
+                     :requests [{:request/id "push-1"
+                                 :capability :history/push-state
+                                 :url "/one"
+                                 :title "One"
+                                 :state nil}]})})
+        after-first-push (quickjs-runner/run-script!
+                          s {:script/type :classic
+                             :script/source "history.pushState(null, 'One', '/one');"
+                             :script/url "https://app.example/start"})
+        after-first-push (assoc after-first-push :browser.session/script-engine
+                                {:script-engine/engine
+                                 (fn [_]
+                                   {:result :ok
+                                    :requests [{:request/id "push-2"
+                                                :capability :history/push-state
+                                                :url "/two"
+                                                :title "Two"
+                                                :state nil}]})})
+        after-second-push (quickjs-runner/run-script!
+                           after-first-push {:script/type :classic
+                                             :script/source "history.pushState(null, 'Two', '/two');"
+                                             :script/url "/one"})
+        after-second-push (assoc after-second-push :browser.session/script-engine
+                                 {:script-engine/engine
+                                  (fn [_]
+                                    {:result :ok
+                                     :requests [{:request/id "back-1"
+                                                 :capability :history/traverse
+                                                 :delta -1}]})})
+        after (quickjs-runner/run-script!
+               after-second-push {:script/type :classic
+                                  :script/source "history.back();"
+                                  :script/url "/two"})]
+    (is (= 1 (get-in after [:browser.session/navigation :index]))
+        "history.back() moves the real navigation index back from /two to /one")
+    (is (= "/one" (get-in after [:browser.session/page :browser/url])))))
+
 (deftest restored-session-uses-persisted-current-page-state
   (let [h (host/recording-host)
         provider (persistence-provider/memory-provider)

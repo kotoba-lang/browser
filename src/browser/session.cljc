@@ -503,14 +503,11 @@
    document itself, only the URL/history) and recording a real navigation
    entry for it, mirroring `remember-navigation-entry`'s own shape.
 
-   Deliberately scoped to `pushState`-driven GROWTH only, an honest,
-   documented limitation rather than a silent gap: a script's own
-   programmatic `history.go()`/`back()`/`forward()` (`:history/traverse`,
-   which only moves the sandbox's own index, never growing entries) is
-   not yet bridged -- it correctly no-ops here rather than bridging
-   incorrect or partial state, left for a separate future cycle. See
-   `bridge-replaced-history-entry` right below for the sibling fix that
-   closes the OTHER deferred half of this same gap, `replaceState`."
+   Deliberately scoped to `pushState`-driven GROWTH only. See
+   `bridge-replaced-history-entry` right below for the sibling fix
+   closing `replaceState`, and `bridge-traversed-history-index` further
+   below for the third sibling closing (a scoped slice of) `history.
+   go()`/`back()`/`forward()`."
   [session script-state]
   (let [entries (vec (:history/entries script-state))
         already-bridged (:browser.session/script-history-bridged-count session 0)]
@@ -543,12 +540,12 @@
    sees `count == already-bridged` again and finds nothing left to
    replace, since the freshly-pushed entry's content already matches
    what was just bridged); the sandbox's own current index points at the
-   LAST already-bridged entry (a stale index from an untracked
-   `:history/traverse` call is deliberately NOT treated as a replace --
-   see `bridge-pushed-history-entries`'s own docstring on why traverse
-   stays unbridged); and that entry's URL genuinely differs from what
-   the session already has recorded, i.e. an actual `replaceState` call
-   happened, not a same-tab replay of already-bridged state.
+   LAST already-bridged entry (an index moved by a `:history/traverse`
+   call is deliberately NOT treated as a replace -- see
+   `bridge-traversed-history-index` right below for that separate case);
+   and that entry's URL genuinely differs from what the session already
+   has recorded, i.e. an actual `replaceState` call happened, not a
+   same-tab replay of already-bridged state.
 
    Updates the session's current page's own `:browser/url` (replaceState
    never touches the document either, same as pushState) AND the
@@ -574,13 +571,76 @@
         session)
       session)))
 
+(defn- bridge-traversed-history-index
+  "The `history.go()`/`back()`/`forward()` half of the same gap
+   `bridge-pushed-history-entries`/`bridge-replaced-history-entry` close
+   above -- a script's own programmatic traversal call (`:history/
+   traverse`) moves the sandbox's own `:history/index` without changing
+   `:history/entries` at all (no growth like `pushState`, no content
+   change like `replaceState`), so neither sibling fires for it.
+
+   DELIBERATELY, HONESTLY scoped narrower than the other two: only
+   bridges a traversal that stays ENTIRELY within the region of entries
+   THIS session itself already bridged via `pushState`/`replaceState`
+   (`already-bridged` of them, all sharing the SAME document -- neither
+   `pushState` nor `replaceState` ever touches it). Landing back on one
+   of those is safe to bridge with a plain session-bookkeeping update
+   (move `:browser.session/navigation`'s own `:index`, update the
+   current page's `:browser/url` to match) -- exactly like the other
+   two siblings, no document re-commit needed, because the document
+   genuinely never changed across any of these entries.
+
+   A traversal that would move OUTSIDE that region -- back past the
+   first `pushState` this generation ever did, into a REAL, distinct
+   navigation entry the SAME document did NOT produce -- is deliberately
+   NOT bridged here, and this is a real, structural limitation, not an
+   oversight: `back!`/`forward!` (the existing, real mechanism for
+   REAL page-to-page navigation) re-`commit-page!` the target entry's
+   OWN `:browser/ops` to genuinely restore that different document --
+   but a `pushState`-created entry's `:page` is just a COPY of whatever
+   document existed at push time, carrying the SAME `:browser/ops` the
+   original page already committed once. Blindly re-committing those
+   same ops on a traversal (naively unifying this with `back!`/
+   `forward!`'s own approach) would re-run real DOM-construction ops
+   (e.g. `:dom/create-element`) a SECOND time against a host that
+   already has those exact nodes -- confirmed via reading `kotoba.wasm.
+   host/commit!`'s own op-application loop that it has no dedupe/no-op
+   awareness of its own, so this is a REAL correctness risk, not a
+   theoretical one. Bridging traversal across that boundary correctly
+   needs a way to tell which navigation-stack entries are real,
+   distinct documents (safe to re-commit) versus which are same-
+   document `pushState`/`replaceState` copies (unsafe to re-commit) --
+   a genuine schema addition (tagging each entry with its own origin),
+   left for a separate, dedicated future cycle rather than folded in
+   here as a side effect."
+  [session script-state]
+  (let [entries (vec (:history/entries script-state))
+        already-bridged (:browser.session/script-history-bridged-count session 0)
+        sandbox-idx (:history/index script-state)]
+    (if (and (= (count entries) already-bridged)
+             (pos? already-bridged)
+             (<= 0 sandbox-idx (dec already-bridged)))
+      (let [nav-entries (get-in session [:browser.session/navigation :entries])
+            script-region-start (- (count nav-entries) already-bridged)
+            target-nav-index (+ script-region-start sandbox-idx)
+            target-entry (get nav-entries target-nav-index)]
+        (if (and target-entry
+                 (not= target-nav-index (get-in session [:browser.session/navigation :index] -1)))
+          (-> session
+              (assoc-in [:browser.session/navigation :index] target-nav-index)
+              (assoc :browser.session/page (assoc (:browser.session/page session)
+                                                   :browser/url (:url target-entry))))
+          session))
+      session)))
+
 (defn commit-script-state!
   [session script-state]
   (let [net-store-updated? (contains? (:net/context script-state) :store)
         session (-> session
                     (apply-script-net-store script-state)
                     (bridge-pushed-history-entries script-state)
-                    (bridge-replaced-history-entry script-state))]
+                    (bridge-replaced-history-entry script-state)
+                    (bridge-traversed-history-index script-state))]
     (if-let [document (:document script-state)]
       (-> (commit-document! session document)
           (update :browser.session/history conj
