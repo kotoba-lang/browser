@@ -450,7 +450,8 @@
                                            :node/id button
                                            :event {:event/type "click"
                                                    :target/id button}})]
-    (is (= "handler-1" (get-in listened [:document :listeners button :click])))
+    (is (= ["handler-1"] (get-in listened [:document :listeners button :click]))
+        ":listeners now holds an ordered collection of handler-ids, not a single scalar -- see kotoba.wasm.dom's own multi-listener fix")
     (is (= true (:event/dispatched? dispatched)))
     (is (= [:dom/dispatch-event "handler-1" {:event/type "click" :target/id button}]
            (last (get-in dispatched [:document :ops]))))))

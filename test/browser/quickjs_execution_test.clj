@@ -1968,6 +1968,49 @@
     (is (= [:dom/remove-event-listener button :click "handler-1"]
            (last (get-in state [:document :ops]))))))
 
+(deftest quickjs-two-real-addeventlistener-calls-on-the-same-button-both-fire
+  ;; The confirmed repro from the bug report: two INDEPENDENT scripts (or
+  ;; two separate addEventListener calls in the same script) each
+  ;; registering their own click handler on the same real button --
+  ;; previously the second call silently overwrote the first at the
+  ;; kotoba.wasm.dom level, so only the most-recently-added listener ever
+  ;; fired, confirmed via direct REPL reproduction before this fix. Run
+  ;; through the REAL run-script! capability-request pipeline (two
+  ;; :event/listen requests for the identical node+event, then a real
+  ;; click dispatch), not a hand-built intermediate map.
+  (let [page (browser/load-html {:url "kotoba://quickjs"
+                                 :html "<main><button id=\"go\">Go</button></main>"})
+        button (bridge/query-selector (:browser/document page) "#go")
+        adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :document (:browser/document page)
+                :engine (fn [_]
+                          {:result :ok
+                           :requests [{:capability :event/listen
+                                       :node/selector "#go"
+                                       :event/type "click"
+                                       :handler/id "handler-A"}
+                                      {:capability :event/listen
+                                       :node/selector "#go"
+                                       :event/type "click"
+                                       :handler/id "handler-B"}
+                                      {:capability :event/dispatch
+                                       :node/selector "#go"
+                                       :event {:event/type "click"
+                                               :target/id button}}]})})
+        state (execution/evaluate! state {:source "button.click()"})
+        dispatch-ops (filterv #(= :dom/dispatch-event (first %))
+                              (get-in state [:document :ops]))]
+    (is (= ["handler-A" "handler-B"] (get-in state [:document :listeners button :click]))
+        "sanity: both handler-ids are registered, in order")
+    (is (= [true true true] (mapv :ok? (:capability/results state))))
+    (is (= [["handler-A" {:event/type "click" :target/id button}]
+            ["handler-B" {:event/type "click" :target/id button}]]
+           (mapv rest dispatch-ops))
+        "both real listeners fire on the real click, not just the last-registered one")))
+
 (deftest quickjs-global-event-listeners-record-sandboxed-targets
   (let [page (browser/load-html {:url "kotoba://quickjs"
                                  :html "<main></main>"})
@@ -2050,7 +2093,8 @@
     (is (= "typed" (get-in state [:document :nodes field :attrs :value])))
     (is (= "42" (get-in state [:document :nodes amount :attrs :value])))
     (is (= "true" (get-in state [:document :nodes field :attrs :checked])))
-    (is (= "handler-1" (get-in state [:document :listeners field :input])))
+    (is (= ["handler-1"] (get-in state [:document :listeners field :input]))
+        ":listeners now holds an ordered collection of handler-ids, not a single scalar -- see kotoba.wasm.dom's own multi-listener fix")
     (is (= [true true true true true] (mapv :ok? (:capability/results state))))
     (is (= [:dom/dispatch-event "handler-1" {:event/type "input"
                                              :target/id field

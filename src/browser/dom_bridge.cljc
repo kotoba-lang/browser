@@ -131,9 +131,7 @@
 
 (defn remove-event-listener
   [document node-id event-type handler-id]
-  {:document (-> document
-                 (update-in [:listeners node-id] dissoc (keyword event-type))
-                 (update :ops conj [:dom/remove-event-listener node-id (keyword event-type) handler-id]))
+  {:document (dom/remove-event-listener document node-id event-type handler-id)
    :node/id node-id
    :handler/id handler-id})
 
