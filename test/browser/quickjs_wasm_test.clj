@@ -98,6 +98,24 @@
     (is (str/includes? source "withoutAttrs = selector.replace(attrPattern, '')"))
     (is (str/includes? source "while ((match = classPattern.exec(withoutPseudos))"))))
 
+(deftest quickjs-wasm-webapi-shim-constraint-invalid-honors-min-max-range
+  ;; A real element.matches(':invalid')/':valid' call goes through this
+  ;; embedded JS copy of the constraint-validation logic -- confirmed (via
+  ;; a real-QuickJS smoke test, since actual JS evaluation only happens
+  ;; under the cljs/node-test target) to previously report a real
+  ;; out-of-range `<input type="number" min="1" max="10" value="15">` as
+  ;; VALID, unlike kotoba-lang/cssom's `constraint-invalid?` and this repo's
+  ;; own `document_input.cljc`'s `validation-reason`, both already fixed
+  ;; for this exact gap in an earlier cycle.
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "function __kotobaParseNumber(v)"))
+    (is (str/includes? source "test(s) ? parseFloat(s) : NaN"))
+    (is (str/includes? source "var rangeValue = (tag === 'input' && (type === 'number' || type === 'range')"))
+    (is (str/includes? source "var rangeMin = __kotobaParseNumber(__kotobaAttr(node, 'min'))"))
+    (is (str/includes? source "var rangeMax = __kotobaParseNumber(__kotobaAttr(node, 'max'))"))
+    (is (str/includes? source "!Number.isNaN(rangeValue) && !Number.isNaN(rangeMin) && rangeValue < rangeMin"))
+    (is (str/includes? source "!Number.isNaN(rangeValue) && !Number.isNaN(rangeMax) && rangeValue > rangeMax"))))
+
 (deftest quickjs-wasm-webapi-shim-exposes-scoped-element-query-selectors
   (let [source quickjs-wasm/webapi-shim-source]
     (is (str/includes? source "function __kotobaScopedQuerySelectorAllIds(rootId, selector)"))

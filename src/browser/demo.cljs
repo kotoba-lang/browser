@@ -251,6 +251,18 @@
    "<li>real, visible row</li>"
    "</ul>"
    "</section>"
+   "<section id=\"constraint-invalid-proof\" style=\"display:flex; flex-direction:column; gap:8\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "Real element.matches(':invalid')/':valid' below, evaluated inside the "
+   "real QuickJS VM against inputs with min/max -- previously this JS-side "
+   "copy of constraint validation had no range check at all, so an "
+   "out-of-range number reported :valid here even though it already "
+   "painted :invalid styling and already blocked real form submission."
+   "</p>"
+   "<input id=\"c-invalid-input\" type=\"number\" min=\"1\" max=\"10\" value=\"15\" style=\"display:none\">"
+   "<input id=\"c-valid-input\" type=\"number\" min=\"1\" max=\"10\" value=\"5\" style=\"display:none\">"
+   "<div id=\"constraint-invalid-result\">constraint-invalid proof: pending...</div>"
+   "</section>"
    "<section style=\"display:flex; flex-direction:row; gap:12px\">"
    "<div style=\"display:flex; flex-direction:column; background:#16202f; border-width:2; border-color:#4fb3a6; padding:10; width:220\">"
    "<p style=\"color:#9fb0c9; font-size:13\">"
@@ -326,6 +338,13 @@
    "var list = document.getElementById('insert-adjacent-list');"
    "list.insertAdjacentHTML('afterbegin', '<li id=\"first-item\">first</li>');"
    "list.insertAdjacentHTML('beforeend', '<li id=\"last-item\">last</li>');"
+   "</script>"
+   "<script>"
+   "var cInvalid = document.getElementById('c-invalid-input');"
+   "var cValid = document.getElementById('c-valid-input');"
+   "var cResult = document.getElementById('constraint-invalid-result');"
+   "cResult.textContent = 'constraint-invalid proof: value=15 (max=10) matches(:invalid)=' + "
+   "cInvalid.matches(':invalid') + ', value=5 (in [1,10]) matches(:valid)=' + cValid.matches(':valid');"
    "</script>"
    "<script>"
    "var w = new Worker(" (pr-str worker-url) ");"
@@ -590,6 +609,7 @@
                  ws-proof (element-text doc "ws-proof")
                  worker-proof (element-text doc "worker-proof")
                  fetch-proof (element-text doc "fetch-proof")
+                 constraint-invalid-proof (element-text doc "constraint-invalid-result")
                  status-badge-proof (pseudo-content doc "status-badge")
                  step-proofs (mapv #(pseudo-content doc %)
                                    ["step-1" "step-2" "step-3" "step-4"])]
@@ -601,6 +621,7 @@
              (js/console.log "browser.demo: #ws-proof ->" (pr-str ws-proof))
              (js/console.log "browser.demo: #worker-proof ->" (pr-str worker-proof))
              (js/console.log "browser.demo: #fetch-proof ->" (pr-str fetch-proof))
+             (js/console.log "browser.demo: #constraint-invalid-result ->" (pr-str constraint-invalid-proof))
              (js/console.log "browser.demo: real ::before generated content ->"
                               "#status-badge:" (pr-str status-badge-proof)
                               "#step-counter lis:" (pr-str step-proofs))

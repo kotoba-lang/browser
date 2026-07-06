@@ -511,6 +511,11 @@
         var value = __kotobaAttr(node, 'value');
         return value == null ? '' : String(value);
       }
+      function __kotobaParseNumber(v) {
+        if (v == null) return NaN;
+        var s = String(v).trim();
+        return /^-?\\d+(\\.\\d+)?$/.test(s) ? parseFloat(s) : NaN;
+      }
       function __kotobaConstraintInvalid(node) {
         if (__kotobaConstraintValidationBarredControl(node)) return false;
         var value = __kotobaControlValue(node);
@@ -518,13 +523,22 @@
         var type = String(__kotobaAttr(node, 'type') || 'text').toLowerCase();
         var minlength = parseInt(__kotobaAttr(node, 'minlength'), 10);
         var maxlength = parseInt(__kotobaAttr(node, 'maxlength'), 10);
+        // range-underflow/range-overflow, mirroring cssom's range-invalid? and
+        // browser's own validation-reason -- this JS copy is what a real
+        // element.matches(':invalid') sees, and had no min/max check at all.
+        var rangeValue = (tag === 'input' && (type === 'number' || type === 'range') && value.trim() !== '')
+          ? __kotobaParseNumber(value) : NaN;
+        var rangeMin = __kotobaParseNumber(__kotobaAttr(node, 'min'));
+        var rangeMax = __kotobaParseNumber(__kotobaAttr(node, 'max'));
         return __kotobaBoolAttr(node, 'invalid') ||
           (__kotobaBoolAttr(node, 'required') &&
             ((tag === 'input' && type === 'checkbox' && !__kotobaBoolAttr(node, 'checked')) ||
              (tag === 'input' && type === 'radio' && !__kotobaRadioRequiredSatisfied(node)) ||
              (!(tag === 'input' && (type === 'checkbox' || type === 'radio')) && value.trim() === ''))) ||
           (!Number.isNaN(minlength) && value.length > 0 && value.length < minlength) ||
-          (!Number.isNaN(maxlength) && value.length > maxlength);
+          (!Number.isNaN(maxlength) && value.length > maxlength) ||
+          (!Number.isNaN(rangeValue) && !Number.isNaN(rangeMin) && rangeValue < rangeMin) ||
+          (!Number.isNaN(rangeValue) && !Number.isNaN(rangeMax) && rangeValue > rangeMax);
       }
       function __kotobaValidationBarredControl(node) {
         var type = String(__kotobaAttr(node, 'type') || 'text').toLowerCase();
