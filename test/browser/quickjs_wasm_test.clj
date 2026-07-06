@@ -158,6 +158,23 @@
     (is (str/includes? source "select: function()"))
     (is (str/includes? source "this.setSelectionRange(0, this.value.length);"))))
 
+(deftest quickjs-wasm-webapi-shim-exposes-pattern-mismatch-validation
+  ;; A real HTML5 `pattern` attribute -- previously an honest, documented
+  ;; scope-cut everywhere (`patternMismatch: false` hardcoded, no check at
+  ;; all in `__kotobaConstraintInvalid`/`__kotobaValidationReason`).
+  ;; Confirmed via a real CLJS/QuickJS smoke test
+  ;; (quickjs-pattern-mismatch-smoke-test) that a real
+  ;; `<input pattern="[0-9]+" value="abc">` now correctly reports
+  ;; `matches(':invalid')`/`checkValidity() === false`/`.validity.
+  ;; patternMismatch === true`, all previously unreachable from JS at all.
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "function __kotobaCompilePattern(pattern)"))
+    (is (str/includes? source "return new RegExp('^(?:' + pattern + ')$');"))
+    (is (str/includes? source "var pattern = __kotobaAttr(node, 'pattern');"))
+    (is (str/includes? source "var patternRegex = patternApplicable ? __kotobaCompilePattern(pattern) : null;"))
+    (is (str/includes? source "if (patternRegex && !patternRegex.test(value)) return 'patternMismatch';"))
+    (is (str/includes? source "patternMismatch: reason === 'patternMismatch',"))))
+
 (deftest quickjs-wasm-webapi-shim-exposes-scoped-element-query-selectors
   (let [source quickjs-wasm/webapi-shim-source]
     (is (str/includes? source "function __kotobaScopedQuerySelectorAllIds(rootId, selector)"))

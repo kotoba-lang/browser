@@ -433,6 +433,16 @@
    "<input id=\"select-target\" value=\"select() should select all of this\">"
    "<div id=\"select-result\">select() proof: pending...</div>"
    "</section>"
+   "<section id=\"pattern-mismatch-proof\" style=\"display:flex; flex-direction:column; gap:8\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "Real HTML5 pattern attribute below -- previously an honest, documented "
+   "scope-cut everywhere (patternMismatch always false). This digits-only "
+   "pattern's own real validity against its non-digit value is read back by "
+   "script below."
+   "</p>"
+   "<input id=\"pattern-target\" pattern=\"[0-9]+\" value=\"abc123\">"
+   "<div id=\"pattern-result\">pattern proof: pending...</div>"
+   "</section>"
    "<section id=\"font-family-proof\" style=\"display:flex; flex-direction:column; gap:8\">"
    "<p style=\"color:#9fb0c9; font-size:13\">"
    "Real CSS font-family below -- previously read from NOWHERE at all, "
@@ -689,6 +699,13 @@
    "var selResult = document.getElementById('select-result');"
    "selResult.textContent = 'select() proof: selectionStart=' + selTarget.selectionStart + "
    "', selectionEnd=' + selTarget.selectionEnd + ', value.length=' + selTarget.value.length;"
+   "</script>"
+   "<script>"
+   "var patTarget = document.getElementById('pattern-target');"
+   "var patResult = document.getElementById('pattern-result');"
+   "patResult.textContent = 'pattern proof: checkValidity()=' + patTarget.checkValidity() + "
+   "', validity.patternMismatch=' + patTarget.validity.patternMismatch + "
+   "', matches(:invalid)=' + patTarget.matches(':invalid');"
    "</script>"
    "<script>"
    "var w = new Worker(" (pr-str worker-url) ");"
@@ -965,6 +982,7 @@
                  get-computed-style-proof (element-text doc "get-computed-style-result")
                  check-validity-proof (element-text doc "check-validity-result")
                  select-proof (element-text doc "select-result")
+                 pattern-proof (element-text doc "pattern-result")
                  status-badge-proof (pseudo-content doc "status-badge")
                  step-proofs (mapv #(pseudo-content doc %)
                                    ["step-1" "step-2" "step-3" "step-4"])]
@@ -988,6 +1006,7 @@
              (js/console.log "browser.demo: #get-computed-style-result ->" (pr-str get-computed-style-proof))
              (js/console.log "browser.demo: #check-validity-result ->" (pr-str check-validity-proof))
              (js/console.log "browser.demo: #select-result ->" (pr-str select-proof))
+             (js/console.log "browser.demo: #pattern-result ->" (pr-str pattern-proof))
              (js/console.log "browser.demo: real ::before generated content ->"
                               "#status-badge:" (pr-str status-badge-proof)
                               "#step-counter lis:" (pr-str step-proofs))

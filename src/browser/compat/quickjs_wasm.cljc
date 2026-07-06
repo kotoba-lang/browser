@@ -516,6 +516,19 @@
         var s = String(v).trim();
         return /^-?\\d+(\\.\\d+)?$/.test(s) ? parseFloat(s) : NaN;
       }
+      function __kotobaCompilePattern(pattern) {
+        // Malformed `pattern` degrades to NOT enforced (returns null),
+        // matching this fn's own existing min/max/minlength/maxlength
+        // degrade-don't-guess treatment -- not a crash. The `^(?:...)$`
+        // wrap is real HTML5's own implicit anchoring of the `pattern`
+        // attribute (a bare, unanchored regex would otherwise only need
+        // to match a SUBSTRING of the value to pass.
+        try {
+          return new RegExp('^(?:' + pattern + ')$');
+        } catch (e) {
+          return null;
+        }
+      }
       function __kotobaValidationReason(node) {
         // real HTML5 ValidityState property names, in the exact same
         // precedence order as browser.document-input's own (CLJC,
@@ -533,6 +546,18 @@
           ? __kotobaParseNumber(value) : NaN;
         var rangeMin = __kotobaParseNumber(__kotobaAttr(node, 'min'));
         var rangeMax = __kotobaParseNumber(__kotobaAttr(node, 'max'));
+        // `pattern` is real HTML5's own restriction: only text/search/url/
+        // tel/email/password <input>s (NOT <textarea>, despite an untyped
+        // <textarea> also having no real `type` attribute of its own),
+        // and only ever enforced against a non-blank value (an empty,
+        // non-required field's own emptiness is `required`'s concern, not
+        // `pattern`'s).
+        var pattern = __kotobaAttr(node, 'pattern');
+        var patternApplicable = tag === 'input' &&
+          (type === 'text' || type === 'search' || type === 'url' || type === 'tel' ||
+           type === 'email' || type === 'password') &&
+          pattern != null && value.trim() !== '';
+        var patternRegex = patternApplicable ? __kotobaCompilePattern(pattern) : null;
         if (__kotobaBoolAttr(node, 'required') &&
             ((tag === 'input' && type === 'checkbox' && !__kotobaBoolAttr(node, 'checked')) ||
              (tag === 'input' && type === 'radio' && !__kotobaRadioRequiredSatisfied(node)) ||
@@ -541,6 +566,7 @@
         }
         if (!Number.isNaN(minlength) && value.length > 0 && value.length < minlength) return 'tooShort';
         if (!Number.isNaN(maxlength) && value.length > maxlength) return 'tooLong';
+        if (patternRegex && !patternRegex.test(value)) return 'patternMismatch';
         if (!Number.isNaN(rangeValue) && !Number.isNaN(rangeMin) && rangeValue < rangeMin) return 'rangeUnderflow';
         if (!Number.isNaN(rangeValue) && !Number.isNaN(rangeMax) && rangeValue > rangeMax) return 'rangeOverflow';
         return null;
@@ -570,14 +596,14 @@
         // Real ValidityState always exposes every flag (false when not
         // applicable), so JS reading e.g. validity.typeMismatch on a
         // control this engine never flags gets a real `false`, not
-        // `undefined`. Only the 5 reasons browser.document-input's own
+        // `undefined`. Only the 6 reasons browser.document-input's own
         // validation-reason already computes are ever real (`valueMissing`/
-        // `tooShort`/`tooLong`/`rangeUnderflow`/`rangeOverflow`) --
-        // `typeMismatch`/`patternMismatch`/`stepMismatch`/`badInput`/
-        // `customError` are an honest, documented scope-cut (no `pattern`/
-        // `step` support, no `setCustomValidity()`, no `type=email|url`
-        // format checking exist anywhere in this engine yet), always
-        // `false`. Unlike the :invalid/:valid CSS pseudo-class match (which
+        // `tooShort`/`tooLong`/`patternMismatch`/`rangeUnderflow`/
+        // `rangeOverflow`) -- `typeMismatch`/`stepMismatch`/`badInput`/
+        // `customError` are an honest, documented scope-cut (no `step`
+        // support, no `setCustomValidity()`, no `type=email|url` format
+        // checking exist anywhere in this engine yet), always `false`.
+        // Unlike the :invalid/:valid CSS pseudo-class match (which
         // also consults the historical, form-submission-time `invalid`
         // attr set by browser.document-input's dispatch-invalid-events),
         // .validity is real HTML5 semantics: always the LIVE, freshly
@@ -587,7 +613,7 @@
         return {
           valueMissing: reason === 'valueMissing',
           typeMismatch: false,
-          patternMismatch: false,
+          patternMismatch: reason === 'patternMismatch',
           tooShort: reason === 'tooShort',
           tooLong: reason === 'tooLong',
           rangeUnderflow: reason === 'rangeUnderflow',

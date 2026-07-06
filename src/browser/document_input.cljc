@@ -755,6 +755,19 @@
 
       :else nil)))
 
+(defn- compile-pattern
+  "Compiles a real HTML5 `pattern` attribute value into a `re-pattern`, or
+   `nil` if it isn't a legal regex -- a malformed `pattern` is simply NOT
+   enforced (matching this file's own existing degrade-don't-guess
+   treatment of a non-numeric `minlength`/`maxlength`/`min`/`max` above),
+   not a crash. `re-matches` (used by `validation-reason` below) already
+   requires matching the ENTIRE string, the same implicit `^(?:...)$`
+   anchoring real HTML5 applies to `pattern` itself -- no extra
+   concatenation needed."
+  [pattern]
+  #?(:clj (try (re-pattern pattern) (catch Exception _ nil))
+     :cljs (try (re-pattern pattern) (catch :default _ nil))))
+
 (defn- validation-reason
   "`:range-underflow`/`:range-overflow` (real HTML5 `ValidityState`
    property names) for `type=\"number\"`/`\"range\"`: a non-blank,
@@ -768,7 +781,19 @@
    dispatches a real `invalid` event instead. Fixed together with the
    identical gap in kotoba-lang/cssom's own `constraint-invalid?` (that
    repo's `:invalid`/`:valid` CSS pseudo-class matching had the exact
-   same missing check)."
+   same missing check).
+
+   `:pattern-mismatch` for a real, non-blank `pattern` attribute (valid on
+   exactly the same `text-input-types` set real HTML5 restricts it to --
+   `text`/`search`/`url`/`tel`/`email`/`password`, NOT `<textarea>` even
+   though `input-type` also resolves an untyped `<textarea>` to the same
+   `\"\"` this set contains, hence the explicit `(= :input (:tag node))`
+   guard below) whose value doesn't fully match it -- previously read
+   NOWHERE at all (a hardcoded `patternMismatch: false` scope-cut existed
+   in this repo's own JS-facing `__kotobaValidityState` and in
+   kotoba-lang/cssom's `constraint-invalid?`), confirmed via direct REPL
+   reproduction that a real `<input pattern=\"[0-9]+\" value=\"abc\">`
+   was silently treated as valid at real form-submission time."
   [document node-id]
   (let [node (get-in document [:nodes node-id])
         attrs (:attrs node)
@@ -782,7 +807,13 @@
                                (not (str/blank? text-value)))
                      (parse-number text-value))
         range-min (when range-value (parse-number (:min attrs)))
-        range-max (when range-value (parse-number (:max attrs)))]
+        range-max (when range-value (parse-number (:max attrs)))
+        pattern-regex (when (and (= :input (:tag node))
+                                 (contains? text-input-types type)
+                                 (some? text-value)
+                                 (not (str/blank? text-value))
+                                 (some? (:pattern attrs)))
+                        (compile-pattern (:pattern attrs)))]
     (when-not (or (disabled-control? document node-id)
                   (readonly-control? document node-id)
                   (validation-barred-control? node))
@@ -807,6 +838,9 @@
              max-length
              (> (count text-value) max-length))
         :too-long
+
+        (and pattern-regex (not (re-matches pattern-regex text-value)))
+        :pattern-mismatch
 
         (and range-min (< range-value range-min))
         :range-underflow

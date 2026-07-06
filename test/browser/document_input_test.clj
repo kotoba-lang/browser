@@ -1444,6 +1444,76 @@
     (is (= true (:submitted? result)))
     (is (nil? (:invalid? result)))))
 
+(deftest pattern-mismatch-validation-blocks-submit
+  ;; The confirmed repro from the bug report: before this fix, NEITHER
+  ;; this reducer's real form-submission-blocking validation NOR
+  ;; kotoba-lang/cssom's own :invalid/:valid CSS pseudo-class matching NOR
+  ;; the JS-facing __kotobaValidityState checked `pattern` at all -- a
+  ;; real, common author pattern like <input pattern="[0-9]+" value="abc">
+  ;; silently submitted successfully when a real browser blocks it.
+  (let [page (browser/load-html
+              {:url "kotoba://submit"
+               :html "<main><form id=\"form\"><input id=\"mismatch\" name=\"mismatch\" pattern=\"[0-9]+\" value=\"abc\"><input id=\"ok\" name=\"ok\" pattern=\"[0-9]+\" value=\"123\"><button id=\"go\">Go</button></form></main>"})
+        document (:browser/document page)
+        form (bridge/query-selector document "#form")
+        mismatch (bridge/query-selector document "#mismatch")
+        go (bridge/query-selector document "#go")
+        document (dom/add-event-listener document mismatch "invalid" "mismatch-invalid")
+        result (document-input/reduce-event document {:event/type :pointer/click
+                                                      :node/id go})]
+    (is (= true (:invalid? result)))
+    (is (= [mismatch] (:invalid/control-ids result)))
+    (is (= "pattern-mismatch" (get-in result [:document :nodes mismatch :attrs :validation-reason])))
+    (is (= [[:dom/dispatch-event
+             "mismatch-invalid"
+             {:event/type "invalid" :target/id mismatch :form/id form :submitter/id go :reason :pattern-mismatch}]]
+           (filterv #(= :dom/dispatch-event (first %))
+                    (get-in result [:document :ops]))))))
+
+(deftest pattern-match-does-not-block-submit
+  (let [page (browser/load-html
+              {:url "kotoba://submit"
+               :html "<main><form id=\"form\"><input id=\"ok\" name=\"ok\" pattern=\"[0-9]+\" value=\"123\"><button id=\"go\">Go</button></form></main>"})
+        document (:browser/document page)
+        go (bridge/query-selector document "#go")
+        result (document-input/reduce-event document {:event/type :pointer/click :node/id go})]
+    (is (= true (:submitted? result)))
+    (is (nil? (:invalid? result)))))
+
+(deftest pattern-blank-optional-value-does-not-block-submit
+  ;; pattern is not required's concern -- a blank, non-required value
+  ;; must not be blocked by its own pattern attribute.
+  (let [page (browser/load-html
+              {:url "kotoba://submit"
+               :html "<main><form id=\"form\"><input id=\"blank\" name=\"blank\" pattern=\"[0-9]+\" value=\"\"><button id=\"go\">Go</button></form></main>"})
+        document (:browser/document page)
+        go (bridge/query-selector document "#go")
+        result (document-input/reduce-event document {:event/type :pointer/click :node/id go})]
+    (is (= true (:submitted? result)))
+    (is (nil? (:invalid? result)))))
+
+(deftest malformed-pattern-is-not-enforced-and-does-not-block-submit
+  (let [page (browser/load-html
+              {:url "kotoba://submit"
+               :html "<main><form id=\"form\"><input id=\"field\" name=\"field\" pattern=\"[\" value=\"abc\"><button id=\"go\">Go</button></form></main>"})
+        document (:browser/document page)
+        go (bridge/query-selector document "#go")
+        result (document-input/reduce-event document {:event/type :pointer/click :node/id go})]
+    (is (= true (:submitted? result)))
+    (is (nil? (:invalid? result)))))
+
+(deftest pattern-on-a-textarea-has-no-effect-and-does-not-block-submit
+  ;; Real HTML5: `pattern` is only ever valid on text/search/url/tel/
+  ;; email/password <input>s, never <textarea>.
+  (let [page (browser/load-html
+              {:url "kotoba://submit"
+               :html "<main><form id=\"form\"><textarea id=\"field\" name=\"field\" pattern=\"[0-9]+\">abc</textarea><button id=\"go\">Go</button></form></main>"})
+        document (:browser/document page)
+        go (bridge/query-selector document "#go")
+        result (document-input/reduce-event document {:event/type :pointer/click :node/id go})]
+    (is (= true (:submitted? result)))
+    (is (nil? (:invalid? result)))))
+
 (deftest readonly-controls-submit-data-but-do-not-block-validation
   (let [page (browser/load-html {:url "kotoba://submit"
                                  :html "<main><form id=\"form\"><input id=\"field\" name=\"q\" required readonly><textarea id=\"long\" name=\"long\" maxlength=\"4\" readonly>abcde</textarea><button id=\"go\" name=\"action\" value=\"go\">Go</button></form></main>"})
