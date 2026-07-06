@@ -330,6 +330,18 @@
    "</div>"
    "<div id=\"scroll-position-result\">scroll-position proof: pending...</div>"
    "</section>"
+   "<section id=\"focus-blur-fragment-proof\" style=\"display:flex; flex-direction:column; gap:8\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "Real element.focus()/.blur(), Text.data mutation, and "
+   "document.createDocumentFragment() below -- previously the WASM host "
+   "ABI had no case for any of these four real ops, crashing the ENTIRE "
+   "commit (every other queued mutation too) the instant a real page "
+   "called any one of them."
+   "</p>"
+   "<input id=\"focus-blur-input\" value=\"focus me\">"
+   "<div id=\"focus-blur-text-target\">original text</div>"
+   "<div id=\"focus-blur-fragment-result\">focus-blur-fragment proof: pending...</div>"
+   "</section>"
    "<section style=\"display:flex; flex-direction:row; gap:12px\">"
    "<div style=\"display:flex; flex-direction:column; background:#16202f; border-width:2; border-color:#4fb3a6; padding:10; width:220\">"
    "<p style=\"color:#9fb0c9; font-size:13\">"
@@ -445,6 +457,24 @@
    "scrollBox.scrollTop = 40;"
    "scrollResult.textContent = 'scroll-position proof: scrollTop=' + scrollBox.scrollTop + "
    "', scrollLeft=' + scrollBox.scrollLeft;"
+   "</script>"
+   "<script>"
+   "var fbInput = document.getElementById('focus-blur-input');"
+   "fbInput.focus();"
+   "var focusOk = document.activeElement === fbInput;"
+   "fbInput.blur();"
+   "var blurOk = document.activeElement !== fbInput;"
+   "var textTarget = document.getElementById('focus-blur-text-target');"
+   "var textNode = textTarget.firstChild;"
+   "textNode.data = 'mutated text';"
+   "var fragment = document.createDocumentFragment();"
+   "var fromFragment = document.createElement('span');"
+   "fromFragment.textContent = ' + from fragment';"
+   "fragment.appendChild(fromFragment);"
+   "textTarget.appendChild(fragment);"
+   "var fbResult = document.getElementById('focus-blur-fragment-result');"
+   "fbResult.textContent = 'focus-blur-fragment proof: focus=' + focusOk + ', blur=' + blurOk + "
+   "', text=\"' + textTarget.textContent + '\"';"
    "</script>"
    "<script>"
    "var w = new Worker(" (pr-str worker-url) ");"
@@ -713,6 +743,7 @@
                  duplicate-attribute-proof (element-text doc "dup-attr-result")
                  remove-listener-proof (element-text doc "remove-listener-result")
                  scroll-position-proof (element-text doc "scroll-position-result")
+                 focus-blur-fragment-proof (element-text doc "focus-blur-fragment-result")
                  status-badge-proof (pseudo-content doc "status-badge")
                  step-proofs (mapv #(pseudo-content doc %)
                                    ["step-1" "step-2" "step-3" "step-4"])]
@@ -728,6 +759,7 @@
              (js/console.log "browser.demo: #dup-attr-result ->" (pr-str duplicate-attribute-proof))
              (js/console.log "browser.demo: #remove-listener-result ->" (pr-str remove-listener-proof))
              (js/console.log "browser.demo: #scroll-position-result ->" (pr-str scroll-position-proof))
+             (js/console.log "browser.demo: #focus-blur-fragment-result ->" (pr-str focus-blur-fragment-proof))
              (js/console.log "browser.demo: real ::before generated content ->"
                               "#status-badge:" (pr-str status-badge-proof)
                               "#step-counter lis:" (pr-str step-proofs))
