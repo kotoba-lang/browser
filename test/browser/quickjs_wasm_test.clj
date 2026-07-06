@@ -316,6 +316,12 @@
     (is (str/includes? source "__kotobaSetBooleanAttribute(ref, 'checked', value)"))
     (is (str/includes? source "__kotobaSetBooleanAttribute(ref, 'default-selected', value)"))))
 
+(deftest quickjs-wasm-webapi-shim-exposes-hidden-property-bindings
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "get hidden()"))
+    (is (str/includes? source "set hidden(value)"))
+    (is (str/includes? source "__kotobaSetBooleanAttribute(ref, 'hidden', value)"))))
+
 (deftest quickjs-wasm-webapi-shim-exposes-media-and-script-element-property-bindings
   (let [source quickjs-wasm/webapi-shim-source]
     (is (str/includes? source "get href()"))

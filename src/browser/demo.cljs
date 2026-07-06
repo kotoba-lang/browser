@@ -361,6 +361,14 @@
    "<div id=\"classlist-replace-target\" class=\"loading box\" style=\"display:none\">source (hidden, read by script below)</div>"
    "<div id=\"classlist-replace-result\">classlist-replace proof: pending...</div>"
    "</section>"
+   "<section id=\"hidden-property-proof\" style=\"display:flex; flex-direction:column; gap:8\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "Real element.hidden below -- previously a plain-object property with no "
+   "attribute reflection at all, the most common vanilla-JS show/hide idiom."
+   "</p>"
+   "<div id=\"hidden-property-target\">visible box, toggled by script below</div>"
+   "<div id=\"hidden-property-result\">hidden-property proof: pending...</div>"
+   "</section>"
    "<section style=\"display:flex; flex-direction:row; gap:12px\">"
    "<div style=\"display:flex; flex-direction:column; background:#16202f; border-width:2; border-color:#4fb3a6; padding:10; width:220\">"
    "<p style=\"color:#9fb0c9; font-size:13\">"
@@ -501,6 +509,16 @@
    "var clResult = document.getElementById('classlist-replace-result');"
    "clResult.textContent = 'classlist-replace proof: class=\"' + "
    "clTarget.getAttribute('class') + '\", returned=' + clReturned;"
+   "</script>"
+   "<script>"
+   "var hpTarget = document.getElementById('hidden-property-target');"
+   "var hpBefore = hpTarget.hidden;"
+   "hpTarget.hidden = true;"
+   "var hpAfterAttr = hpTarget.getAttribute('hidden');"
+   "var hpAfterProp = hpTarget.hidden;"
+   "var hpResult = document.getElementById('hidden-property-result');"
+   "hpResult.textContent = 'hidden-property proof: before=' + hpBefore + "
+   "', after attr=' + hpAfterAttr + ', after prop=' + hpAfterProp;"
    "</script>"
    "<script>"
    "var w = new Worker(" (pr-str worker-url) ");"
@@ -771,6 +789,7 @@
                  scroll-position-proof (element-text doc "scroll-position-result")
                  focus-blur-fragment-proof (element-text doc "focus-blur-fragment-result")
                  classlist-replace-proof (element-text doc "classlist-replace-result")
+                 hidden-property-proof (element-text doc "hidden-property-result")
                  status-badge-proof (pseudo-content doc "status-badge")
                  step-proofs (mapv #(pseudo-content doc %)
                                    ["step-1" "step-2" "step-3" "step-4"])]
@@ -788,6 +807,7 @@
              (js/console.log "browser.demo: #scroll-position-result ->" (pr-str scroll-position-proof))
              (js/console.log "browser.demo: #focus-blur-fragment-result ->" (pr-str focus-blur-fragment-proof))
              (js/console.log "browser.demo: #classlist-replace-result ->" (pr-str classlist-replace-proof))
+             (js/console.log "browser.demo: #hidden-property-result ->" (pr-str hidden-property-proof))
              (js/console.log "browser.demo: real ::before generated content ->"
                               "#status-badge:" (pr-str status-badge-proof)
                               "#step-counter lis:" (pr-str step-proofs))

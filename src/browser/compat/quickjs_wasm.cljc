@@ -1469,6 +1469,13 @@
           set required(value) {
             __kotobaSetBooleanAttribute(ref, 'required', value);
           },
+          get hidden() {
+            var node = __kotobaNodeById(__kotobaRefNodeId(ref));
+            return __kotobaBoolAttr(node, 'hidden');
+          },
+          set hidden(value) {
+            __kotobaSetBooleanAttribute(ref, 'hidden', value);
+          },
           get readOnly() {
             var node = __kotobaNodeById(__kotobaRefNodeId(ref));
             return __kotobaBoolAttr(node, 'readonly');
