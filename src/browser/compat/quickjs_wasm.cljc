@@ -1253,6 +1253,36 @@
           }
         });
       }
+      function __kotobaComputedStyle(ref) {
+        // Real getComputedStyle() is genuinely READ-ONLY -- unlike
+        // __kotobaStyle above (element.style), this Proxy has no `set`
+        // trap at all, so an assignment attempt falls through to the
+        // default JS behavior (setting a plain, inert own-property on the
+        // Proxy's empty `{}` target) rather than mutating the real node,
+        // matching a real CSSStyleDeclaration returned by
+        // getComputedStyle() being immune to writes. `:style/<prop>`
+        // attrs are already the real, cascade-computed style -- rebuilt
+        // every page commit by cssom.core/apply-cascade's style-element
+        // from stylesheet rules + :style-inline, confirmed via direct
+        // REPL reproduction: a real element with ONLY a stylesheet rule
+        // (no inline style at all) already reads back the stylesheet's
+        // own value through this exact attr lookup -- so this can reuse
+        // __kotobaStyle's own get-trap logic verbatim rather than
+        // needing any new host-side plumbing.
+        return new Proxy({}, {
+          get: function(_, prop) {
+            if (prop === 'getPropertyValue') return function(name) {
+              var node = __kotobaNodeById(__kotobaRefNodeId(ref));
+              var value = __kotobaAttr(node, __kotobaStyleAttrName(name));
+              return value == null ? '' : String(value);
+            };
+            if (typeof prop === 'symbol') return undefined;
+            var node = __kotobaNodeById(__kotobaRefNodeId(ref));
+            var value = __kotobaAttr(node, __kotobaStyleAttrName(prop));
+            return value == null ? '' : String(value);
+          }
+        });
+      }
       function __kotobaEvent(type, init) {
         var event = init || {};
         event.type = String(type);
@@ -2538,6 +2568,9 @@
       };
       globalThis.dispatchEvent = function(event) {
         return __kotobaDispatchGlobalEvent('window', event);
+      };
+      globalThis.getComputedStyle = function(el) {
+        return __kotobaComputedStyle(el && el.__kotobaRef);
       };
       function __kotobaConsoleArgs(args) {
         return Array.prototype.slice.call(args).map(function(value) {

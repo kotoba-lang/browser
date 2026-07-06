@@ -371,6 +371,13 @@
     (is (str/includes? source "this.setAttribute('scroll-top', Math.max(0, Number(value) || 0))"))
     (is (str/includes? source "this.setAttribute('scroll-left', Math.max(0, Number(value) || 0))"))))
 
+(deftest quickjs-wasm-webapi-shim-exposes-get-computed-style
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "function __kotobaComputedStyle(ref)"))
+    (is (str/includes? source "globalThis.getComputedStyle = function(el)"))
+    (is (str/includes? source "return __kotobaComputedStyle(el && el.__kotobaRef)"))
+    (is (str/includes? source "if (prop === 'getPropertyValue') return function(name)"))))
+
 (deftest quickjs-wasm-webapi-shim-exposes-attribute-convenience-methods
   (let [source quickjs-wasm/webapi-shim-source]
     (is (str/includes? source "toggleAttribute: function(name, force)"))

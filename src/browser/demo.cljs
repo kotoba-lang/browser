@@ -173,7 +173,8 @@
        "#step-counter { counter-reset: step } "
        "#step-counter li { counter-increment: step } "
        "#step-counter li::before { content: counter(step) \". \"; color: #e0a458; font-size: 12 } "
-       ".style-prop-box { color: #4fb3a6 }"))
+       ".style-prop-box { color: #4fb3a6 } "
+       ".computed-style-box { color: #e0a458; font-weight: bold }"))
 
 (defn sample-html
   "The demo page's real HTML, parameterized on `worker-url`/`fetch-url` (the
@@ -403,6 +404,16 @@
    "<div id=\"line-height-box\" style=\"line-height:32; background:#e0a458; width:110; color:#121724\">line-height:32 wraps across several lines at real, visibly wider spacing</div>"
    "</div>"
    "</section>"
+   "<section id=\"get-computed-style-proof\" style=\"display:flex; flex-direction:column; gap:8\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "Real getComputedStyle() below -- previously entirely missing. This box "
+   "has NO inline style at all, only the stylesheet rule "
+   "\".computed-style-box\" above -- the color/bold below prove a script "
+   "can read a PURE cascade-computed value, not just an inline override."
+   "</p>"
+   "<div id=\"computed-style-box\" class=\"computed-style-box\">styled only by the stylesheet, read back by script below</div>"
+   "<div id=\"get-computed-style-result\">getComputedStyle proof: pending...</div>"
+   "</section>"
    "<section style=\"display:flex; flex-direction:row; gap:12px\">"
    "<div style=\"display:flex; flex-direction:column; background:#16202f; border-width:2; border-color:#4fb3a6; padding:10; width:220\">"
    "<p style=\"color:#9fb0c9; font-size:13\">"
@@ -569,6 +580,13 @@
    "var raAfter = raTarget.getAttribute('checked');"
    "var raResult = document.getElementById('remove-attr-result');"
    "raResult.textContent = 'remove-attr proof: before=' + raBefore + ', after=' + raAfter;"
+   "</script>"
+   "<script>"
+   "var csTarget = document.getElementById('computed-style-box');"
+   "var csComputed = getComputedStyle(csTarget);"
+   "var csResult = document.getElementById('get-computed-style-result');"
+   "csResult.textContent = 'getComputedStyle proof: color=' + csComputed.color + "
+   "', fontWeight=' + csComputed.fontWeight + ', inline style attr=' + csTarget.getAttribute('style');"
    "</script>"
    "<script>"
    "var w = new Worker(" (pr-str worker-url) ");"
@@ -842,6 +860,7 @@
                  hidden-property-proof (element-text doc "hidden-property-result")
                  style-property-proof (element-text doc "style-prop-result")
                  remove-attr-proof (element-text doc "remove-attr-result")
+                 get-computed-style-proof (element-text doc "get-computed-style-result")
                  status-badge-proof (pseudo-content doc "status-badge")
                  step-proofs (mapv #(pseudo-content doc %)
                                    ["step-1" "step-2" "step-3" "step-4"])]
@@ -862,6 +881,7 @@
              (js/console.log "browser.demo: #hidden-property-result ->" (pr-str hidden-property-proof))
              (js/console.log "browser.demo: #style-prop-result ->" (pr-str style-property-proof))
              (js/console.log "browser.demo: #remove-attr-result ->" (pr-str remove-attr-proof))
+             (js/console.log "browser.demo: #get-computed-style-result ->" (pr-str get-computed-style-proof))
              (js/console.log "browser.demo: real ::before generated content ->"
                               "#status-badge:" (pr-str status-badge-proof)
                               "#step-counter lis:" (pr-str step-proofs))
