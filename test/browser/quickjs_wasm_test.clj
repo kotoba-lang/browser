@@ -116,6 +116,35 @@
     (is (str/includes? source "!Number.isNaN(rangeValue) && !Number.isNaN(rangeMin) && rangeValue < rangeMin"))
     (is (str/includes? source "!Number.isNaN(rangeValue) && !Number.isNaN(rangeMax) && rangeValue > rangeMax"))))
 
+(deftest quickjs-wasm-webapi-shim-exposes-checkvalidity-and-validity-state
+  ;; element.checkValidity()/.reportValidity()/.validity/.willValidate --
+  ;; previously entirely missing (a repo-wide grep for `checkValidity`/
+  ;; `reportValidity`/`ValidityState`/`willValidate` returned zero JS-facing
+  ;; matches), even though the underlying constraint-validation reason logic
+  ;; already existed (used only for the `:invalid`/`:valid` CSS pseudo-class
+  ;; match). Confirmed via a real CLJS/QuickJS smoke test
+  ;; (quickjs-check-validity-smoke-test) that a real blank `required` input
+  ;; now correctly reports `checkValidity() === false`, `.validity.
+  ;; valueMissing === true`, and a real out-of-range `type="number"` input
+  ;; reports `.validity.rangeOverflow === true` -- all previously
+  ;; unreachable from JS at all.
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "function __kotobaValidationReason(node)"))
+    (is (str/includes? source "return 'valueMissing';"))
+    (is (str/includes? source "if (!Number.isNaN(minlength) && value.length > 0 && value.length < minlength) return 'tooShort';"))
+    (is (str/includes? source "if (!Number.isNaN(maxlength) && value.length > maxlength) return 'tooLong';"))
+    (is (str/includes? source "return 'rangeUnderflow';"))
+    (is (str/includes? source "return 'rangeOverflow';"))
+    (is (str/includes? source "function __kotobaWillValidate(node)"))
+    (is (str/includes? source "function __kotobaValidityState(node)"))
+    (is (str/includes? source "get willValidate()"))
+    (is (str/includes? source "get validity()"))
+    (is (str/includes? source "checkValidity: function()"))
+    (is (str/includes? source "reportValidity: function()"))
+    (is (str/includes? source "valueMissing: reason === 'valueMissing'"))
+    (is (str/includes? source "rangeOverflow: reason === 'rangeOverflow'"))
+    (is (str/includes? source "valid: reason === null"))))
+
 (deftest quickjs-wasm-webapi-shim-exposes-scoped-element-query-selectors
   (let [source quickjs-wasm/webapi-shim-source]
     (is (str/includes? source "function __kotobaScopedQuerySelectorAllIds(rootId, selector)"))

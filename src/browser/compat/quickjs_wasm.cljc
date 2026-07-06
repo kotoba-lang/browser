@@ -516,29 +516,38 @@
         var s = String(v).trim();
         return /^-?\\d+(\\.\\d+)?$/.test(s) ? parseFloat(s) : NaN;
       }
-      function __kotobaConstraintInvalid(node) {
-        if (__kotobaConstraintValidationBarredControl(node)) return false;
+      function __kotobaValidationReason(node) {
+        // real HTML5 ValidityState property names, in the exact same
+        // precedence order as browser.document-input's own (CLJC,
+        // form-submission-time) validation-reason -- this JS copy is what
+        // both a real element.matches(':invalid') AND the new .validity/
+        // checkValidity()/reportValidity() JS-facing surface see, and
+        // previously had no min/max check at all.
+        if (__kotobaConstraintValidationBarredControl(node)) return null;
         var value = __kotobaControlValue(node);
         var tag = String(node && node.tag || '').toLowerCase();
         var type = String(__kotobaAttr(node, 'type') || 'text').toLowerCase();
         var minlength = parseInt(__kotobaAttr(node, 'minlength'), 10);
         var maxlength = parseInt(__kotobaAttr(node, 'maxlength'), 10);
-        // range-underflow/range-overflow, mirroring cssom's range-invalid? and
-        // browser's own validation-reason -- this JS copy is what a real
-        // element.matches(':invalid') sees, and had no min/max check at all.
         var rangeValue = (tag === 'input' && (type === 'number' || type === 'range') && value.trim() !== '')
           ? __kotobaParseNumber(value) : NaN;
         var rangeMin = __kotobaParseNumber(__kotobaAttr(node, 'min'));
         var rangeMax = __kotobaParseNumber(__kotobaAttr(node, 'max'));
-        return __kotobaBoolAttr(node, 'invalid') ||
-          (__kotobaBoolAttr(node, 'required') &&
+        if (__kotobaBoolAttr(node, 'required') &&
             ((tag === 'input' && type === 'checkbox' && !__kotobaBoolAttr(node, 'checked')) ||
              (tag === 'input' && type === 'radio' && !__kotobaRadioRequiredSatisfied(node)) ||
-             (!(tag === 'input' && (type === 'checkbox' || type === 'radio')) && value.trim() === ''))) ||
-          (!Number.isNaN(minlength) && value.length > 0 && value.length < minlength) ||
-          (!Number.isNaN(maxlength) && value.length > maxlength) ||
-          (!Number.isNaN(rangeValue) && !Number.isNaN(rangeMin) && rangeValue < rangeMin) ||
-          (!Number.isNaN(rangeValue) && !Number.isNaN(rangeMax) && rangeValue > rangeMax);
+             (!(tag === 'input' && (type === 'checkbox' || type === 'radio')) && value.trim() === ''))) {
+          return 'valueMissing';
+        }
+        if (!Number.isNaN(minlength) && value.length > 0 && value.length < minlength) return 'tooShort';
+        if (!Number.isNaN(maxlength) && value.length > maxlength) return 'tooLong';
+        if (!Number.isNaN(rangeValue) && !Number.isNaN(rangeMin) && rangeValue < rangeMin) return 'rangeUnderflow';
+        if (!Number.isNaN(rangeValue) && !Number.isNaN(rangeMax) && rangeValue > rangeMax) return 'rangeOverflow';
+        return null;
+      }
+      function __kotobaConstraintInvalid(node) {
+        if (__kotobaConstraintValidationBarredControl(node)) return false;
+        return __kotobaBoolAttr(node, 'invalid') || __kotobaValidationReason(node) != null;
       }
       function __kotobaValidationBarredControl(node) {
         var type = String(__kotobaAttr(node, 'type') || 'text').toLowerCase();
@@ -549,11 +558,45 @@
         return __kotobaValidationBarredControl(node) ||
           (__kotobaEditableFormControl(node) && __kotobaBoolAttr(node, 'readonly'));
       }
-      function __kotobaConstraintValid(node) {
+      function __kotobaWillValidate(node) {
         return __kotobaFormControl(node) &&
           !__kotobaDisabledControl(node) &&
-          !__kotobaConstraintValidationBarredControl(node) &&
-          !__kotobaConstraintInvalid(node);
+          !__kotobaConstraintValidationBarredControl(node);
+      }
+      function __kotobaConstraintValid(node) {
+        return __kotobaWillValidate(node) && !__kotobaConstraintInvalid(node);
+      }
+      function __kotobaValidityState(node) {
+        // Real ValidityState always exposes every flag (false when not
+        // applicable), so JS reading e.g. validity.typeMismatch on a
+        // control this engine never flags gets a real `false`, not
+        // `undefined`. Only the 5 reasons browser.document-input's own
+        // validation-reason already computes are ever real (`valueMissing`/
+        // `tooShort`/`tooLong`/`rangeUnderflow`/`rangeOverflow`) --
+        // `typeMismatch`/`patternMismatch`/`stepMismatch`/`badInput`/
+        // `customError` are an honest, documented scope-cut (no `pattern`/
+        // `step` support, no `setCustomValidity()`, no `type=email|url`
+        // format checking exist anywhere in this engine yet), always
+        // `false`. Unlike the :invalid/:valid CSS pseudo-class match (which
+        // also consults the historical, form-submission-time `invalid`
+        // attr set by browser.document-input's dispatch-invalid-events),
+        // .validity is real HTML5 semantics: always the LIVE, freshly
+        // recomputed constraint state, never the historical submit-time
+        // marker.
+        var reason = __kotobaWillValidate(node) ? __kotobaValidationReason(node) : null;
+        return {
+          valueMissing: reason === 'valueMissing',
+          typeMismatch: false,
+          patternMismatch: false,
+          tooShort: reason === 'tooShort',
+          tooLong: reason === 'tooLong',
+          rangeUnderflow: reason === 'rangeUnderflow',
+          rangeOverflow: reason === 'rangeOverflow',
+          stepMismatch: false,
+          badInput: false,
+          customError: false,
+          valid: reason === null
+        };
       }
       function __kotobaParseSimpleSelector(selector) {
         selector = String(selector || '').trim();
@@ -1588,6 +1631,12 @@
           set selectionEnd(value) {
             this.setSelectionRange(this.selectionStart, Number(value));
           },
+          get willValidate() {
+            return __kotobaWillValidate(__kotobaNodeById(__kotobaRefNodeId(ref)));
+          },
+          get validity() {
+            return __kotobaValidityState(__kotobaNodeById(__kotobaRefNodeId(ref)));
+          },
           get scrollTop() {
             // The real host-bridged half of this already exists --
             // document_input.cljc's reduce-scroll-event writes the exact
@@ -2156,6 +2205,21 @@
               node['selection-start'] = Math.min(s, e);
               node['selection-end'] = Math.max(s, e);
             }
+          },
+          checkValidity: function() {
+            return __kotobaValidityState(__kotobaNodeById(__kotobaRefNodeId(ref))).valid;
+          },
+          reportValidity: function() {
+            // Honest scope-cut: a real reportValidity() also shows native
+            // validation-bubble UI and scrolls the first invalid control
+            // into view (gated on a cancelable `invalid` event) -- this
+            // engine has neither a validation-bubble UI nor scrollIntoView/
+            // getBoundingClientRect geometry to scroll with. Best-effort
+            // substitute: focus the control (already a real op) when
+            // invalid, same as checkValidity() otherwise.
+            var valid = this.checkValidity();
+            if (!valid) this.focus();
+            return valid;
           },
           addEventListener: function(type, handler) {
             var handlerId = __kotobaHandlerId();

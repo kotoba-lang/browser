@@ -414,6 +414,16 @@
    "<div id=\"computed-style-box\" class=\"computed-style-box\">styled only by the stylesheet, read back by script below</div>"
    "<div id=\"get-computed-style-result\">getComputedStyle proof: pending...</div>"
    "</section>"
+   "<section id=\"check-validity-proof\" style=\"display:flex; flex-direction:column; gap:8\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "Real element.checkValidity()/.validity/.willValidate below -- previously "
+   "entirely missing, even though the same constraint-validation logic "
+   "already drove the :invalid/:valid CSS pseudo-classes. This required, "
+   "empty input's own real, live validity is read back by script below."
+   "</p>"
+   "<input id=\"check-validity-target\" required placeholder=\"required field, left blank\">"
+   "<div id=\"check-validity-result\">checkValidity proof: pending...</div>"
+   "</section>"
    "<section id=\"font-family-proof\" style=\"display:flex; flex-direction:column; gap:8\">"
    "<p style=\"color:#9fb0c9; font-size:13\">"
    "Real CSS font-family below -- previously read from NOWHERE at all, "
@@ -633,6 +643,12 @@
    "var csResult = document.getElementById('get-computed-style-result');"
    "csResult.textContent = 'getComputedStyle proof: color=' + csComputed.color + "
    "', fontWeight=' + csComputed.fontWeight + ', inline style attr=' + csTarget.getAttribute('style');"
+   "</script>"
+   "<script>"
+   "var cvTarget = document.getElementById('check-validity-target');"
+   "var cvResult = document.getElementById('check-validity-result');"
+   "cvResult.textContent = 'checkValidity proof: checkValidity()=' + cvTarget.checkValidity() + "
+   "', validity.valueMissing=' + cvTarget.validity.valueMissing + ', willValidate=' + cvTarget.willValidate;"
    "</script>"
    "<script>"
    "var w = new Worker(" (pr-str worker-url) ");"
@@ -907,6 +923,7 @@
                  style-property-proof (element-text doc "style-prop-result")
                  remove-attr-proof (element-text doc "remove-attr-result")
                  get-computed-style-proof (element-text doc "get-computed-style-result")
+                 check-validity-proof (element-text doc "check-validity-result")
                  status-badge-proof (pseudo-content doc "status-badge")
                  step-proofs (mapv #(pseudo-content doc %)
                                    ["step-1" "step-2" "step-3" "step-4"])]
@@ -928,6 +945,7 @@
              (js/console.log "browser.demo: #style-prop-result ->" (pr-str style-property-proof))
              (js/console.log "browser.demo: #remove-attr-result ->" (pr-str remove-attr-proof))
              (js/console.log "browser.demo: #get-computed-style-result ->" (pr-str get-computed-style-proof))
+             (js/console.log "browser.demo: #check-validity-result ->" (pr-str check-validity-proof))
              (js/console.log "browser.demo: real ::before generated content ->"
                               "#status-badge:" (pr-str status-badge-proof)
                               "#step-counter lis:" (pr-str step-proofs))
