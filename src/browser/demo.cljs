@@ -286,6 +286,14 @@
    "</p>"
    "<ul id=\"replace-child-list\"><li>first</li><li id=\"replace-target\">to be replaced</li><li>last</li></ul>"
    "</section>"
+   "<section id=\"duplicate-attribute-proof\" style=\"display:flex; flex-direction:column; gap:8\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "Real duplicate class attribute below -- previously the LAST "
+   "occurrence silently won; real HTML5 tokenization keeps the FIRST."
+   "</p>"
+   "<div id=\"dup-attr-source\" class=\"box-first\" class=\"box-second\" style=\"display:none\">source (hidden, read by script below)</div>"
+   "<div id=\"dup-attr-result\">duplicate-attribute proof: pending...</div>"
+   "</section>"
    "<section style=\"display:flex; flex-direction:row; gap:12px\">"
    "<div style=\"display:flex; flex-direction:column; background:#16202f; border-width:2; border-color:#4fb3a6; padding:10; width:220\">"
    "<p style=\"color:#9fb0c9; font-size:13\">"
@@ -375,6 +383,12 @@
    "var rcNew = document.createElement('li');"
    "rcNew.textContent = 'replaced';"
    "rcList.replaceChild(rcNew, rcOld);"
+   "</script>"
+   "<script>"
+   "var dupSource = document.getElementById('dup-attr-source');"
+   "var dupResult = document.getElementById('dup-attr-result');"
+   "dupResult.textContent = 'duplicate-attribute proof: class=\"' + "
+   "dupSource.getAttribute('class') + '\"';"
    "</script>"
    "<script>"
    "var w = new Worker(" (pr-str worker-url) ");"
@@ -640,6 +654,7 @@
                  worker-proof (element-text doc "worker-proof")
                  fetch-proof (element-text doc "fetch-proof")
                  constraint-invalid-proof (element-text doc "constraint-invalid-result")
+                 duplicate-attribute-proof (element-text doc "dup-attr-result")
                  status-badge-proof (pseudo-content doc "status-badge")
                  step-proofs (mapv #(pseudo-content doc %)
                                    ["step-1" "step-2" "step-3" "step-4"])]
@@ -652,6 +667,7 @@
              (js/console.log "browser.demo: #worker-proof ->" (pr-str worker-proof))
              (js/console.log "browser.demo: #fetch-proof ->" (pr-str fetch-proof))
              (js/console.log "browser.demo: #constraint-invalid-result ->" (pr-str constraint-invalid-proof))
+             (js/console.log "browser.demo: #dup-attr-result ->" (pr-str duplicate-attribute-proof))
              (js/console.log "browser.demo: real ::before generated content ->"
                               "#status-badge:" (pr-str status-badge-proof)
                               "#step-counter lis:" (pr-str step-proofs))
