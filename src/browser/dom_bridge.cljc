@@ -309,6 +309,71 @@
     {:document document
      :node/id node-id}))
 
+(defn- insert-adjacent-html
+  "Real `Element.insertAdjacentHTML(position, html)`: parses `html-text` as
+   a real HTML fragment (the SAME `html/parse-into-document` +
+   `import-node*` machinery `set-inner-html`/`set-outer-html` already use,
+   just landing the parsed nodes at one of 4 positions relative to
+   `node-id` instead of replacing its content/itself) and inserts its
+   top-level nodes, in order, at `position`:
+
+     \"beforebegin\" -- as siblings immediately BEFORE `node-id`, under
+                        `node-id`'s own parent (a no-op if `node-id` has
+                        no parent, matching real `insertAdjacentHTML` on a
+                        detached node -- there's nowhere to insert a
+                        sibling).
+     \"afterbegin\"  -- as the FIRST children of `node-id`, before
+                        whatever its current first child is (or appended
+                        if `node-id` currently has none).
+     \"beforeend\"   -- as the LAST children of `node-id` (plain append).
+     \"afterend\"    -- as siblings immediately AFTER `node-id`, under
+                        `node-id`'s own parent (same no-op-if-detached
+                        rule as beforebegin).
+
+   Each of the 4 branches inserts every parsed top-level node relative to
+   the SAME captured anchor (the original first-child / next-sibling /
+   `node-id` itself, computed once before the loop) rather than
+   re-deriving it after each insertion -- this is what keeps multiple
+   top-level nodes in a single `html` string (e.g. `\"<b>a</b><i>b</i>\"`)
+   landing in their own correct relative order instead of reversed."
+  [document node-id position html-text]
+  (let [fragment-document (html/parse-into-document html-text)
+        fragment-root (:root fragment-document)
+        children (vec (get-in fragment-document [:nodes fragment-root :children] []))
+        import-all (fn [document insert-fn]
+                     (reduce (fn [document child-id]
+                               (let [[imported-id document] (import-node* document fragment-document child-id)]
+                                 (insert-fn document imported-id)))
+                             document
+                             children))]
+    (case position
+      "beforebegin"
+      (if-let [parent-id (get (parent-index document) node-id)]
+        {:document (import-all document #(dom/insert-before %1 parent-id %2 node-id))
+         :node/id node-id}
+        {:document document :node/id node-id})
+
+      "afterbegin"
+      (let [first-child (first (get-in document [:nodes node-id :children] []))]
+        {:document (import-all document #(dom/insert-before %1 node-id %2 first-child))
+         :node/id node-id})
+
+      "beforeend"
+      {:document (import-all document #(dom/append-child %1 node-id %2))
+       :node/id node-id}
+
+      "afterend"
+      (if-let [parent-id (get (parent-index document) node-id)]
+        (let [siblings (vec (get-in document [:nodes parent-id :children] []))
+              idx (.indexOf siblings node-id)
+              next-id (when (and (<= 0 idx) (< (inc idx) (count siblings)))
+                        (nth siblings (inc idx)))]
+          {:document (import-all document #(dom/insert-before %1 parent-id %2 next-id))
+           :node/id node-id})
+        {:document document :node/id node-id})
+
+      {:document document :node/id node-id})))
+
 (defn- split-text-node
   [document node-id offset]
   (let [text (str (get-in document [:nodes node-id :text] ""))
@@ -371,7 +436,7 @@
         document))))
 
 (defn apply-mutation
-  [document {:keys [dom/op tag attrs attr value text title html offset deep?] :as mutation}]
+  [document {:keys [dom/op tag attrs attr value text title html offset deep? position] :as mutation}]
   (case op
     :create-element
     (let [[id document] (dom/create-element document tag)
@@ -411,6 +476,9 @@
 
     :set-outer-html
     (set-outer-html document (:node/id mutation) html)
+
+    :insert-adjacent-html
+    (insert-adjacent-html document (:node/id mutation) position html)
 
     :normalize
     (let [node-id (:node/id mutation)]

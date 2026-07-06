@@ -1935,6 +1935,37 @@
            (mapv :result (:capability/results state))))
     (is (= [true true true true] (mapv :ok? (:capability/results state))))))
 
+(deftest quickjs-real-insert-adjacent-html-capability-request-bridges-through-the-full-pipeline
+  ;; The same end-to-end proof pattern as this file's own event-listen/
+  ;; dispatch test right below: a fake :script-engine/engine returning a
+  ;; REAL :dom/mutate :insert-adjacent-html capability request (the exact
+  ;; shape a real QuickJS VM's own
+  ;; element.insertAdjacentHTML('afterend', ...) call produces, per this
+  ;; cycle's new quickjs_wasm.cljc binding), run through the REAL
+  ;; execution/evaluate! -> dom-bridge/apply-mutation pipeline, proving
+  ;; the wire contract this cycle's new insert-adjacent-html fn expects
+  ;; actually matches what a real script would send.
+  (let [page (browser/load-html {:url "kotoba://quickjs"
+                                 :html "<main><p id=\"first\">First</p></main>"})
+        adapter (quickjs/new-adapter {:origin "kotoba://quickjs"
+                                      :profile-id "default"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :document (:browser/document page)
+                :engine (fn [_]
+                          {:result :ok
+                           :requests [{:capability :dom/mutate
+                                       :dom/op :insert-adjacent-html
+                                       :node/selector "#first"
+                                       :position "afterend"
+                                       :html "<p id=\"second\">Second</p>"}]})})
+        state (execution/evaluate! state {:source "first.insertAdjacentHTML('afterend', '<p id=\"second\">Second</p>')"})
+        document (:document state)
+        second-p (bridge/query-selector document "#second")]
+    (is (some? second-p))
+    (is (= "FirstSecond" (dom/text-content document)))
+    (is (= [true] (mapv :ok? (:capability/results state))))))
+
 (deftest quickjs-event-listen-and-dispatch-apply-through-dom-bridge
   (let [page (browser/load-html {:url "kotoba://quickjs"
                                  :html "<main><button id=\"go\">Go</button></main>"})

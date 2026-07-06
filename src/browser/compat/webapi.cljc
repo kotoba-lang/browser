@@ -413,6 +413,7 @@
              :getAttribute :hasAttribute :removeAttribute
              :addEventListener :removeEventListener :dispatchEvent :textContent :nodeValue :data :classList
              :append :prepend :before :after :replaceWith :remove
+             :insertAdjacentHTML :insertAdjacentElement :insertAdjacentText
              :cloneNode :innerHTML :outerHTML
              :appendData :deleteData :insertData :replaceData :substringData
              :splitText :normalize

@@ -333,6 +333,106 @@
     (is (not (some #{old} (get-in document [:nodes root :children]))))
     (is (nil? (bridge/query-selector document "#old")))))
 
+(deftest mutation-bridge-inserts-adjacent-html-beforeend
+  ;; insertAdjacentHTML('beforeend', ...) -- one of the most common
+  ;; real-world DOM-mutation APIs (dynamic list/template row insertion
+  ;; without wiping existing children the way innerHTML += would) had NO
+  ;; implementation anywhere in this codebase at all before this fix --
+  ;; confirmed via grep across the whole repo returning zero hits.
+  (let [page (browser/load-html {:url "kotoba://dom"
+                                 :html "<main id=\"root\"><p id=\"first\">First</p></main>"})
+        document (:browser/document page)
+        root (bridge/query-selector document "#root")
+        result (bridge/apply-mutation document {:dom/op :insert-adjacent-html
+                                                :node/id root
+                                                :position "beforeend"
+                                                :html "<p id=\"last\">Last</p>"})
+        document (:document result)
+        first-p (bridge/query-selector document "#first")
+        last-p (bridge/query-selector document "#last")]
+    (is (= [first-p last-p] (get-in document [:nodes root :children])))
+    (is (= "FirstLast" (dom/text-content document)))))
+
+(deftest mutation-bridge-inserts-adjacent-html-afterbegin
+  (let [page (browser/load-html {:url "kotoba://dom"
+                                 :html "<main id=\"root\"><p id=\"last\">Last</p></main>"})
+        document (:browser/document page)
+        root (bridge/query-selector document "#root")
+        result (bridge/apply-mutation document {:dom/op :insert-adjacent-html
+                                                :node/id root
+                                                :position "afterbegin"
+                                                :html "<p id=\"first\">First</p>"})
+        document (:document result)
+        first-p (bridge/query-selector document "#first")
+        last-p (bridge/query-selector document "#last")]
+    (is (= [first-p last-p] (get-in document [:nodes root :children])))
+    (is (= "FirstLast" (dom/text-content document)))))
+
+(deftest mutation-bridge-inserts-adjacent-html-beforebegin
+  (let [page (browser/load-html {:url "kotoba://dom"
+                                 :html "<main id=\"root\"><p id=\"target\">Target</p></main>"})
+        document (:browser/document page)
+        root (bridge/query-selector document "#root")
+        target (bridge/query-selector document "#target")
+        result (bridge/apply-mutation document {:dom/op :insert-adjacent-html
+                                                :node/id target
+                                                :position "beforebegin"
+                                                :html "<p id=\"before\">Before</p>"})
+        document (:document result)
+        before (bridge/query-selector document "#before")]
+    (is (= [before target] (get-in document [:nodes root :children]))
+        "the new sibling lands under target's own PARENT, before target -- not inside target")
+    (is (= "BeforeTarget" (dom/text-content document)))))
+
+(deftest mutation-bridge-inserts-adjacent-html-afterend
+  (let [page (browser/load-html {:url "kotoba://dom"
+                                 :html "<main id=\"root\"><p id=\"target\">Target</p></main>"})
+        document (:browser/document page)
+        root (bridge/query-selector document "#root")
+        target (bridge/query-selector document "#target")
+        result (bridge/apply-mutation document {:dom/op :insert-adjacent-html
+                                                :node/id target
+                                                :position "afterend"
+                                                :html "<p id=\"after\">After</p>"})
+        document (:document result)
+        after (bridge/query-selector document "#after")]
+    (is (= [target after] (get-in document [:nodes root :children])))
+    (is (= "TargetAfter" (dom/text-content document)))))
+
+(deftest mutation-bridge-inserts-adjacent-html-preserves-relative-order-of-multiple-top-level-nodes
+  ;; A single insertAdjacentHTML call's html argument can itself contain
+  ;; MULTIPLE top-level nodes (e.g. "<b>a</b><i>b</i>") -- each must land
+  ;; in its own correct relative order, not reversed, regardless of which
+  ;; position is used.
+  (let [page (browser/load-html {:url "kotoba://dom"
+                                 :html "<main id=\"root\"><p id=\"target\">Target</p></main>"})
+        document (:browser/document page)
+        root (bridge/query-selector document "#root")
+        target (bridge/query-selector document "#target")
+        result (bridge/apply-mutation document {:dom/op :insert-adjacent-html
+                                                :node/id target
+                                                :position "afterend"
+                                                :html "<b id=\"b\">B</b><i id=\"i\">I</i>"})
+        document (:document result)
+        b (bridge/query-selector document "#b")
+        i (bridge/query-selector document "#i")]
+    (is (= [target b i] (get-in document [:nodes root :children])))
+    (is (= "TargetBI" (dom/text-content document)))))
+
+(deftest mutation-bridge-inserts-adjacent-html-beforebegin-on-a-detached-node-is-a-safe-no-op
+  ;; beforebegin/afterend need node-id's own PARENT -- a detached node (no
+  ;; parent at all, e.g. the real document root itself) has nowhere for a
+  ;; new SIBLING to go, so this must degrade to a genuine no-op rather
+  ;; than crash.
+  (let [page (browser/load-html {:url "kotoba://dom" :html "<main id=\"root\">hi</main>"})
+        document (:browser/document page)
+        root (:root document)
+        result (bridge/apply-mutation document {:dom/op :insert-adjacent-html
+                                                :node/id root
+                                                :position "beforebegin"
+                                                :html "<p>x</p>"})]
+    (is (= document (:document result)))))
+
 (deftest mutation-bridge-removes-attributes
   (let [page (browser/load-html {:url "kotoba://dom"
                                  :html "<main><p id=\"note\" data-temp=\"1\" class=\"note\">Hello</p></main>"})

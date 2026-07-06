@@ -1732,6 +1732,34 @@
               __kotobaRefreshText(parent['node/id']);
             }
           },
+          insertAdjacentHTML: function(position, html) {
+            var request = {
+              capability: 'dom/mutate',
+              'dom/op': 'insert-adjacent-html',
+              position: String(position),
+              html: String(html)
+            };
+            Object.assign(request, __kotobaNodeRequest(ref, 'node'));
+            globalThis.__kotobaRequests.push(request);
+          },
+          insertAdjacentElement: function(position, element) {
+            switch (String(position)) {
+              case 'beforebegin': this.before(element); break;
+              case 'afterbegin': this.prepend(element); break;
+              case 'beforeend': this.append(element); break;
+              case 'afterend': this.after(element); break;
+            }
+            return element;
+          },
+          insertAdjacentText: function(position, text) {
+            var node = __kotobaTextNode(String(text));
+            switch (String(position)) {
+              case 'beforebegin': this.before(node); break;
+              case 'afterbegin': this.prepend(node); break;
+              case 'beforeend': this.append(node); break;
+              case 'afterend': this.after(node); break;
+            }
+          },
           matches: function(selector) {
             return __kotobaMatches(__kotobaNodeById(__kotobaRefNodeId(ref)), selector);
           },
