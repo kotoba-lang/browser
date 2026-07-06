@@ -563,6 +563,30 @@
     (is (str/includes? source "globalThis.addEventListener = function(type, handler)"))
     (is (str/includes? source "globalThis.removeEventListener = function(type, handler)"))))
 
+(deftest quickjs-wasm-webapi-shim-exposes-event-modifier-keys
+  ;; KeyboardEvent/MouseEvent shiftKey/ctrlKey/altKey/metaKey -- previously
+  ;; silently dropped: neither constructor read them from its own init
+  ;; dict at all (a real `new KeyboardEvent('keydown', {})` read `undefined`
+  ;; for all four instead of the real spec default `false`), and the
+  ;; outbound __kotobaEventPayload builder used by every dispatchEvent had
+  ;; zero modifier-key fields either. Confirmed via a real CLJS/QuickJS
+  ;; smoke test (quickjs-event-modifier-keys-smoke-test) that a real
+  ;; KeyboardEvent/MouseEvent with no modifiers given now correctly defaults
+  ;; all four to `false` (previously `undefined`) -- while an already-set
+  ;; modifier (e.g. `{shiftKey: true}`) had actually been reading back
+  ;; correctly all along, an implementation-detail passthrough (the
+  ;; constructor's `event` object IS its own `init` object, so any property
+  ;; already present on `init` survived untouched even before this fix).
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "event.shiftKey = Boolean(init.shiftKey);"))
+    (is (str/includes? source "event.ctrlKey = Boolean(init.ctrlKey);"))
+    (is (str/includes? source "event.altKey = Boolean(init.altKey);"))
+    (is (str/includes? source "event.metaKey = Boolean(init.metaKey);"))
+    (is (str/includes? source "shiftKey: Boolean(event && event.shiftKey),"))
+    (is (str/includes? source "ctrlKey: Boolean(event && event.ctrlKey),"))
+    (is (str/includes? source "altKey: Boolean(event && event.altKey),"))
+    (is (str/includes? source "metaKey: Boolean(event && event.metaKey)"))))
+
 (deftest quickjs-wasm-webapi-shim-exposes-location-capability
   (let [source quickjs-wasm/webapi-shim-source]
     (is (str/includes? source "globalThis.location = globalThis.location ||"))

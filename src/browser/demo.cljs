@@ -472,6 +472,17 @@
    "<input id=\"validation-message-target\" required>"
    "<div id=\"validation-message-result\">validation-message proof: pending...</div>"
    "</section>"
+   "<section id=\"event-modifier-keys-proof\" style=\"display:flex; flex-direction:column; gap:8\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "Real KeyboardEvent/MouseEvent shiftKey/ctrlKey/altKey/metaKey below -- "
+   "previously silently dropped by both constructors (defaulting to "
+   "undefined instead of false) and by the outbound dispatchEvent payload. "
+   "A real shift+ctrl click dispatched below is read back by its own "
+   "listener via script."
+   "</p>"
+   "<button id=\"event-modifier-keys-target\">click target</button>"
+   "<div id=\"event-modifier-keys-result\">event-modifier-keys proof: pending...</div>"
+   "</section>"
    "<section id=\"font-family-proof\" style=\"display:flex; flex-direction:column; gap:8\">"
    "<p style=\"color:#9fb0c9; font-size:13\">"
    "Real CSS font-family below -- previously read from NOWHERE at all, "
@@ -771,6 +782,15 @@
    "', validationMessage=' + JSON.stringify(vmTarget.validationMessage);"
    "</script>"
    "<script>"
+   "var emkTarget = document.getElementById('event-modifier-keys-target');"
+   "var emkResult = document.getElementById('event-modifier-keys-result');"
+   "emkTarget.addEventListener('click', function(e) {"
+   "emkResult.textContent = 'event-modifier-keys proof: shiftKey=' + e.shiftKey + "
+   "', ctrlKey=' + e.ctrlKey + ', altKey=' + e.altKey + ', metaKey=' + e.metaKey;"
+   "});"
+   "emkTarget.dispatchEvent(new MouseEvent('click', {shiftKey: true, ctrlKey: true}));"
+   "</script>"
+   "<script>"
    "var w = new Worker(" (pr-str worker-url) ");"
    "w.onmessage = function(e) { document.getElementById('worker-proof').textContent = "
    "'Worker proof: real 2nd QuickJS context computed 21 * 2 -> ' + e.data; };"
@@ -1049,6 +1069,7 @@
                  type-mismatch-proof (element-text doc "type-mismatch-result")
                  step-mismatch-proof (element-text doc "step-mismatch-result")
                  validation-message-proof (element-text doc "validation-message-result")
+                 event-modifier-keys-proof (element-text doc "event-modifier-keys-result")
                  status-badge-proof (pseudo-content doc "status-badge")
                  step-proofs (mapv #(pseudo-content doc %)
                                    ["step-1" "step-2" "step-3" "step-4"])]
@@ -1076,6 +1097,7 @@
              (js/console.log "browser.demo: #type-mismatch-result ->" (pr-str type-mismatch-proof))
              (js/console.log "browser.demo: #step-mismatch-result ->" (pr-str step-mismatch-proof))
              (js/console.log "browser.demo: #validation-message-result ->" (pr-str validation-message-proof))
+             (js/console.log "browser.demo: #event-modifier-keys-result ->" (pr-str event-modifier-keys-proof))
              (js/console.log "browser.demo: real ::before generated content ->"
                               "#status-badge:" (pr-str status-badge-proof)
                               "#step-counter lis:" (pr-str step-proofs))

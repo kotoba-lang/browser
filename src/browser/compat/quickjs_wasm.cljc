@@ -1472,7 +1472,11 @@
           code: event && event.code != null ? String(event.code) : null,
           button: event && event.button != null ? Number(event.button) : null,
           clientX: event && event.clientX != null ? Number(event.clientX) : null,
-          clientY: event && event.clientY != null ? Number(event.clientY) : null
+          clientY: event && event.clientY != null ? Number(event.clientY) : null,
+          shiftKey: Boolean(event && event.shiftKey),
+          ctrlKey: Boolean(event && event.ctrlKey),
+          altKey: Boolean(event && event.altKey),
+          metaKey: Boolean(event && event.metaKey)
         };
       }
       function __kotobaDispatch(ref, event) {
@@ -2636,6 +2640,10 @@
         event.button = init.button == null ? 0 : Number(init.button);
         event.clientX = init.clientX == null ? 0 : Number(init.clientX);
         event.clientY = init.clientY == null ? 0 : Number(init.clientY);
+        event.shiftKey = Boolean(init.shiftKey);
+        event.ctrlKey = Boolean(init.ctrlKey);
+        event.altKey = Boolean(init.altKey);
+        event.metaKey = Boolean(init.metaKey);
         return event;
       };
       globalThis.KeyboardEvent = function(type, init) {
@@ -2644,6 +2652,10 @@
         event.key = init.key == null ? '' : String(init.key);
         event.code = init.code == null ? '' : String(init.code);
         event.repeat = Boolean(init.repeat);
+        event.shiftKey = Boolean(init.shiftKey);
+        event.ctrlKey = Boolean(init.ctrlKey);
+        event.altKey = Boolean(init.altKey);
+        event.metaKey = Boolean(init.metaKey);
         return event;
       };
       globalThis.MutationObserver = function(callback) {
