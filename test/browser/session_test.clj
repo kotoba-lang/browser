@@ -3494,6 +3494,123 @@
     (is (= ["kotoba://one" "kotoba://two"]
            (mapv :url (get-in forward [:browser.session/navigation :entries]))))))
 
+(deftest script-pushstate-bridges-into-the-real-navigation-stack
+  ;; The confirmed gap: quickjs-execution's own sandboxed :history/entries
+  ;; model already tracks a real history.pushState(...) call correctly,
+  ;; but nothing ever read it back into THIS session's own real
+  ;; :browser.session/navigation stack (the one back!/forward!/reload!
+  ;; actually operate on) -- confirmed via direct REPL reproduction that
+  ;; a script's pushState call had zero effect on session-level state
+  ;; before this fix.
+  (let [h (host/recording-host)
+        s (-> (session/new-session {:host h})
+              (session/load-html! {:url "kotoba://start"
+                                   :html "<main>hi</main>"}))
+        pushed (session/commit-script-state!
+                s {:history/entries [{:url "/one" :title "One" :state {:a 1}}]
+                   :history/index 0})]
+    (is (= ["kotoba://start" "/one"]
+           (mapv :url (get-in pushed [:browser.session/navigation :entries])))
+        "pushState's own URL is bridged as a real, new navigation entry")
+    (is (= "/one" (get-in pushed [:browser.session/page :browser/url]))
+        "the session's own current page URL reflects the pushed URL too")
+    (is (= "hi" (-> pushed :browser.session/page :browser/document dom/text-content))
+        "pushState never touches the document -- the same DOM survives, only the URL changes")))
+
+(deftest script-pushstate-across-two-script-tags-continues-without-duplicating
+  ;; A second <script> tag's own pushState call (its sandboxed
+  ;; :history/entries now includes BOTH this tag's and the previous tag's
+  ;; own push) must bridge only the genuinely NEW entry, not re-bridge
+  ;; the one a previous script tag's own commit-script-state! call
+  ;; already bridged.
+  (let [h (host/recording-host)
+        s (-> (session/new-session {:host h})
+              (session/load-html! {:url "kotoba://start" :html "<main>hi</main>"}))
+        after-first (session/commit-script-state!
+                     s {:history/entries [{:url "/one" :title "One" :state nil}]
+                        :history/index 0})
+        after-second (session/commit-script-state!
+                      after-first {:history/entries [{:url "/one" :title "One" :state nil}
+                                                       {:url "/two" :title "Two" :state nil}]
+                                   :history/index 1})]
+    (is (= ["kotoba://start" "/one" "/two"]
+           (mapv :url (get-in after-second [:browser.session/navigation :entries])))
+        "both real pushes land, in order, with no duplicate entry for /one")
+    (is (= "/two" (get-in after-second [:browser.session/page :browser/url])))))
+
+(deftest script-with-no-history-activity-does-not-affect-navigation
+  ;; The other half of the contract: a script that never calls pushState
+  ;; at all (no :history/entries key, matching every existing
+  ;; commit-script-state! test above this one) must leave the real
+  ;; navigation stack completely untouched.
+  (let [h (host/recording-host)
+        s (-> (session/new-session {:host h})
+              (session/load-html! {:url "kotoba://start" :html "<main>hi</main>"}))
+        unaffected (session/commit-script-state!
+                    s {:document (get-in s [:browser.session/page :browser/document])
+                       :result :ok})]
+    (is (= (mapv :url (get-in s [:browser.session/navigation :entries]))
+           (mapv :url (get-in unaffected [:browser.session/navigation :entries]))))
+    (is (= 0 (:browser.session/script-history-bridged-count unaffected)))))
+
+(deftest real-navigation-resets-the-pushstate-bridged-count
+  ;; quickjs-execution/new-state always starts a fresh page generation's
+  ;; sandboxed :history/entries at [] regardless of this session's own
+  ;; real navigation depth -- so the bridged-count this session tracks
+  ;; must reset on every REAL navigation too, or the next page's very
+  ;; first pushState (sandboxed index 0) would be wrongly skipped as
+  ;; \"already bridged.\"
+  (let [h (host/recording-host)
+        s (-> (session/new-session {:host h})
+              (session/load-html! {:url "kotoba://start" :html "<main>hi</main>"})
+              (session/commit-script-state!
+               {:history/entries [{:url "/one" :title "One" :state nil}]
+                :history/index 0}))
+        next-page (session/load-html! s {:url "kotoba://second" :html "<main>second</main>"})
+        pushed-again (session/commit-script-state!
+                      next-page {:history/entries [{:url "/again" :title "Again" :state nil}]
+                                 :history/index 0})]
+    (is (= 0 (:browser.session/script-history-bridged-count next-page))
+        "a real navigation resets the counter")
+    (is (= ["kotoba://start" "/one" "kotoba://second" "/again"]
+           (mapv :url (get-in pushed-again [:browser.session/navigation :entries])))
+        "the next page's own first pushState correctly bridges again, not skipped")))
+
+(deftest run-script-real-pushstate-capability-request-bridges-through-the-full-pipeline
+  ;; The most end-to-end proof of all: not commit-script-state! called
+  ;; directly with a hand-built :history/entries map (every test above),
+  ;; but a fake :script-engine/engine returning a REAL :history/push-state
+  ;; CAPABILITY REQUEST -- the exact shape a real QuickJS VM's own
+  ;; globalThis.history.pushState(...) call produces (see
+  ;; quickjs-wasm's webapi shim) -- run through the REAL run-script! ->
+  ;; quickjs-execution/evaluate! capability-processing pipeline
+  ;; (history-push-state-result et al., already proven correct by
+  ;; quickjs-execution_test's own quickjs-history-state-records-
+  ;; sandboxed-entries), proving the bridge added by this fix reaches all
+  ;; the way from a real capability request to this session's own real
+  ;; navigation stack -- mirroring the existing fake-engine pattern
+  ;; run-geolocation-probe! above already established for a different
+  ;; capability.
+  (let [h (host/recording-host)
+        s (-> (session/new-session {:host h})
+              (session/load-html! {:url "https://app.example/start" :html "<main>hi</main>"}))
+        s (assoc s :browser.session/script-engine
+                 {:script-engine/engine
+                  (fn [_]
+                    {:result :ok
+                     :requests [{:request/id "push-1"
+                                 :capability :history/push-state
+                                 :url "/one"
+                                 :title "One"
+                                 :state {:a 1}}]})})
+        after (quickjs-runner/run-script!
+               s {:script/type :classic
+                  :script/source "history.pushState({a:1}, 'One', '/one');"
+                  :script/url "https://app.example/start"})]
+    (is (= ["https://app.example/start" "/one"]
+           (mapv :url (get-in after [:browser.session/navigation :entries]))))
+    (is (= "/one" (get-in after [:browser.session/page :browser/url])))))
+
 (deftest restored-session-uses-persisted-current-page-state
   (let [h (host/recording-host)
         provider (persistence-provider/memory-provider)

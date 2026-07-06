@@ -96,6 +96,7 @@
    :browser.session/navigation (or navigation {:entries []
                                                :index -1
                                                :redirects []})
+   :browser.session/script-history-bridged-count 0
    :browser.session/history (or history [])
    :browser.session/audit (or audit (audit/empty-log))}))
 
@@ -390,7 +391,8 @@
                :browser.session/page-generation generation
                :browser.session/last-batch batch
                :browser.session/error nil
-               :browser.session/error-document nil)
+               :browser.session/error-document nil
+               :browser.session/script-history-bridged-count 0)
         (update :browser.session/profile
                 (fn [p]
                   (if p
@@ -477,10 +479,57 @@
     (assoc session :browser.session/store (get-in script-state [:net/context :store]))
     session))
 
+(defn- bridge-pushed-history-entries
+  "Real `history.pushState(state, title, url)` calls already run for real
+   against `quickjs-execution`'s own sandboxed `:history/entries`/
+   `:history/index` model (see `history-push-state-result` et al. in that
+   namespace) -- a script calling it gets a real, correct return value and
+   a real, growing in-VM entry list -- but until this fix, NOTHING ever
+   read that model back out into this session's own REAL navigation stack
+   (`:browser.session/navigation`, the same one `back!`/`forward!`/
+   `reload!` operate on): no session-level URL update, no new navigation
+   entry, nothing persisted. A script's `pushState` call was a real,
+   working no-op as far as the rest of this engine could tell.
+
+   `:browser.session/script-history-bridged-count` tracks how many of
+   `script-state`'s own `:history/entries` have ALREADY been bridged into
+   `:browser.session/navigation` (reset to 0 on every real navigation via
+   `commit-page!`, since `quickjs-execution/new-state` itself always
+   starts a fresh page generation's sandboxed history at `:history/entries
+   []` regardless of this session's own real navigation depth). Each
+   sandbox entry BEYOND that count is a genuinely NEW `pushState` call
+   this invocation just made -- bridged here by updating the session's
+   current page's own `:browser/url` (pushState never touches the
+   document itself, only the URL/history) and recording a real navigation
+   entry for it, mirroring `remember-navigation-entry`'s own shape.
+
+   Deliberately scoped to `pushState`-driven GROWTH only, an honest,
+   documented limitation rather than a silent gap: a `replaceState` call
+   that overwrites the CURRENT sandbox entry in place (same entry count,
+   different content) is not yet detected or bridged, and neither is a
+   script's own programmatic `history.go()`/`back()`/`forward()`
+   (`:history/traverse`, which only moves the sandbox's own index, never
+   growing entries) -- both correctly no-op here rather than bridging
+   incorrect or partial state, left for a separate future cycle."
+  [session script-state]
+  (let [entries (vec (:history/entries script-state))
+        already-bridged (:browser.session/script-history-bridged-count session 0)]
+    (if (> (count entries) already-bridged)
+      (reduce (fn [session entry]
+                (let [page (assoc (:browser.session/page session) :browser/url (:url entry))]
+                  (-> session
+                      (assoc :browser.session/page page)
+                      (remember-navigation-entry page))))
+              (assoc session :browser.session/script-history-bridged-count (count entries))
+              (subvec entries already-bridged))
+      session)))
+
 (defn commit-script-state!
   [session script-state]
   (let [net-store-updated? (contains? (:net/context script-state) :store)
-        session (apply-script-net-store session script-state)]
+        session (-> session
+                    (apply-script-net-store script-state)
+                    (bridge-pushed-history-entries script-state))]
     (if-let [document (:document script-state)]
       (-> (commit-document! session document)
           (update :browser.session/history conj
