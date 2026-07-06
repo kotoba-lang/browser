@@ -755,6 +755,42 @@
 
       :else nil)))
 
+(def ^:private email-format-pattern
+  "The real WHATWG HTML5 email-format regex (verbatim -- the same one
+   real browsers use for `type=\"email\"` `typeMismatch` checking), not a
+   hand-simplified approximation. Deliberately still an honest scope-cut
+   in one specific way: the `multiple` attribute (a comma-separated list
+   of addresses, each individually checked) is NOT supported -- a single
+   address only, matching this file's own established 'single X only'
+   posture elsewhere (e.g. `text-shadow`'s single-shadow scope-cut in the
+   sibling kotoba-lang/cssom repo)."
+  #"[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*")
+
+(def ^:private url-format-pattern
+  "A deliberately simplified `type=\"url\"` format check -- real HTML5
+   requires successfully parsing via the full WHATWG URL parser (which
+   accepts almost anything with a scheme); this engine has no such parser,
+   so this instead requires the single most common practical shape, an
+   absolute URL with a real scheme (`scheme://...`) -- an honest,
+   documented scope-cut consistent with this file's other 'reasonable
+   baseline, not full spec coverage' checks."
+  #"[a-zA-Z][a-zA-Z0-9+.-]*://\S+")
+
+(defn- type-mismatch?
+  "Real HTML5 `typeMismatch`: a non-blank value on `type=\"email\"`/
+   `\"url\"` that doesn't match that type's own format -- previously read
+   NOWHERE at all, an honest, documented scope-cut called out right next
+   to `pattern`'s own (now-fixed) gap in this repo's JS-facing
+   `__kotobaValidityState`. Mirrors `pattern-invalid?`'s own shape --
+   deliberately NOT enforced for a blank value (that's `required`'s
+   concern, not `typeMismatch`'s)."
+  [type value]
+  (and (not (str/blank? value))
+       (case type
+         "email" (not (re-matches email-format-pattern value))
+         "url" (not (re-matches url-format-pattern value))
+         false)))
+
 (defn- compile-pattern
   "Compiles a real HTML5 `pattern` attribute value into a `re-pattern`, or
    `nil` if it isn't a legal regex -- a malformed `pattern` is simply NOT
@@ -793,7 +829,14 @@
    in this repo's own JS-facing `__kotobaValidityState` and in
    kotoba-lang/cssom's `constraint-invalid?`), confirmed via direct REPL
    reproduction that a real `<input pattern=\"[0-9]+\" value=\"abc\">`
-   was silently treated as valid at real form-submission time."
+   was silently treated as valid at real form-submission time.
+
+   `:type-mismatch` for a non-blank `type=\"email\"`/`\"url\"` value not
+   matching that type's own format (see `type-mismatch?`) -- checked
+   BEFORE `:pattern-mismatch` since a real, wrong-FORMAT value is a more
+   fundamental problem than merely not matching an author's own custom
+   `pattern` (also legal on `email`/`url`), matching real ValidityState's
+   own IDL property ordering."
   [document node-id]
   (let [node (get-in document [:nodes node-id])
         attrs (:attrs node)
@@ -838,6 +881,11 @@
              max-length
              (> (count text-value) max-length))
         :too-long
+
+        (and (= :input (:tag node))
+             (some? text-value)
+             (type-mismatch? type text-value))
+        :type-mismatch
 
         (and pattern-regex (not (re-matches pattern-regex text-value)))
         :pattern-mismatch

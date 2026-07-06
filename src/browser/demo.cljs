@@ -443,6 +443,15 @@
    "<input id=\"pattern-target\" pattern=\"[0-9]+\" value=\"abc123\">"
    "<div id=\"pattern-result\">pattern proof: pending...</div>"
    "</section>"
+   "<section id=\"type-mismatch-proof\" style=\"display:flex; flex-direction:column; gap:8\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "Real HTML5 type=\"email\" format checking below -- previously an honest, "
+   "documented scope-cut everywhere (typeMismatch always false). This "
+   "malformed email value's own real validity is read back by script below."
+   "</p>"
+   "<input id=\"type-mismatch-target\" type=\"email\" value=\"not-an-email\">"
+   "<div id=\"type-mismatch-result\">type-mismatch proof: pending...</div>"
+   "</section>"
    "<section id=\"font-family-proof\" style=\"display:flex; flex-direction:column; gap:8\">"
    "<p style=\"color:#9fb0c9; font-size:13\">"
    "Real CSS font-family below -- previously read from NOWHERE at all, "
@@ -706,6 +715,13 @@
    "patResult.textContent = 'pattern proof: checkValidity()=' + patTarget.checkValidity() + "
    "', validity.patternMismatch=' + patTarget.validity.patternMismatch + "
    "', matches(:invalid)=' + patTarget.matches(':invalid');"
+   "</script>"
+   "<script>"
+   "var tmTarget = document.getElementById('type-mismatch-target');"
+   "var tmResult = document.getElementById('type-mismatch-result');"
+   "tmResult.textContent = 'type-mismatch proof: checkValidity()=' + tmTarget.checkValidity() + "
+   "', validity.typeMismatch=' + tmTarget.validity.typeMismatch + "
+   "', matches(:invalid)=' + tmTarget.matches(':invalid');"
    "</script>"
    "<script>"
    "var w = new Worker(" (pr-str worker-url) ");"
@@ -983,6 +999,7 @@
                  check-validity-proof (element-text doc "check-validity-result")
                  select-proof (element-text doc "select-result")
                  pattern-proof (element-text doc "pattern-result")
+                 type-mismatch-proof (element-text doc "type-mismatch-result")
                  status-badge-proof (pseudo-content doc "status-badge")
                  step-proofs (mapv #(pseudo-content doc %)
                                    ["step-1" "step-2" "step-3" "step-4"])]
@@ -1007,6 +1024,7 @@
              (js/console.log "browser.demo: #check-validity-result ->" (pr-str check-validity-proof))
              (js/console.log "browser.demo: #select-result ->" (pr-str select-proof))
              (js/console.log "browser.demo: #pattern-result ->" (pr-str pattern-proof))
+             (js/console.log "browser.demo: #type-mismatch-result ->" (pr-str type-mismatch-proof))
              (js/console.log "browser.demo: real ::before generated content ->"
                               "#status-badge:" (pr-str status-badge-proof)
                               "#step-counter lis:" (pr-str step-proofs))

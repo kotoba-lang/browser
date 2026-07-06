@@ -516,6 +516,26 @@
         var s = String(v).trim();
         return /^-?\\d+(\\.\\d+)?$/.test(s) ? parseFloat(s) : NaN;
       }
+      function __kotobaTypeMismatch(type, value) {
+        // Real HTML5 typeMismatch: a non-blank type=email/url value not
+        // matching that type's own format -- previously an honest,
+        // documented scope-cut here (patternMismatch's own fix landed a
+        // prior cycle; typeMismatch was the other half of that same
+        // scope-cut comment). email uses the real WHATWG spec regex
+        // verbatim (not a hand-simplified approximation, except that the
+        // multiple attribute's comma-separated-list form is out of
+        // scope); url is a deliberately simplified absolute-URL-shape
+        // check (scheme://...), since this engine has no real WHATWG URL
+        // parser to match against.
+        if (value.trim() === '') return false;
+        if (type === 'email') {
+          return !/^[a-zA-Z0-9.!#$%&'*+\\/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/.test(value);
+        }
+        if (type === 'url') {
+          return !/^[a-zA-Z][a-zA-Z0-9+.-]*:\\/\\/\\S+$/.test(value);
+        }
+        return false;
+      }
       function __kotobaCompilePattern(pattern) {
         // Malformed `pattern` degrades to NOT enforced (returns null),
         // matching this fn's own existing min/max/minlength/maxlength
@@ -566,6 +586,7 @@
         }
         if (!Number.isNaN(minlength) && value.length > 0 && value.length < minlength) return 'tooShort';
         if (!Number.isNaN(maxlength) && value.length > maxlength) return 'tooLong';
+        if (tag === 'input' && __kotobaTypeMismatch(type, value)) return 'typeMismatch';
         if (patternRegex && !patternRegex.test(value)) return 'patternMismatch';
         if (!Number.isNaN(rangeValue) && !Number.isNaN(rangeMin) && rangeValue < rangeMin) return 'rangeUnderflow';
         if (!Number.isNaN(rangeValue) && !Number.isNaN(rangeMax) && rangeValue > rangeMax) return 'rangeOverflow';
@@ -594,25 +615,24 @@
       }
       function __kotobaValidityState(node) {
         // Real ValidityState always exposes every flag (false when not
-        // applicable), so JS reading e.g. validity.typeMismatch on a
+        // applicable), so JS reading e.g. validity.stepMismatch on a
         // control this engine never flags gets a real `false`, not
-        // `undefined`. Only the 6 reasons browser.document-input's own
+        // `undefined`. Only the 7 reasons browser.document-input's own
         // validation-reason already computes are ever real (`valueMissing`/
-        // `tooShort`/`tooLong`/`patternMismatch`/`rangeUnderflow`/
-        // `rangeOverflow`) -- `typeMismatch`/`stepMismatch`/`badInput`/
+        // `tooShort`/`tooLong`/`typeMismatch`/`patternMismatch`/
+        // `rangeUnderflow`/`rangeOverflow`) -- `stepMismatch`/`badInput`/
         // `customError` are an honest, documented scope-cut (no `step`
-        // support, no `setCustomValidity()`, no `type=email|url` format
-        // checking exist anywhere in this engine yet), always `false`.
-        // Unlike the :invalid/:valid CSS pseudo-class match (which
-        // also consults the historical, form-submission-time `invalid`
-        // attr set by browser.document-input's dispatch-invalid-events),
-        // .validity is real HTML5 semantics: always the LIVE, freshly
-        // recomputed constraint state, never the historical submit-time
-        // marker.
+        // support, no `setCustomValidity()` exist anywhere in this engine
+        // yet), always `false`. Unlike the :invalid/:valid CSS pseudo-class
+        // match (which also consults the historical, form-submission-time
+        // `invalid` attr set by browser.document-input's dispatch-invalid-
+        // events), .validity is real HTML5 semantics: always the LIVE,
+        // freshly recomputed constraint state, never the historical
+        // submit-time marker.
         var reason = __kotobaWillValidate(node) ? __kotobaValidationReason(node) : null;
         return {
           valueMissing: reason === 'valueMissing',
-          typeMismatch: false,
+          typeMismatch: reason === 'typeMismatch',
           patternMismatch: reason === 'patternMismatch',
           tooShort: reason === 'tooShort',
           tooLong: reason === 'tooLong',

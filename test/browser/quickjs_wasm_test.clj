@@ -175,6 +175,23 @@
     (is (str/includes? source "if (patternRegex && !patternRegex.test(value)) return 'patternMismatch';"))
     (is (str/includes? source "patternMismatch: reason === 'patternMismatch',"))))
 
+(deftest quickjs-wasm-webapi-shim-exposes-type-mismatch-validation
+  ;; Real HTML5 type="email"/"url" format checking -- previously an
+  ;; honest, documented scope-cut everywhere (`typeMismatch: false`
+  ;; hardcoded, the other half of the same scope-cut comment
+  ;; patternMismatch's own fix closed a prior cycle). Confirmed via a
+  ;; real CLJS/QuickJS smoke test (quickjs-type-mismatch-smoke-test) that
+  ;; a real `<input type="email" value="not-an-email">` now correctly
+  ;; reports `matches(':invalid')`/`checkValidity() === false`/`.validity.
+  ;; typeMismatch === true`, all previously unreachable from JS at all.
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "function __kotobaTypeMismatch(type, value)"))
+    (is (str/includes? source "if (value.trim() === '') return false;"))
+    (is (str/includes? source "if (type === 'email') {"))
+    (is (str/includes? source "if (type === 'url') {"))
+    (is (str/includes? source "if (tag === 'input' && __kotobaTypeMismatch(type, value)) return 'typeMismatch';"))
+    (is (str/includes? source "typeMismatch: reason === 'typeMismatch',"))))
+
 (deftest quickjs-wasm-webapi-shim-exposes-scoped-element-query-selectors
   (let [source quickjs-wasm/webapi-shim-source]
     (is (str/includes? source "function __kotobaScopedQuerySelectorAllIds(rootId, selector)"))

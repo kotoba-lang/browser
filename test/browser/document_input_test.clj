@@ -1514,6 +1514,65 @@
     (is (= true (:submitted? result)))
     (is (nil? (:invalid? result)))))
 
+(deftest type-mismatch-email-validation-blocks-submit
+  ;; The confirmed repro from the bug report: before this fix, NEITHER
+  ;; this reducer's real form-submission-blocking validation NOR
+  ;; kotoba-lang/cssom's own :invalid/:valid CSS pseudo-class matching NOR
+  ;; the JS-facing __kotobaValidityState checked type=email/url format at
+  ;; all -- a real, malformed <input type="email" value="not-an-email">
+  ;; silently submitted successfully when a real browser blocks it.
+  (let [page (browser/load-html
+              {:url "kotoba://submit"
+               :html "<main><form id=\"form\"><input id=\"mismatch\" type=\"email\" name=\"mismatch\" value=\"not-an-email\"><input id=\"ok\" type=\"email\" name=\"ok\" value=\"user@example.com\"><button id=\"go\">Go</button></form></main>"})
+        document (:browser/document page)
+        form (bridge/query-selector document "#form")
+        mismatch (bridge/query-selector document "#mismatch")
+        go (bridge/query-selector document "#go")
+        document (dom/add-event-listener document mismatch "invalid" "mismatch-invalid")
+        result (document-input/reduce-event document {:event/type :pointer/click
+                                                      :node/id go})]
+    (is (= true (:invalid? result)))
+    (is (= [mismatch] (:invalid/control-ids result)))
+    (is (= "type-mismatch" (get-in result [:document :nodes mismatch :attrs :validation-reason])))
+    (is (= [[:dom/dispatch-event
+             "mismatch-invalid"
+             {:event/type "invalid" :target/id mismatch :form/id form :submitter/id go :reason :type-mismatch}]]
+           (filterv #(= :dom/dispatch-event (first %))
+                    (get-in result [:document :ops]))))))
+
+(deftest type-mismatch-url-validation-blocks-submit
+  (let [page (browser/load-html
+              {:url "kotoba://submit"
+               :html "<main><form id=\"form\"><input id=\"mismatch\" type=\"url\" name=\"mismatch\" value=\"not a url\"><button id=\"go\">Go</button></form></main>"})
+        document (:browser/document page)
+        go (bridge/query-selector document "#go")
+        mismatch (bridge/query-selector document "#mismatch")
+        result (document-input/reduce-event document {:event/type :pointer/click :node/id go})]
+    (is (= true (:invalid? result)))
+    (is (= "type-mismatch" (get-in result [:document :nodes mismatch :attrs :validation-reason])))))
+
+(deftest well-formed-email-and-url-do-not-block-submit
+  (let [page (browser/load-html
+              {:url "kotoba://submit"
+               :html "<main><form id=\"form\"><input id=\"email\" type=\"email\" name=\"email\" value=\"user@example.com\"><input id=\"url\" type=\"url\" name=\"url\" value=\"https://example.com/path\"><button id=\"go\">Go</button></form></main>"})
+        document (:browser/document page)
+        go (bridge/query-selector document "#go")
+        result (document-input/reduce-event document {:event/type :pointer/click :node/id go})]
+    (is (= true (:submitted? result)))
+    (is (nil? (:invalid? result)))))
+
+(deftest blank-email-and-url-do-not-block-submit
+  ;; type-mismatch is not required's concern -- a blank, non-required
+  ;; email/url value must not be blocked by its own type format.
+  (let [page (browser/load-html
+              {:url "kotoba://submit"
+               :html "<main><form id=\"form\"><input id=\"email\" type=\"email\" name=\"email\" value=\"\"><input id=\"url\" type=\"url\" name=\"url\" value=\"\"><button id=\"go\">Go</button></form></main>"})
+        document (:browser/document page)
+        go (bridge/query-selector document "#go")
+        result (document-input/reduce-event document {:event/type :pointer/click :node/id go})]
+    (is (= true (:submitted? result)))
+    (is (nil? (:invalid? result)))))
+
 (deftest readonly-controls-submit-data-but-do-not-block-validation
   (let [page (browser/load-html {:url "kotoba://submit"
                                  :html "<main><form id=\"form\"><input id=\"field\" name=\"q\" required readonly><textarea id=\"long\" name=\"long\" maxlength=\"4\" readonly>abcde</textarea><button id=\"go\" name=\"action\" value=\"go\">Go</button></form></main>"})
