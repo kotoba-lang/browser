@@ -2043,6 +2043,17 @@
             __kotobaRefreshText(parentId);
             return child;
           },
+          replaceChild: function(newChild, oldChild) {
+            // parentNode.replaceChild(newChild, oldChild) -- called on the
+            // PARENT, argument order (new, old) reversed vs. replaceWith's
+            // own (old, new) shape above, and returns the REMOVED child
+            // per spec, not the new one. Composes this.insertBefore/
+            // this.removeChild verbatim, the same composition replaceWith
+            // already uses.
+            this.insertBefore(newChild, oldChild);
+            this.removeChild(oldChild);
+            return oldChild;
+          },
           setAttribute: function(name, value) {
             __kotobaSetAttribute(ref, name, value);
           },

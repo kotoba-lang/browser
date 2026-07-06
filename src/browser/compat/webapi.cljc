@@ -409,7 +409,7 @@
               :querySelector :querySelectorAll
               :getElementsByTagName :getElementsByClassName
               :forms :images :links :scripts]
-   :element [:setAttribute :appendChild :removeChild :insertBefore :replaceChildren
+   :element [:setAttribute :appendChild :removeChild :insertBefore :replaceChild :replaceChildren
              :getAttribute :hasAttribute :removeAttribute
              :addEventListener :removeEventListener :dispatchEvent :textContent :nodeValue :data :classList
              :append :prepend :before :after :replaceWith :remove

@@ -349,6 +349,13 @@
     (is (str/includes? source "parent.insertBefore(__kotobaNodeArg(arguments[i]), next)"))
     (is (str/includes? source "parent.removeChild(element)"))))
 
+(deftest quickjs-wasm-webapi-shim-exposes-replace-child
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "replaceChild: function(newChild, oldChild)"))
+    (is (str/includes? source "this.insertBefore(newChild, oldChild)"))
+    (is (str/includes? source "this.removeChild(oldChild)"))
+    (is (str/includes? source "return oldChild"))))
+
 (deftest quickjs-wasm-webapi-shim-exposes-attribute-convenience-methods
   (let [source quickjs-wasm/webapi-shim-source]
     (is (str/includes? source "toggleAttribute: function(name, force)"))

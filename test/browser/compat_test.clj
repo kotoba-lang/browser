@@ -256,6 +256,9 @@
   (is (some #{:querySelector} (get-in webapi/webapi-surface [:element])))
   (is (some #{:querySelectorAll} (get-in webapi/webapi-surface [:element]))))
 
+(deftest webapi-surface-includes-replace-child
+  (is (some #{:replaceChild} (get-in webapi/webapi-surface [:element]))))
+
 (deftest webapi-surface-includes-document-root-and-collection-bindings
   (let [document-surface (set (get-in webapi/webapi-surface [:document]))
         element-surface (set (get-in webapi/webapi-surface [:element]))]
