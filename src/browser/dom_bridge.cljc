@@ -182,11 +182,63 @@
         (dom/set-attribute node-id :style-inline-important important)
         (dom/set-style node-id style))))
 
+(defn- style-property-attr?
+  "True for a script mutating an INDIVIDUAL `element.style.<prop>` property
+   (or `style.setProperty(prop, value)`/`style.removeProperty(prop)`) --
+   `browser.compat.quickjs-wasm`'s `__kotobaStyle` shim namespaces these as
+   `\"style/<kebab-prop>\"`, e.g. `\"style/color\"`, distinct from the
+   literal `\"style\"` attr `style-attr?` matches (a full `cssText`/
+   `setAttribute('style', ...)` replace)."
+  [attr]
+  (= "style" (namespace (keyword attr))))
+
+(defn- set-style-property
+  "A script mutating an individual `element.style.<prop>` property goes
+   through here -- unlike `set-style-attribute` (a full `cssText` replace
+   that re-parses and REPLACES the entire `:style-inline` map), this merges
+   just the one changed property into the EXISTING `:style-inline` map, and
+   clears any prior `!important` flag on that property (a plain property
+   assignment always carries no priority, exactly like
+   `setProperty(prop, value)` with no third argument). Without this,
+   writing `attr` straight through the generic `dom/set-attribute` path
+   (as this used to) only ever touched the derived, cascade-computed
+   `:style/<prop>` attr directly -- `cssom.core/apply-cascade`'s
+   `style-element` clears and rebuilds every `:style/*` attr from
+   `:style-inline` + stylesheet rules on every page commit, silently
+   reverting the mutation on the very next commit."
+  [document node-id attr value]
+  (let [prop (keyword (name (keyword attr)))
+        node (get-in document [:nodes node-id])
+        style-inline (assoc (get-in node [:attrs :style-inline] {}) prop value)
+        style-important (disj (get-in node [:attrs :style-inline-important] #{}) prop)]
+    (-> document
+        (dom/set-attribute node-id :style-inline style-inline)
+        (dom/set-attribute node-id :style-inline-important style-important)
+        (dom/set-attribute node-id (keyword attr) value))))
+
+(defn- remove-style-property
+  "`style.removeProperty(prop)`'s counterpart to `set-style-property` above
+   -- removes just the one property from `:style-inline` (so the next
+   cascade recompute no longer re-applies it), rather than the generic
+   attribute-removal path this used to fall through to, which only ever
+   touched the derived `:style/<prop>` attr and left the stale value in
+   `:style-inline` to keep winning the cascade on every subsequent commit."
+  [document node-id attr]
+  (let [prop (keyword (name (keyword attr)))
+        node (get-in document [:nodes node-id])
+        style-inline (dissoc (get-in node [:attrs :style-inline] {}) prop)
+        style-important (disj (get-in node [:attrs :style-inline-important] #{}) prop)]
+    (-> document
+        (dom/set-attribute node-id :style-inline style-inline)
+        (dom/set-attribute node-id :style-inline-important style-important)
+        (update-in [:nodes node-id :attrs] dissoc (keyword attr)))))
+
 (defn- remove-attribute
   [document node-id attr]
-  (if (style-attr? attr)
-    (clear-style-attrs document node-id)
-    (update-in document [:nodes node-id :attrs] dissoc (keyword attr))))
+  (cond
+    (style-attr? attr) (clear-style-attrs document node-id)
+    (style-property-attr? attr) (remove-style-property document node-id attr)
+    :else (update-in document [:nodes node-id :attrs] dissoc (keyword attr))))
 
 (defn- create-fragment
   [document]
@@ -487,9 +539,10 @@
 
     :set-attribute
     (let [node-id (:node/id mutation)]
-      {:document (if (style-attr? attr)
-                   (set-style-attribute document node-id value)
-                   (dom/set-attribute document node-id attr value))
+      {:document (cond
+                   (style-attr? attr) (set-style-attribute document node-id value)
+                   (style-property-attr? attr) (set-style-property document node-id attr value)
+                   :else (dom/set-attribute document node-id attr value))
        :node/id node-id})
 
     :remove-attribute

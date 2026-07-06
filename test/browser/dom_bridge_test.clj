@@ -496,6 +496,93 @@
     (is (= #{:color} (:style-inline-important attrs)))
     (is (not (contains? removed-attrs :style-inline-important)))))
 
+(deftest mutation-bridge-set-individual-style-property-persists-across-a-cascade-recompute
+  ;; Regression test for a real bug: a script mutating an individual
+  ;; `element.style.<prop>` property (surfaced by browser.compat.quickjs-
+  ;; wasm's __kotobaStyle shim as attr "style/<prop>") used to write
+  ;; straight through the generic dom/set-attribute path, touching ONLY
+  ;; the derived, cascade-computed :style/<prop> attr directly -- never
+  ;; :style-inline, the attr cssom.core/apply-cascade's style-element
+  ;; actually treats as authoritative input. Since apply-cascade clears and
+  ;; rebuilds every :style/* attr from :style-inline + stylesheet rules on
+  ;; every page commit (browser.core/render-document, called after every
+  ;; script run via refresh-page), the mutation was silently reverted on
+  ;; the very next commit -- the single most common way real JS touches
+  ;; CSS never actually painted, on any page with a stylesheet.
+  (let [page (browser/load-html {:url "kotoba://dom"
+                                 :css ".note { color: blue }"
+                                 :html "<main><p id=\"note\" class=\"note\">Hello</p></main>"})
+        note (bridge/query-selector (:browser/document page) "#note")
+        _ (is (= "blue" (get-in page [:browser/document :nodes note :attrs :style/color]))
+              "sanity: the stylesheet rule applies before any mutation")
+        mutated (bridge/apply-mutation (:browser/document page)
+                                       {:dom/op :set-attribute
+                                        :node/id note
+                                        :attr "style/color"
+                                        :value "red"})
+        mutated-doc (:document mutated)]
+    (is (= "red" (get-in mutated-doc [:nodes note :attrs :style/color]))
+        "immediately after the mutation, the new value wins")
+    (is (= {:color "red"} (get-in mutated-doc [:nodes note :attrs :style-inline]))
+        "the mutation must land in :style-inline, the attr the cascade treats as authoritative input")
+    (let [recommitted (browser/refresh-page page {:document mutated-doc})]
+      (is (= "red" (get-in recommitted [:browser/document :nodes note :attrs :style/color]))
+          "the mutation survives a subsequent page commit's cascade recompute -- the real bug this guards against"))))
+
+(deftest mutation-bridge-remove-individual-style-property-reverts-to-the-stylesheet-value
+  (let [page (browser/load-html {:url "kotoba://dom"
+                                 :css ".note { color: blue }"
+                                 :html "<main><p id=\"note\" class=\"note\">Hello</p></main>"})
+        note (bridge/query-selector (:browser/document page) "#note")
+        mutated (bridge/apply-mutation (:browser/document page)
+                                       {:dom/op :set-attribute
+                                        :node/id note
+                                        :attr "style/color"
+                                        :value "red"})
+        removed (bridge/apply-mutation (:document mutated)
+                                       {:dom/op :remove-attribute
+                                        :node/id note
+                                        :attr "style/color"})]
+    (is (empty? (get-in removed [:document :nodes note :attrs :style-inline])))
+    (let [recommitted (browser/refresh-page page {:document (:document removed)})]
+      (is (= "blue" (get-in recommitted [:browser/document :nodes note :attrs :style/color]))
+          "removeProperty must let the stylesheet rule win again on the next commit"))))
+
+(deftest mutation-bridge-set-individual-style-property-preserves-other-inline-properties
+  ;; A `:css` rule (even one matching nothing here) is required for this
+  ;; test to discriminate at all -- `browser.core/render-document` only
+  ;; ever calls `cssom.core/apply-cascade` when `(seq css-rules)` is
+  ;; truthy, so a page with NO stylesheet never re-runs the cascade's
+  ;; clear-and-rebuild on a subsequent commit, and the bug this guards
+  ;; against (an :style-inline that never got the new property, silently
+  ;; losing it on the next cascade rebuild) would never be exercised.
+  (let [page (browser/load-html {:url "kotoba://dom"
+                                 :css "body { margin: 0 }"
+                                 :html "<main><p id=\"note\" style=\"font-weight: bold\">Hello</p></main>"})
+        note (bridge/query-selector (:browser/document page) "#note")
+        mutated (bridge/apply-mutation (:browser/document page)
+                                       {:dom/op :set-attribute
+                                        :node/id note
+                                        :attr "style/color"
+                                        :value "green"})
+        recommitted (browser/refresh-page page {:document (:document mutated)})]
+    (is (= "green" (get-in recommitted [:browser/document :nodes note :attrs :style/color])))
+    (is (= "bold" (get-in recommitted [:browser/document :nodes note :attrs :style/font-weight]))
+        "a pre-existing, untouched inline property must survive a mutation of a different property")))
+
+(deftest mutation-bridge-set-individual-style-property-clears-a-prior-important-flag-on-that-property
+  (let [page (browser/load-html {:url "kotoba://dom"
+                                 :html "<main><p id=\"note\" style=\"color: red !important\">Hello</p></main>"})
+        note (bridge/query-selector (:browser/document page) "#note")
+        mutated (bridge/apply-mutation (:browser/document page)
+                                       {:dom/op :set-attribute
+                                        :node/id note
+                                        :attr "style/color"
+                                        :value "blue"})]
+    (is (= {:color "blue"} (get-in mutated [:document :nodes note :attrs :style-inline])))
+    (is (not (contains? (get-in mutated [:document :nodes note :attrs :style-inline-important]) :color))
+        "a plain style.<prop> assignment always carries no priority, exactly like setProperty(prop, value) with no third argument")))
+
 (deftest mutation-bridge-focus-and-blur-updates-document-focus
   (let [page (browser/load-html {:url "kotoba://dom"
                                  :html "<main><input id=\"field\"></main>"})
