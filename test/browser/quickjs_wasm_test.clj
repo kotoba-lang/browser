@@ -208,6 +208,32 @@
     (is (str/includes? source "if (tag === 'input' && __kotobaStepMismatch(type, value, node)) return 'stepMismatch';"))
     (is (str/includes? source "stepMismatch: reason === 'stepMismatch',"))))
 
+(deftest quickjs-wasm-webapi-shim-exposes-validation-message
+  ;; element.validationMessage -- previously entirely missing (a repo-wide
+  ;; grep for `validationMessage` returned zero matches anywhere), even
+  ;; though `__kotobaValidationReason` already computes exactly one of 8
+  ;; canonical reasons (used only for `.validity`/checkValidity()). Confirmed
+  ;; via a real CLJS/QuickJS smoke test
+  ;; (quickjs-validation-message-smoke-test) that a real blank `required`
+  ;; input now reports `validationMessage === "Please fill out this
+  ;; field."`, a real invalid `type="email"` input reports a message naming
+  ;; the email format, and both a valid control and a disabled (never a
+  ;; validation candidate) control report the empty string -- all
+  ;; previously unreachable from JS at all (reading the property returned
+  ;; `undefined`).
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "function __kotobaValidationMessage(node)"))
+    (is (str/includes? source "if (!__kotobaWillValidate(node)) return '';"))
+    (is (str/includes? source "if (reason === null) return '';"))
+    (is (str/includes? source "case 'valueMissing': return 'Please fill out this field.';"))
+    (is (str/includes? source "if (type === 'email') return 'Please enter a valid email address.';"))
+    (is (str/includes? source "if (type === 'url') return 'Please enter a valid URL.';"))
+    (is (str/includes? source "case 'patternMismatch': return 'Please match the requested format.';"))
+    (is (str/includes? source "case 'rangeUnderflow':"))
+    (is (str/includes? source "case 'rangeOverflow':"))
+    (is (str/includes? source "get validationMessage()"))
+    (is (str/includes? source "return __kotobaValidationMessage(__kotobaNodeById(__kotobaRefNodeId(ref)));"))))
+
 (deftest quickjs-wasm-webapi-shim-exposes-scoped-element-query-selectors
   (let [source quickjs-wasm/webapi-shim-source]
     (is (str/includes? source "function __kotobaScopedQuerySelectorAllIds(rootId, selector)"))

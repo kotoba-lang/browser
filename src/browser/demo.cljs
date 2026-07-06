@@ -462,6 +462,16 @@
    "<input id=\"step-mismatch-target\" type=\"number\" step=\"2\" value=\"3\">"
    "<div id=\"step-mismatch-result\">step-mismatch proof: pending...</div>"
    "</section>"
+   "<section id=\"validation-message-proof\" style=\"display:flex; flex-direction:column; gap:8\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "Real element.validationMessage below -- previously entirely missing "
+   "(reading the property returned undefined no matter what a real page's "
+   "own constraint validation reason was). This blank required field's own "
+   "real human-readable message is read back by script below."
+   "</p>"
+   "<input id=\"validation-message-target\" required>"
+   "<div id=\"validation-message-result\">validation-message proof: pending...</div>"
+   "</section>"
    "<section id=\"font-family-proof\" style=\"display:flex; flex-direction:column; gap:8\">"
    "<p style=\"color:#9fb0c9; font-size:13\">"
    "Real CSS font-family below -- previously read from NOWHERE at all, "
@@ -755,6 +765,12 @@
    "', matches(:invalid)=' + smTarget.matches(':invalid');"
    "</script>"
    "<script>"
+   "var vmTarget = document.getElementById('validation-message-target');"
+   "var vmResult = document.getElementById('validation-message-result');"
+   "vmResult.textContent = 'validation-message proof: checkValidity()=' + vmTarget.checkValidity() + "
+   "', validationMessage=' + JSON.stringify(vmTarget.validationMessage);"
+   "</script>"
+   "<script>"
    "var w = new Worker(" (pr-str worker-url) ");"
    "w.onmessage = function(e) { document.getElementById('worker-proof').textContent = "
    "'Worker proof: real 2nd QuickJS context computed 21 * 2 -> ' + e.data; };"
@@ -1032,6 +1048,7 @@
                  pattern-proof (element-text doc "pattern-result")
                  type-mismatch-proof (element-text doc "type-mismatch-result")
                  step-mismatch-proof (element-text doc "step-mismatch-result")
+                 validation-message-proof (element-text doc "validation-message-result")
                  status-badge-proof (pseudo-content doc "status-badge")
                  step-proofs (mapv #(pseudo-content doc %)
                                    ["step-1" "step-2" "step-3" "step-4"])]
@@ -1058,6 +1075,7 @@
              (js/console.log "browser.demo: #pattern-result ->" (pr-str pattern-proof))
              (js/console.log "browser.demo: #type-mismatch-result ->" (pr-str type-mismatch-proof))
              (js/console.log "browser.demo: #step-mismatch-result ->" (pr-str step-mismatch-proof))
+             (js/console.log "browser.demo: #validation-message-result ->" (pr-str validation-message-proof))
              (js/console.log "browser.demo: real ::before generated content ->"
                               "#status-badge:" (pr-str status-badge-proof)
                               "#step-counter lis:" (pr-str step-proofs))

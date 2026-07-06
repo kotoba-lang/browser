@@ -672,6 +672,41 @@
           valid: reason === null
         };
       }
+      function __kotobaValidationMessage(node) {
+        // Real HTML5 `.validationMessage` is a human-readable string
+        // (locale/engine-specific by spec -- not required to match any
+        // real browser's own copy byte-for-byte), always the empty string
+        // whenever the control is either not a validation candidate at
+        // all (__kotobaWillValidate false, e.g. disabled) or currently
+        // satisfies every constraint __kotobaValidationReason evaluates
+        // (reason === null) -- both already real, load-bearing states in
+        // __kotobaValidityState above.
+        if (!__kotobaWillValidate(node)) return '';
+        var reason = __kotobaValidationReason(node);
+        if (reason === null) return '';
+        var value = __kotobaControlValue(node);
+        var type = String(__kotobaAttr(node, 'type') || 'text').toLowerCase();
+        switch (reason) {
+          case 'valueMissing': return 'Please fill out this field.';
+          case 'typeMismatch':
+            if (type === 'email') return 'Please enter a valid email address.';
+            if (type === 'url') return 'Please enter a valid URL.';
+            return 'Please enter a valid value.';
+          case 'patternMismatch': return 'Please match the requested format.';
+          case 'tooShort':
+            return 'Please lengthen this text to ' + parseInt(__kotobaAttr(node, 'minlength'), 10) +
+              ' characters or more (you are currently using ' + value.length + ' characters).';
+          case 'tooLong':
+            return 'Please shorten this text to ' + parseInt(__kotobaAttr(node, 'maxlength'), 10) +
+              ' characters or less (you are currently using ' + value.length + ' characters).';
+          case 'rangeUnderflow':
+            return 'Value must be greater than or equal to ' + __kotobaAttr(node, 'min') + '.';
+          case 'rangeOverflow':
+            return 'Value must be less than or equal to ' + __kotobaAttr(node, 'max') + '.';
+          case 'stepMismatch': return 'Please enter a valid value.';
+          default: return '';
+        }
+      }
       function __kotobaParseSimpleSelector(selector) {
         selector = String(selector || '').trim();
         var attrPattern = /\\[\\s*([A-Za-z_][-A-Za-z0-9_]*)\\s*(?:(~=|\\|=|\\^=|\\$=|\\*=|=)\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\]\\s]+)))?\\s*\\]/g;
@@ -1710,6 +1745,9 @@
           },
           get validity() {
             return __kotobaValidityState(__kotobaNodeById(__kotobaRefNodeId(ref)));
+          },
+          get validationMessage() {
+            return __kotobaValidationMessage(__kotobaNodeById(__kotobaRefNodeId(ref)));
           },
           get scrollTop() {
             // The real host-bridged half of this already exists --
