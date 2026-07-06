@@ -238,7 +238,7 @@
   (cond
     (style-attr? attr) (clear-style-attrs document node-id)
     (style-property-attr? attr) (remove-style-property document node-id attr)
-    :else (update-in document [:nodes node-id :attrs] dissoc (keyword attr))))
+    :else (dom/remove-attribute document node-id attr)))
 
 (defn- create-fragment
   [document]

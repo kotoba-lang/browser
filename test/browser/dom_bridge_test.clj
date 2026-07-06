@@ -442,7 +442,11 @@
                                                  :node/id note
                                                  :attr "data-temp"})]
     (is (= "note" (get-in removed [:document :nodes note :attrs :class])))
-    (is (not (contains? (get-in removed [:document :nodes note :attrs]) :data-temp)))))
+    (is (not (contains? (get-in removed [:document :nodes note :attrs]) :data-temp)))
+    (is (= [:dom/remove-attr note :data-temp] (last (get-in removed [:document :ops])))
+        "the JS-facing document must also emit a real :dom/remove-attr op, or the actual
+         GPU-rendered host (which only ever mutates by replaying :ops, never by re-reading
+         this document) keeps the removed attribute stale forever")))
 
 (deftest mutation-bridge-set-and-remove-style-attribute-updates-inline-style-model
   (let [page (browser/load-html {:url "kotoba://dom"

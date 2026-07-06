@@ -382,6 +382,16 @@
    "<div id=\"style-prop-target\" class=\"style-prop-box\">teal by stylesheet, mutated below</div>"
    "<div id=\"style-prop-result\">style-property proof: pending...</div>"
    "</section>"
+   "<section id=\"remove-attr-proof\" style=\"display:flex; flex-direction:column; gap:8\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "Real element.removeAttribute('checked') below -- previously never "
+   "reached the actual GPU-rendered host at all (no op was ever emitted "
+   "for it), so the real retained-tree paint kept a removed attribute "
+   "stale forever even though getAttribute() already looked correct."
+   "</p>"
+   "<input type=\"checkbox\" id=\"remove-attr-target\" checked>"
+   "<div id=\"remove-attr-result\">remove-attr proof: pending...</div>"
+   "</section>"
    "<section style=\"display:flex; flex-direction:row; gap:12px\">"
    "<div style=\"display:flex; flex-direction:column; background:#16202f; border-width:2; border-color:#4fb3a6; padding:10; width:220\">"
    "<p style=\"color:#9fb0c9; font-size:13\">"
@@ -540,6 +550,14 @@
    "var spColor = document.getElementById('style-prop-target').style.color;"
    "var spResult = document.getElementById('style-prop-result');"
    "spResult.textContent = 'style-property proof: color after a real commit boundary=' + spColor;"
+   "</script>"
+   "<script>"
+   "var raTarget = document.getElementById('remove-attr-target');"
+   "var raBefore = raTarget.getAttribute('checked');"
+   "raTarget.removeAttribute('checked');"
+   "var raAfter = raTarget.getAttribute('checked');"
+   "var raResult = document.getElementById('remove-attr-result');"
+   "raResult.textContent = 'remove-attr proof: before=' + raBefore + ', after=' + raAfter;"
    "</script>"
    "<script>"
    "var w = new Worker(" (pr-str worker-url) ");"
@@ -812,6 +830,7 @@
                  classlist-replace-proof (element-text doc "classlist-replace-result")
                  hidden-property-proof (element-text doc "hidden-property-result")
                  style-property-proof (element-text doc "style-prop-result")
+                 remove-attr-proof (element-text doc "remove-attr-result")
                  status-badge-proof (pseudo-content doc "status-badge")
                  step-proofs (mapv #(pseudo-content doc %)
                                    ["step-1" "step-2" "step-3" "step-4"])]
@@ -831,6 +850,7 @@
              (js/console.log "browser.demo: #classlist-replace-result ->" (pr-str classlist-replace-proof))
              (js/console.log "browser.demo: #hidden-property-result ->" (pr-str hidden-property-proof))
              (js/console.log "browser.demo: #style-prop-result ->" (pr-str style-property-proof))
+             (js/console.log "browser.demo: #remove-attr-result ->" (pr-str remove-attr-proof))
              (js/console.log "browser.demo: real ::before generated content ->"
                               "#status-badge:" (pr-str status-badge-proof)
                               "#step-counter lis:" (pr-str step-proofs))
