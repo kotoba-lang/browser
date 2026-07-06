@@ -353,6 +353,14 @@
    "<div id=\"min-height-box\" style=\"min-height:80; background:#e0a458; width:120; color:#121724\">min-height:80</div>"
    "</div>"
    "</section>"
+   "<section id=\"classlist-replace-proof\" style=\"display:flex; flex-direction:column; gap:8\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "Real classList.replace() below -- previously entirely missing, a "
+   "common vanilla-JS single-class-swap idiom."
+   "</p>"
+   "<div id=\"classlist-replace-target\" class=\"loading box\" style=\"display:none\">source (hidden, read by script below)</div>"
+   "<div id=\"classlist-replace-result\">classlist-replace proof: pending...</div>"
+   "</section>"
    "<section style=\"display:flex; flex-direction:row; gap:12px\">"
    "<div style=\"display:flex; flex-direction:column; background:#16202f; border-width:2; border-color:#4fb3a6; padding:10; width:220\">"
    "<p style=\"color:#9fb0c9; font-size:13\">"
@@ -486,6 +494,13 @@
    "var fbResult = document.getElementById('focus-blur-fragment-result');"
    "fbResult.textContent = 'focus-blur-fragment proof: focus=' + focusOk + ', blur=' + blurOk + "
    "', text=\"' + textTarget.textContent + '\"';"
+   "</script>"
+   "<script>"
+   "var clTarget = document.getElementById('classlist-replace-target');"
+   "var clReturned = clTarget.classList.replace('loading', 'loaded');"
+   "var clResult = document.getElementById('classlist-replace-result');"
+   "clResult.textContent = 'classlist-replace proof: class=\"' + "
+   "clTarget.getAttribute('class') + '\", returned=' + clReturned;"
    "</script>"
    "<script>"
    "var w = new Worker(" (pr-str worker-url) ");"
@@ -755,6 +770,7 @@
                  remove-listener-proof (element-text doc "remove-listener-result")
                  scroll-position-proof (element-text doc "scroll-position-result")
                  focus-blur-fragment-proof (element-text doc "focus-blur-fragment-result")
+                 classlist-replace-proof (element-text doc "classlist-replace-result")
                  status-badge-proof (pseudo-content doc "status-badge")
                  step-proofs (mapv #(pseudo-content doc %)
                                    ["step-1" "step-2" "step-3" "step-4"])]
@@ -771,6 +787,7 @@
              (js/console.log "browser.demo: #remove-listener-result ->" (pr-str remove-listener-proof))
              (js/console.log "browser.demo: #scroll-position-result ->" (pr-str scroll-position-proof))
              (js/console.log "browser.demo: #focus-blur-fragment-result ->" (pr-str focus-blur-fragment-proof))
+             (js/console.log "browser.demo: #classlist-replace-result ->" (pr-str classlist-replace-proof))
              (js/console.log "browser.demo: real ::before generated content ->"
                               "#status-badge:" (pr-str status-badge-proof)
                               "#step-counter lis:" (pr-str step-proofs))

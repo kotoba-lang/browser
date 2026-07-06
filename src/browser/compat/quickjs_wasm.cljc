@@ -1183,6 +1183,17 @@
             write(next);
             return shouldAdd;
           },
+          replace: function(oldToken, newToken) {
+            oldToken = String(oldToken);
+            newToken = String(newToken);
+            var next = tokens();
+            var i = next.indexOf(oldToken);
+            // Real spec: absent oldToken is a no-op (does NOT add newToken).
+            if (i < 0) return false;
+            next[i] = newToken;
+            write(next);
+            return true;
+          },
           toString: function() { return tokens().join(' '); },
           get value() { return tokens().join(' '); }
         };

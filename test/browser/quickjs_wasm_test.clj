@@ -559,6 +559,8 @@
     (is (str/includes? source "add: function()"))
     (is (str/includes? source "remove: function()"))
     (is (str/includes? source "toggle: function(token, force)"))
+    (is (str/includes? source "replace: function(oldToken, newToken)"))
+    (is (str/includes? source "if (i < 0) return false"))
     (is (str/includes? source "__kotobaSetAttribute(ref, 'class'"))
     (is (str/includes? source "'dom/op': 'set-attribute'"))))
 
