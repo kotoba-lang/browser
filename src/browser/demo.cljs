@@ -424,6 +424,15 @@
    "<input id=\"check-validity-target\" required placeholder=\"required field, left blank\">"
    "<div id=\"check-validity-result\">checkValidity proof: pending...</div>"
    "</section>"
+   "<section id=\"select-proof\" style=\"display:flex; flex-direction:column; gap:8\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "Real HTMLInputElement.select() below -- previously entirely missing, "
+   "deferred across ten prior cycles. A script below calls select() on this "
+   "input and reads back the real resulting selection range."
+   "</p>"
+   "<input id=\"select-target\" value=\"select() should select all of this\">"
+   "<div id=\"select-result\">select() proof: pending...</div>"
+   "</section>"
    "<section id=\"font-family-proof\" style=\"display:flex; flex-direction:column; gap:8\">"
    "<p style=\"color:#9fb0c9; font-size:13\">"
    "Real CSS font-family below -- previously read from NOWHERE at all, "
@@ -673,6 +682,13 @@
    "var cvResult = document.getElementById('check-validity-result');"
    "cvResult.textContent = 'checkValidity proof: checkValidity()=' + cvTarget.checkValidity() + "
    "', validity.valueMissing=' + cvTarget.validity.valueMissing + ', willValidate=' + cvTarget.willValidate;"
+   "</script>"
+   "<script>"
+   "var selTarget = document.getElementById('select-target');"
+   "selTarget.select();"
+   "var selResult = document.getElementById('select-result');"
+   "selResult.textContent = 'select() proof: selectionStart=' + selTarget.selectionStart + "
+   "', selectionEnd=' + selTarget.selectionEnd + ', value.length=' + selTarget.value.length;"
    "</script>"
    "<script>"
    "var w = new Worker(" (pr-str worker-url) ");"
@@ -948,6 +964,7 @@
                  remove-attr-proof (element-text doc "remove-attr-result")
                  get-computed-style-proof (element-text doc "get-computed-style-result")
                  check-validity-proof (element-text doc "check-validity-result")
+                 select-proof (element-text doc "select-result")
                  status-badge-proof (pseudo-content doc "status-badge")
                  step-proofs (mapv #(pseudo-content doc %)
                                    ["step-1" "step-2" "step-3" "step-4"])]
@@ -970,6 +987,7 @@
              (js/console.log "browser.demo: #remove-attr-result ->" (pr-str remove-attr-proof))
              (js/console.log "browser.demo: #get-computed-style-result ->" (pr-str get-computed-style-proof))
              (js/console.log "browser.demo: #check-validity-result ->" (pr-str check-validity-proof))
+             (js/console.log "browser.demo: #select-result ->" (pr-str select-proof))
              (js/console.log "browser.demo: real ::before generated content ->"
                               "#status-badge:" (pr-str status-badge-proof)
                               "#step-counter lis:" (pr-str step-proofs))

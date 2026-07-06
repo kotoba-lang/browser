@@ -145,6 +145,19 @@
     (is (str/includes? source "rangeOverflow: reason === 'rangeOverflow'"))
     (is (str/includes? source "valid: reason === null"))))
 
+(deftest quickjs-wasm-webapi-shim-exposes-select-method
+  ;; HTMLInputElement/HTMLTextAreaElement.select() -- previously entirely
+  ;; missing (a repo-wide grep for a `select:` method on the generic
+  ;; element wrapper returned nothing at all, only the unrelated
+  ;; `<select>` tag/option-list machinery), deferred across ten prior
+  ;; scoping passes as the safest trivial close-out. Confirmed via a real
+  ;; CLJS/QuickJS smoke test (quickjs-select-smoke-test) that a real
+  ;; input/textarea's own select() now correctly selects its whole value,
+  ;; reusing the already-real setSelectionRange.
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "select: function()"))
+    (is (str/includes? source "this.setSelectionRange(0, this.value.length);"))))
+
 (deftest quickjs-wasm-webapi-shim-exposes-scoped-element-query-selectors
   (let [source quickjs-wasm/webapi-shim-source]
     (is (str/includes? source "function __kotobaScopedQuerySelectorAllIds(rootId, selector)"))

@@ -2206,6 +2206,18 @@
               node['selection-end'] = Math.max(s, e);
             }
           },
+          select: function() {
+            // Real HTMLInputElement/HTMLTextAreaElement.select() -- selects
+            // all of the control's own text, equivalent to a real
+            // setSelectionRange(0, value.length), reused verbatim here
+            // (matching this engine's own existing permissive posture --
+            // setSelectionRange itself never gates on control type either,
+            // e.g. a checkbox's own attribute value.length -- neither
+            // visually matters here since layout-form-control's own sel-ops
+            // only ever renders a caret/selection for a real text-entry
+            // input, gated separately at the paint layer).
+            this.setSelectionRange(0, this.value.length);
+          },
           checkValidity: function() {
             return __kotobaValidityState(__kotobaNodeById(__kotobaRefNodeId(ref))).valid;
           },
