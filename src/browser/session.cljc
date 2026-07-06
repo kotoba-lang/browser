@@ -504,13 +504,13 @@
    entry for it, mirroring `remember-navigation-entry`'s own shape.
 
    Deliberately scoped to `pushState`-driven GROWTH only, an honest,
-   documented limitation rather than a silent gap: a `replaceState` call
-   that overwrites the CURRENT sandbox entry in place (same entry count,
-   different content) is not yet detected or bridged, and neither is a
-   script's own programmatic `history.go()`/`back()`/`forward()`
-   (`:history/traverse`, which only moves the sandbox's own index, never
-   growing entries) -- both correctly no-op here rather than bridging
-   incorrect or partial state, left for a separate future cycle."
+   documented limitation rather than a silent gap: a script's own
+   programmatic `history.go()`/`back()`/`forward()` (`:history/traverse`,
+   which only moves the sandbox's own index, never growing entries) is
+   not yet bridged -- it correctly no-ops here rather than bridging
+   incorrect or partial state, left for a separate future cycle. See
+   `bridge-replaced-history-entry` right below for the sibling fix that
+   closes the OTHER deferred half of this same gap, `replaceState`."
   [session script-state]
   (let [entries (vec (:history/entries script-state))
         already-bridged (:browser.session/script-history-bridged-count session 0)]
@@ -524,12 +524,63 @@
               (subvec entries already-bridged))
       session)))
 
+(defn- bridge-replaced-history-entry
+  "The `replaceState` half of the same gap `bridge-pushed-history-entries`
+   closes above -- deliberately a SEPARATE, follow-on fix rather than
+   folded into that one, since `replaceState`'s own real HTML5 semantics
+   are genuinely different: it overwrites the CURRENT sandbox entry's
+   content IN PLACE (same `:history/entries` count as before, just
+   different `:url`/`:title`/`:state` at the current `:history/index`),
+   never creating a new entry -- the exact case
+   `bridge-pushed-history-entries`'s own GROWTH-only check
+   (`(> (count entries) already-bridged)`) correctly, deliberately never
+   catches.
+
+   Only fires when: `:history/entries`' count is UNCHANGED from what's
+   already bridged (no `pushState` happened this call -- if one did,
+   `bridge-pushed-history-entries` runs first, in `commit-script-state!`,
+   and already advances `already-bridged` to match, so this fn correctly
+   sees `count == already-bridged` again and finds nothing left to
+   replace, since the freshly-pushed entry's content already matches
+   what was just bridged); the sandbox's own current index points at the
+   LAST already-bridged entry (a stale index from an untracked
+   `:history/traverse` call is deliberately NOT treated as a replace --
+   see `bridge-pushed-history-entries`'s own docstring on why traverse
+   stays unbridged); and that entry's URL genuinely differs from what
+   the session already has recorded, i.e. an actual `replaceState` call
+   happened, not a same-tab replay of already-bridged state.
+
+   Updates the session's current page's own `:browser/url` (replaceState
+   never touches the document either, same as pushState) AND the
+   matching entry already sitting in `:browser.session/navigation` at
+   its own current `:index`, in place -- no new navigation entry, since
+   `replaceState`'s entire point in real HTML5 is that it does NOT grow
+   the history stack."
+  [session script-state]
+  (let [entries (vec (:history/entries script-state))
+        already-bridged (:browser.session/script-history-bridged-count session 0)
+        idx (:history/index script-state)]
+    (if-let [entry (when (and (= (count entries) already-bridged)
+                              (pos? already-bridged)
+                              (= idx (dec already-bridged)))
+                     (nth entries idx nil))]
+      (if (not= (:url entry) (get-in session [:browser.session/page :browser/url]))
+        (let [page (assoc (:browser.session/page session) :browser/url (:url entry))
+              nav-idx (get-in session [:browser.session/navigation :index] -1)]
+          (-> session
+              (assoc :browser.session/page page)
+              (assoc-in [:browser.session/navigation :entries nav-idx :page] page)
+              (assoc-in [:browser.session/navigation :entries nav-idx :url] (:url entry))))
+        session)
+      session)))
+
 (defn commit-script-state!
   [session script-state]
   (let [net-store-updated? (contains? (:net/context script-state) :store)
         session (-> session
                     (apply-script-net-store script-state)
-                    (bridge-pushed-history-entries script-state))]
+                    (bridge-pushed-history-entries script-state)
+                    (bridge-replaced-history-entry script-state))]
     (if-let [document (:document script-state)]
       (-> (commit-document! session document)
           (update :browser.session/history conj

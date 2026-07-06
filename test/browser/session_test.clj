@@ -3611,6 +3611,80 @@
            (mapv :url (get-in after [:browser.session/navigation :entries]))))
     (is (= "/one" (get-in after [:browser.session/page :browser/url])))))
 
+(deftest script-replacestate-in-a-separate-call-updates-the-bridged-entry-in-place
+  ;; The sibling gap to pushState, closed as its own follow-up cycle:
+  ;; real HTML5 replaceState overwrites the CURRENT entry's content in
+  ;; place -- no new navigation entry -- but a SEPARATE <script> tag
+  ;; calling it (after an earlier tag already pushed) couldn't be
+  ;; detected by pushState's own growth-only bridging at all (entries
+  ;; count doesn't change), confirmed via direct REPL reproduction that
+  ;; the session's own navigation stack stayed stuck on the pre-replace
+  ;; URL before this fix.
+  (let [h (host/recording-host)
+        s (-> (session/new-session {:host h})
+              (session/load-html! {:url "https://app.example/start" :html "<main>hi</main>"})
+              (session/commit-script-state!
+               {:history/entries [{:url "/one" :title "One" :state nil}]
+                :history/index 0}))
+        replaced (session/commit-script-state!
+                  s {:history/entries [{:url "/one-edited" :title "Edited" :state nil}]
+                     :history/index 0})]
+    (is (= ["https://app.example/start" "/one-edited"]
+           (mapv :url (get-in replaced [:browser.session/navigation :entries])))
+        "the already-bridged entry is updated IN PLACE, not left stale and not duplicated")
+    (is (= "/one-edited" (get-in replaced [:browser.session/page :browser/url])))))
+
+(deftest script-replacestate-only-touches-the-latest-bridged-entry-not-earlier-ones
+  (let [h (host/recording-host)
+        s (-> (session/new-session {:host h})
+              (session/load-html! {:url "https://app.example/start" :html "<main>hi</main>"})
+              (session/commit-script-state!
+               {:history/entries [{:url "/one" :title "One" :state nil}]
+                :history/index 0})
+              (session/commit-script-state!
+               {:history/entries [{:url "/one" :title "One" :state nil}
+                                   {:url "/two" :title "Two" :state nil}]
+                :history/index 1}))
+        replaced (session/commit-script-state!
+                  s {:history/entries [{:url "/one" :title "One" :state nil}
+                                       {:url "/two-edited" :title "Two edited" :state nil}]
+                     :history/index 1})]
+    (is (= ["https://app.example/start" "/one" "/two-edited"]
+           (mapv :url (get-in replaced [:browser.session/navigation :entries])))
+        "only the LATEST entry (/two) is replaced -- /one, bridged earlier, is untouched")))
+
+(deftest script-pushstate-and-replacestate-in-the-same-call-bridges-only-the-final-content
+  ;; A single <script> tag calling both pushState then replaceState
+  ;; before this session ever sees the result: quickjs-execution's own
+  ;; sandbox model already combines these into ONE final entry (see
+  ;; history-replace-state-result), so this is really confirming
+  ;; bridge-pushed-history-entries' own pre-existing growth-bridging
+  ;; already handles this composed case correctly -- bridge-replaced-
+  ;; history-entry correctly finds nothing left to do once the fresh
+  ;; push already landed the final, already-replaced content.
+  (let [h (host/recording-host)
+        s (-> (session/new-session {:host h})
+              (session/load-html! {:url "https://app.example/start" :html "<main>hi</main>"}))
+        combined (session/commit-script-state!
+                  s {:history/entries [{:url "/one-final" :title "Final" :state nil}]
+                     :history/index 0})]
+    (is (= ["https://app.example/start" "/one-final"]
+           (mapv :url (get-in combined [:browser.session/navigation :entries]))))
+    (is (= 1 (:browser.session/script-history-bridged-count combined)))))
+
+(deftest script-replacestate-with-identical-url-is-a-genuine-no-op
+  (let [h (host/recording-host)
+        s (-> (session/new-session {:host h})
+              (session/load-html! {:url "https://app.example/start" :html "<main>hi</main>"})
+              (session/commit-script-state!
+               {:history/entries [{:url "/one" :title "One" :state nil}]
+                :history/index 0}))
+        same-again (session/commit-script-state!
+                    s {:history/entries [{:url "/one" :title "One" :state nil}]
+                       :history/index 0})]
+    (is (= (mapv :url (get-in s [:browser.session/navigation :entries]))
+           (mapv :url (get-in same-again [:browser.session/navigation :entries]))))))
+
 (deftest restored-session-uses-persisted-current-page-state
   (let [h (host/recording-host)
         provider (persistence-provider/memory-provider)
