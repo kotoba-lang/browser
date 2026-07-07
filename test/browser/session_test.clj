@@ -4221,6 +4221,71 @@
                               net/cookie-key)))
     (is (= "Landing" (-> navigated :browser.session/page :browser/document kotoba.wasm.dom/text-content)))))
 
+(deftest navigation-attaches-samesite-default-cookie-on-cross-site-top-level-link-click
+  ;; A user on other.test clicks an ordinary link into app.example, which
+  ;; already has a SameSite-unspecified (Lax by default, per RFC 6265bis)
+  ;; session cookie set from an earlier same-site visit. Real browsers
+  ;; still attach it to this top-level GET navigation even though the
+  ;; page-to-page referrer is cross-site -- this carve-out is the entire
+  ;; reason Lax exists as a level distinct from Strict (which blocks it
+  ;; too, see the sibling test below). Previously `navigate!` treated
+  ;; every navigation identically to a cross-site subresource fetch,
+  ;; requiring the same-site check unconditionally, so this cookie would
+  ;; be silently withheld and the user would appear logged out on arrival.
+  (let [h (host/recording-host)
+        p (profile/new-profile {:id "default"})
+        login-calls (atom [])
+        login-session (session/new-session
+                       {:host h
+                        :profile p
+                        :store (storage/empty-store)
+                        :fetch-fn (fn [{:keys [url] :as req}]
+                                    (swap! login-calls conj req)
+                                    (case url
+                                      "https://app.example/login"
+                                      {:status 200 :headers {"set-cookie" "sid=abc123; Path=/"} :body "<main>Logged in</main>"}))})
+        logged-in (session/navigate! login-session "https://app.example/login")
+        cross-calls (atom [])
+        cross-session (assoc (session/new-session
+                              {:host h
+                               :profile p
+                               :store (:browser.session/store logged-in)
+                               :fetch-fn (fn [{:keys [url] :as req}]
+                                           (swap! cross-calls conj req)
+                                           {:status 200 :body "<main>Dashboard</main>"})})
+                             :browser.session/page {:browser/url "https://other.test/referrer-page"})]
+    (session/navigate! cross-session "https://app.example/dashboard")
+    (is (= "sid=abc123" (get-in (first @cross-calls) [:headers "cookie"])))))
+
+(deftest navigation-still-withholds-samesite-strict-cookie-on-cross-site-top-level-link-click
+  ;; Strict is meaningfully stricter than Lax specifically because it does
+  ;; NOT carve out top-level navigation -- a Strict cookie must never
+  ;; cross sites at all, unlike the sibling test above.
+  (let [h (host/recording-host)
+        p (profile/new-profile {:id "default"})
+        login-session (session/new-session
+                       {:host h
+                        :profile p
+                        :store (storage/empty-store)
+                        :fetch-fn (fn [{:keys [url]}]
+                                    (case url
+                                      "https://app.example/login"
+                                      {:status 200
+                                       :headers {"set-cookie" "sid=strictval; Path=/; SameSite=Strict"}
+                                       :body "<main>Logged in</main>"}))})
+        logged-in (session/navigate! login-session "https://app.example/login")
+        cross-calls (atom [])
+        cross-session (assoc (session/new-session
+                              {:host h
+                               :profile p
+                               :store (:browser.session/store logged-in)
+                               :fetch-fn (fn [{:keys [url] :as req}]
+                                           (swap! cross-calls conj req)
+                                           {:status 200 :body "<main>Dashboard</main>"})})
+                             :browser.session/page {:browser/url "https://other.test/referrer-page"})]
+    (session/navigate! cross-session "https://app.example/dashboard")
+    (is (nil? (get-in (first @cross-calls) [:headers "cookie"])))))
+
 (deftest navigation-redirect-resolves-relative-location
   (let [h (host/recording-host)
         calls (atom [])

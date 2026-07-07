@@ -984,6 +984,60 @@
     (is (= "implicit=yes" (get-in @same-site-seen [:headers "cookie"])))
     (is (nil? (get-in @cross-site-seen [:headers "cookie"])))))
 
+(deftest cookie-header-exempts-samesite-lax-default-for-top-level-navigation
+  ;; Real browsers still attach a SameSite=Lax (or missing, which behaves
+  ;; as Lax by default per RFC 6265bis) cookie to a cross-site TOP-LEVEL
+  ;; GET navigation -- e.g. clicking an ordinary inbound link -- even
+  ;; though the identical cookie must NOT be attached to a cross-site
+  ;; subresource/fetch request (see the sibling `-defaults-samesite-to-
+  ;; lax-when-omitted` test above). This is the entire reason Lax is a
+  ;; DISTINCT, less restrictive level than Strict, not just an alias for
+  ;; it. `net/cookie-header`'s new 5th `top-level-navigation?` arg (used
+  ;; by `browser.session/navigate!` via `navigation-cookie-header`) is
+  ;; what carries this distinction down into `cookie-same-site-matches?`.
+  (let [p (profile/new-profile {:id "default"})
+        stored (net/fetch-resource
+                {:store (storage/empty-store)
+                 :profile (profile/grant-permission p "https://app.example.com" :net/fetch)
+                 :page-url "https://app.example.com/login"
+                 :fetch-fn (fn [_]
+                             {:status 200
+                              :headers {"set-cookie" "implicit=yes; Domain=example.com; Path=/"}
+                              :body "ok"})}
+                {:url "https://app.example.com/login" :method :get})
+        store (:store stored)]
+    (is (= "implicit=yes"
+           (net/cookie-header store p "https://app.example.com/login" "https://app.example.com/dashboard" true))
+        "same-site navigation: attached regardless")
+    (is (= "implicit=yes"
+           (net/cookie-header store p "https://other.test/referrer" "https://app.example.com/dashboard" true))
+        "cross-site TOP-LEVEL NAVIGATION: still attached -- the Lax carve-out")
+    (is (nil?
+         (net/cookie-header store p "https://other.test/referrer" "https://app.example.com/dashboard" false))
+        "cross-site but NOT flagged as a top-level navigation (e.g. a subresource fetch): still blocked")
+    (is (nil?
+         (net/cookie-header store p "https://other.test/referrer" "https://app.example.com/dashboard"))
+        "cross-site via the pre-existing 4-arg arity (top-level-navigation? omitted): unaffected by this fix, still blocked")))
+
+(deftest cookie-header-does-not-exempt-samesite-strict-for-top-level-navigation
+  ;; Strict is meaningfully stricter than Lax specifically because it does
+  ;; NOT carve out top-level navigation -- a Strict cookie must never
+  ;; cross sites at all, full stop, even when navigate! flags the request
+  ;; as a top-level navigation.
+  (let [p (profile/new-profile {:id "default"})
+        stored (net/fetch-resource
+                {:store (storage/empty-store)
+                 :profile (profile/grant-permission p "https://app.example.com" :net/fetch)
+                 :page-url "https://app.example.com/login"
+                 :fetch-fn (fn [_]
+                             {:status 200
+                              :headers {"set-cookie" "strict=yes; Domain=example.com; Path=/; SameSite=Strict"}
+                              :body "ok"})}
+                {:url "https://app.example.com/login" :method :get})
+        store (:store stored)]
+    (is (nil? (net/cookie-header store p "https://other.test/referrer" "https://app.example.com/dashboard" true)))
+    (is (= "strict=yes" (net/cookie-header store p "https://app.example.com/login" "https://app.example.com/dashboard" true)))))
+
 (deftest cookie-domain-does-not-subdomain-match-across-unrelated-ip-hosts
   ;; RFC 6265 5.1.3: a suffix match is only a real domain-match when the
   ;; request host is a genuine host NAME -- if it's an IP address, only an

@@ -223,10 +223,15 @@
   [session page-url url]
   (when (and (:browser.session/store session)
              (:browser.session/profile session))
+    ;; `navigate!` (this fn's only caller) always issues a top-level GET --
+    ;; the one real-browser case a SameSite=Lax/default cookie is still
+    ;; attached to even cross-site (e.g. clicking an inbound external
+    ;; link), unlike a cross-site subresource/script fetch.
     (net/cookie-header (:browser.session/store session)
                        (:browser.session/profile session)
                        page-url
-                       url)))
+                       url
+                       true)))
 
 (defn- remember-navigation-response-cookies
   [session url response]

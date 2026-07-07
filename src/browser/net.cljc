@@ -240,15 +240,29 @@
          (= (site-host a) (site-host b)))))
 
 (defn- cookie-same-site-matches?
-  [page-url request-url same-site]
-  ;; RFC 6265bis: a cookie with no SameSite attribute (nil here) defaults to
-  ;; Lax, not None. Only an *explicit* SameSite=None opts a cookie into being
-  ;; sent on cross-site requests; every other value (missing, "lax",
-  ;; "strict", or an unrecognized token) must still satisfy the same-site
-  ;; check, matching real browsers' Lax-by-default CSRF mitigation.
-  (if (= "none" (str/lower-case (str same-site)))
-    true
-    (same-site? page-url request-url)))
+  ([page-url request-url same-site]
+   (cookie-same-site-matches? page-url request-url same-site false))
+  ([page-url request-url same-site top-level-navigation?]
+   ;; RFC 6265bis: a cookie with no SameSite attribute (nil here) defaults to
+   ;; Lax, not None. Only an *explicit* SameSite=None opts a cookie into being
+   ;; sent on cross-site requests; every other value (missing, "lax",
+   ;; "strict", or an unrecognized token) must still satisfy the same-site
+   ;; check, matching real browsers' Lax-by-default CSRF mitigation --
+   ;; EXCEPT that Lax (and the missing/unrecognized default, which also
+   ;; behaves as Lax) specifically carves out one case real browsers still
+   ;; allow cross-site: a top-level, safe-method (GET) navigation, e.g.
+   ;; clicking an ordinary link from another site straight into this one.
+   ;; That's the entire reason Lax exists as a *distinct*, less restrictive
+   ;; level than Strict -- Strict blocks that case too, and must keep doing
+   ;; so even here. Without this carve-out, a page whose session cookie
+   ;; relies on the (extremely common) Lax/default behavior would appear
+   ;; logged out the instant a user arrives via any inbound cross-site
+   ;; link, since every other real browser still sends it.
+   (let [same-site-kw (str/lower-case (str same-site))]
+     (cond
+       (= "none" same-site-kw) true
+       (and top-level-navigation? (not= "strict" same-site-kw)) true
+       :else (same-site? page-url request-url)))))
 
 (defn- cookie-secure-matches?
   [request-url secure?]
@@ -347,26 +361,28 @@
         (storage/put-value profile store-url cookie-expires-at-key cookie-expires-at))))
 
 (defn- cookie-entries
-  [store profile page-url url include-http-only?]
-  (let [request-path (:path (origin/parse-url url))
-        request-host (url-host url)]
-    (distinct-cookie-names
-     (mapcat
-      (fn [store-url]
-        (let [variants (cookie-variants store profile store-url)]
-          (keep (fn [[_ {:keys [name value path domain same-site http-only? secure?] :as variant}]]
-                  (when (and (cookie-path-matches? request-path path)
-                             (cookie-domain-matches? request-host domain)
-                             (cookie-same-site-matches? page-url url same-site)
-                             (cookie-secure-matches? url secure?)
-                             (not (cookie-variant-expired? variant))
-                             (or include-http-only?
-                                 (not http-only?)))
-                    [name value]))
-                (sort-by (fn [[_ variant]]
-                           (- (cookie-variant-path-length variant)))
-                         variants))))
-      (cookie-domain-candidate-urls url)))))
+  ([store profile page-url url include-http-only?]
+   (cookie-entries store profile page-url url include-http-only? false))
+  ([store profile page-url url include-http-only? top-level-navigation?]
+   (let [request-path (:path (origin/parse-url url))
+         request-host (url-host url)]
+     (distinct-cookie-names
+      (mapcat
+       (fn [store-url]
+         (let [variants (cookie-variants store profile store-url)]
+           (keep (fn [[_ {:keys [name value path domain same-site http-only? secure?] :as variant}]]
+                   (when (and (cookie-path-matches? request-path path)
+                              (cookie-domain-matches? request-host domain)
+                              (cookie-same-site-matches? page-url url same-site top-level-navigation?)
+                              (cookie-secure-matches? url secure?)
+                              (not (cookie-variant-expired? variant))
+                              (or include-http-only?
+                                  (not http-only?)))
+                     [name value]))
+                 (sort-by (fn [[_ variant]]
+                            (- (cookie-variant-path-length variant)))
+                          variants))))
+       (cookie-domain-candidate-urls url))))))
 
 (defn- purge-expired-cookies
   [store profile url]
@@ -395,8 +411,10 @@
   ([store profile url]
    (cookie-header store profile url url))
   ([store profile page-url url]
+   (cookie-header store profile page-url url false))
+  ([store profile page-url url top-level-navigation?]
    (cookie-header-from-entries
-    (cookie-entries store profile page-url url true))))
+    (cookie-entries store profile page-url url true top-level-navigation?))))
 
 (defn script-cookie-header
   ([store profile url]
