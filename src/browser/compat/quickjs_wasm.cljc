@@ -1504,13 +1504,31 @@
         };
       }
       function __kotobaDataSet(ref) {
+        // Real DOMStringMap enumerates like a plain object -- Object.keys(),
+        // for...in, and object-spread must all see every real data-*
+        // attribute, matching direct property access (el.dataset.foo),
+        // which already worked correctly. Previously this Proxy had no
+        // ownKeys/getOwnPropertyDescriptor traps at all, so every one of
+        // those enumeration paths fell through to the Proxy's own
+        // permanently-empty {} target instead, silently returning nothing
+        // -- confirmed via a temporary CLJS/QuickJS smoke test before
+        // touching source: Object.keys(el.dataset) on a real element with
+        // two real data-* attributes read as an empty list even though
+        // el.dataset.foo itself already read the right value.
+        function dataKeys() {
+          var node = __kotobaNodeById(__kotobaRefNodeId(ref));
+          var attrs = node && node.attrs ? node.attrs : {};
+          return Object.keys(attrs)
+            .filter(function(name) { return name.indexOf('data-') === 0; })
+            .map(__kotobaDatasetKey);
+        }
         return new Proxy({}, {
           get: function(_, prop) {
             if (prop === 'toJSON') return function() {
               var node = __kotobaNodeById(__kotobaRefNodeId(ref));
               var attrs = node && node.attrs ? node.attrs : {};
-              return Object.keys(attrs).reduce(function(out, name) {
-                if (name.indexOf('data-') === 0) out[__kotobaDatasetKey(name)] = String(attrs[name]);
+              return dataKeys().reduce(function(out, key) {
+                out[key] = String(__kotobaAttr(node, __kotobaDataAttrName(key)));
                 return out;
               }, {});
             };
@@ -1526,6 +1544,22 @@
           deleteProperty: function(_, prop) {
             __kotobaRemoveAttribute(ref, __kotobaDataAttrName(prop));
             return true;
+          },
+          ownKeys: function() {
+            return dataKeys();
+          },
+          getOwnPropertyDescriptor: function(_, prop) {
+            if (typeof prop === 'symbol') return undefined;
+            var node = __kotobaNodeById(__kotobaRefNodeId(ref));
+            var value = __kotobaAttr(node, __kotobaDataAttrName(prop));
+            // Required for the Proxy invariants: ownKeys' reported keys
+            // must each have a corresponding descriptor, and it must be
+            // configurable since the underlying target ({}) has no real
+            // own property for it (a non-configurable descriptor for a
+            // phantom property throws a real TypeError at the engine
+            // level).
+            if (value == null) return undefined;
+            return { value: String(value), writable: true, enumerable: true, configurable: true };
           }
         });
       }

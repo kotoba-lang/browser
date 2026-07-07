@@ -1078,3 +1078,26 @@
                                     "              this.appendChild(__kotobaNodeArg(arguments[i]));\n"
                                     "            }\n"
                                     "          },")))))
+
+(deftest quickjs-wasm-webapi-shim-dataset-proxy-supports-enumeration
+  ;; __kotobaDataSet's Proxy previously had get/set/deleteProperty traps
+  ;; but no ownKeys/getOwnPropertyDescriptor traps, so Object.keys()/
+  ;; for...in/object-spread over el.dataset all silently fell through to
+  ;; the Proxy's own permanently-empty {} target -- confirmed via a
+  ;; temporary CLJS/QuickJS smoke test before touching source that
+  ;; Object.keys(el.dataset) on a real element with two real data-*
+  ;; attributes read as an empty list, even though direct property
+  ;; access (el.dataset.foo) already worked correctly.
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source (str "function dataKeys() {\n"
+                                    "          var node = __kotobaNodeById(__kotobaRefNodeId(ref));\n"
+                                    "          var attrs = node && node.attrs ? node.attrs : {};\n"
+                                    "          return Object.keys(attrs)\n"
+                                    "            .filter(function(name) { return name.indexOf('data-') === 0; })\n"
+                                    "            .map(__kotobaDatasetKey);\n"
+                                    "        }")))
+    (is (str/includes? source (str "ownKeys: function() {\n"
+                                    "            return dataKeys();\n"
+                                    "          },\n"
+                                    "          getOwnPropertyDescriptor: function(_, prop) {")))
+    (is (str/includes? source "return { value: String(value), writable: true, enumerable: true, configurable: true };"))))
