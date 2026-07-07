@@ -179,7 +179,8 @@
        ".focus-within-box:focus-within { background: #2d4a63 } "
        ".range-proof-input:out-of-range { color: #e05a4f; border-color: #e05a4f } "
        ".range-proof-input:in-range { color: #7fce7f; border-color: #7fce7f } "
-       ".box-shadow-spread-box { box-shadow: 0 1px 2px 4px rgba(80,160,220,0.6) }"))
+       ".box-shadow-spread-box { box-shadow: 0 1px 2px 4px rgba(80,160,220,0.6) } "
+       ".currentcolor-box { color: #e07a3f; border: 3px solid currentColor }"))
 
 (defn sample-html
   "The demo page's real HTML, parameterized on `worker-url`/`fetch-url` (the
@@ -773,6 +774,15 @@
    "<input id=\"dispatchevent-click-checkbox\" type=\"checkbox\">"
    "<div id=\"dispatchevent-click-activation-result\">dispatchevent-click-activation proof: pending...</div>"
    "</section>"
+   "<section id=\"currentcolor-proof\" style=\"display:flex; flex-direction:column; gap:8; margin-top:4\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "Real CSS currentColor below -- previously entirely unsupported, "
+   "silently painting fully transparent instead of resolving to the "
+   "element's own text color."
+   "</p>"
+   "<div id=\"currentcolor-target\" class=\"currentcolor-box\" style=\"padding:8\">currentColor box</div>"
+   "<div id=\"currentcolor-result\">currentcolor proof: pending...</div>"
+   "</section>"
    "<script>"
    "document.title = 'Kotoba Browser: real QuickJS + real cssom layout + real WebGL paint';"
    "</script>"
@@ -1077,6 +1087,12 @@
    "', events=' + deEvents.join(',');"
    "</script>"
    "<script>"
+   "var ccTarget = document.getElementById('currentcolor-target');"
+   "var ccComputed = getComputedStyle(ccTarget);"
+   "document.getElementById('currentcolor-result').textContent = "
+   "'currentcolor proof: color=' + ccComputed.color + ', border-color=' + ccComputed.getPropertyValue('border-color');"
+   "</script>"
+   "<script>"
    "void 0;"
    "</script>"
    "</main>"))
@@ -1360,6 +1376,7 @@
                  click-preventdefault-proof (element-text doc "click-preventdefault-result")
                  focus-blur-events-proof (element-text doc "focus-blur-events-result")
                  dispatchevent-click-activation-proof (element-text doc "dispatchevent-click-activation-result")
+                 currentcolor-proof (element-text doc "currentcolor-result")
                  status-badge-proof (pseudo-content doc "status-badge")
                  step-proofs (mapv #(pseudo-content doc %)
                                    ["step-1" "step-2" "step-3" "step-4"])]
@@ -1402,6 +1419,7 @@
              (js/console.log "browser.demo: #click-preventdefault-result ->" (pr-str click-preventdefault-proof))
              (js/console.log "browser.demo: #focus-blur-events-result ->" (pr-str focus-blur-events-proof))
              (js/console.log "browser.demo: #dispatchevent-click-activation-result ->" (pr-str dispatchevent-click-activation-proof))
+             (js/console.log "browser.demo: #currentcolor-result ->" (pr-str currentcolor-proof))
              (js/console.log "browser.demo: real ::before generated content ->"
                               "#status-badge:" (pr-str status-badge-proof)
                               "#step-counter lis:" (pr-str step-proofs))
