@@ -1282,6 +1282,25 @@
    "document.getElementById('mutation-observer-dup-result').textContent = "
    "'mutation-observer-dup proof: records=' + moRecords.length;"
    "</script>"
+   "<section id=\"c1-entity-proof\" style=\"display:flex; flex-direction:column; gap:8; margin-top:4\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "The real text below is written using numeric character references "
+   "in the C1 control range (the classic Word/legacy-CMS smart-quotes "
+   "source) -- per spec these must decode through a fixed Windows-1252 "
+   "remap, not as their literal, invisible C1 control codepoints."
+   "</p>"
+   "<div id=\"c1-entity-target\">&#146;&#147;&#148;&#128;</div>"
+   "<div id=\"c1-entity-result\">c1-entity proof: pending...</div>"
+   "</section>"
+   "<script>"
+   "var ceTarget = document.getElementById('c1-entity-target');"
+   "var ceCodes = [];"
+   "for (var ceI = 0; ceI < ceTarget.textContent.length; ceI++) {"
+   "ceCodes.push(ceTarget.textContent.charCodeAt(ceI));"
+   "}"
+   "document.getElementById('c1-entity-result').textContent = "
+   "'c1-entity proof: codes=' + ceCodes.join(',');"
+   "</script>"
    "<script>"
    "void 0;"
    "</script>"
@@ -1579,6 +1598,7 @@
                  pre-leading-lf-proof (element-text doc "pre-leading-lf-result")
                  textarea-leading-lf-proof (element-text doc "textarea-leading-lf-result")
                  mutation-observer-dup-proof (element-text doc "mutation-observer-dup-result")
+                 c1-entity-proof (element-text doc "c1-entity-result")
                  status-badge-proof (pseudo-content doc "status-badge")
                  step-proofs (mapv #(pseudo-content doc %)
                                    ["step-1" "step-2" "step-3" "step-4"])]
@@ -1633,6 +1653,7 @@
              (js/console.log "browser.demo: #pre-leading-lf-result ->" (pr-str pre-leading-lf-proof))
              (js/console.log "browser.demo: #textarea-leading-lf-result ->" (pr-str textarea-leading-lf-proof))
              (js/console.log "browser.demo: #mutation-observer-dup-result ->" (pr-str mutation-observer-dup-proof))
+             (js/console.log "browser.demo: #c1-entity-result ->" (pr-str c1-entity-proof))
              (js/console.log "browser.demo: real ::before generated content ->"
                               "#status-badge:" (pr-str status-badge-proof)
                               "#step-counter lis:" (pr-str step-proofs))
