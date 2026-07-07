@@ -518,11 +518,19 @@
 (declare ancestor-form-id)
 
 (defn- node-by-dom-id
+  "Real document.getElementById-equivalent resolution: the FIRST element in
+   tree order carrying this `id` (an invalid-but-common-in-the-wild
+   duplicate id resolves to the earliest one, not an arbitrary one).
+   Previously implemented as a raw (:nodes document) hash-map scan --
+   the exact same unordered-iteration bug class already found and fixed
+   in form-associated-node-ids last cycle (a hash-map's iteration order
+   is not a language guarantee), and inconsistent within this very
+   codebase: `dom-bridge/get-element-by-id` already implements the
+   correct, real-tree-order version of this exact lookup (used by
+   `document.getElementById`), so this now simply delegates to it instead
+   of duplicating an equivalent (previously incorrect) tree walk."
   [document dom-id]
-  (some (fn [[node-id node]]
-          (when (= dom-id (get-in node [:attrs :id]))
-            node-id))
-        (:nodes document)))
+  (dom-bridge/get-element-by-id document dom-id))
 
 (defn- descendant-node-ids
   ([document node-id]

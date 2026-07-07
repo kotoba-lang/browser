@@ -1751,6 +1751,50 @@
            (:form/data submitted))
         "external form= controls must appear in real document/tree order, not alphabetical or any other incidental order")))
 
+(deftest label-for-and-form-attribute-id-resolution-picks-the-first-tree-order-match
+  ;; node-by-dom-id (backing both label[for] resolution and a control's
+  ;; own explicit form="id" owner lookup) had the exact same unordered
+  ;; (:nodes document) hash-map scan the just-fixed form-associated-node-
+  ;; ids used to have -- a real document.getElementById-equivalent lookup
+  ;; must always resolve a duplicate (invalid but common in the wild) id
+  ;; to the FIRST element in tree order, deterministically, never an
+  ;; arbitrary one depending on hash-map iteration order. Fixed by
+  ;; delegating to dom-bridge/get-element-by-id, this codebase's own
+  ;; already-correct sibling implementation of the identical lookup.
+  ;; Two duplicate ids are used here at once (one for a <label for=...>,
+  ;; one for a control's own form=... owner) so both call sites of
+  ;; node-by-dom-id are exercised by the same test.
+  (let [page (browser/load-html
+              {:url "kotoba://dup-id"
+               :html (str "<main>"
+                          "<label id=\"label\" for=\"dup-checkbox\">Flag</label>"
+                          "<input id=\"dup-checkbox\" type=\"checkbox\">"
+                          "<input id=\"dup-checkbox\" type=\"checkbox\">"
+                          "<form id=\"dup-form\"></form>"
+                          "<form id=\"dup-form\">"
+                          "<button id=\"go\" form=\"dup-form\" name=\"go\" value=\"x\">Go</button>"
+                          "</form>"
+                          "</main>")})
+        document (:browser/document page)
+        label (bridge/query-selector document "#label")
+        checkboxes (bridge/query-selector-all document "#dup-checkbox")
+        first-checkbox (first checkboxes)
+        second-checkbox (second checkboxes)
+        forms (bridge/query-selector-all document "#dup-form")
+        first-form (first forms)
+        go (bridge/query-selector document "#go")
+        result (document-input/reduce-event document {:event/type :pointer/click :node/id label})]
+    (is (= first-checkbox (:node/id result))
+        "label[for] with a duplicate id must activate the FIRST matching element in tree order")
+    (is (= true (get-in result [:document :nodes first-checkbox :attrs :checked])))
+    (is (not= true (get-in result [:document :nodes second-checkbox :attrs :checked]))
+        "the second (later) duplicate-id element must be entirely unaffected")
+    (let [document (dom/add-event-listener document first-form "submit" "submit-handler")
+          submitted (document-input/reduce-event document {:event/type :pointer/click :node/id go})]
+      (is (= true (:submitted? submitted)))
+      (is (= first-form (:form/id submitted))
+          "a control's own explicit form=\"id\" owner must resolve to the FIRST matching <form> in tree order"))))
+
 (deftest select-option-click-updates-value-and-form-data
   (let [page (browser/load-html {:url "kotoba://select"
                                  :html "<main><form id=\"form\"><select id=\"mode\" name=\"mode\"><option id=\"one\" value=\"one\" selected>One</option><option id=\"two\" value=\"two\">Two</option><option id=\"locked\" value=\"locked\" disabled>Locked</option></select><button id=\"go\">Go</button></form></main>"})
