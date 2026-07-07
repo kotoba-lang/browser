@@ -226,11 +226,26 @@
       (domain-matches? request-host cookie-domain)))
 
 (defn- site-host
+  "The SameSite/CSRF-relevant \"site\" for a URL: the registrable domain,
+   i.e. one label ABOVE the public suffix -- not just a naive last-2-labels
+   guess. A bare last-2-labels join wrongly conflates any two hosts that
+   happen to share a multi-label public suffix like `co.uk`/`com.au`
+   (`victim.co.uk` and `attacker.co.uk` would both naively reduce to the
+   same \"co.uk\"), which would make a SameSite=Strict cookie set on one
+   wrongly get sent on a cross-site request whose page is the other -- a
+   real CSRF-protection bypass, confirmed via a direct REPL reproduction
+   before this fix. Reuses this file's own `public-suffix-like-domains`
+   (the same set `cookie-domain` above already consults for a related
+   purpose): when the naive last-2-labels join IS a known public suffix,
+   one more label is included instead."
   [url]
-  (let [labels (str/split (str (url-host url)) #"\.")]
-    (if (>= (count labels) 2)
-      (str/join "." (take-last 2 labels))
-      (first labels))))
+  (let [labels (str/split (str (url-host url)) #"\.")
+        n (count labels)]
+    (cond
+      (< n 2) (first labels)
+      (and (>= n 3) (contains? public-suffix-like-domains (str/join "." (take-last 2 labels))))
+      (str/join "." (take-last 3 labels))
+      :else (str/join "." (take-last 2 labels)))))
 
 (defn- same-site?
   [a b]

@@ -934,6 +934,60 @@
     (is (= "strict=yes" (get-in @same-site-seen [:headers "cookie"])))
     (is (nil? (get-in @cross-site-seen [:headers "cookie"])))))
 
+(deftest cookie-header-respects-samesite-strict-across-a-shared-multi-label-public-suffix
+  ;; site-host previously reduced ANY host to its naive last-2-labels, so
+  ;; two entirely unrelated sites sharing a multi-label public suffix like
+  ;; `co.uk` (victim.co.uk / attacker.co.uk) both wrongly reduced to the
+  ;; same "co.uk" -- a real SameSite=Strict CSRF-protection bypass,
+  ;; confirmed via a direct REPL reproduction before this fix. This test is
+  ;; the exact cookie-header-respects-samesite-strict shape above, but with
+  ;; victim.co.uk/attacker.co.uk in place of example.com/other.test, so it
+  ;; specifically exercises the multi-label-public-suffix path.
+  (let [p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "https://victim.co.uk" :net/fetch)
+              (profile/grant-permission "https://api.victim.co.uk" :net/fetch))
+        stored (net/fetch-resource
+                {:store (storage/empty-store)
+                 :profile p
+                 :page-url "https://victim.co.uk/login"
+                 :fetch-fn (fn [_]
+                             {:status 200
+                              :headers {"set-cookie" "strict=yes; Domain=victim.co.uk; Path=/; SameSite=Strict"}
+                              :body "ok"})}
+                {:url "https://victim.co.uk/login" :method :get})
+        same-site-seen (atom nil)
+        _same-site (net/fetch-resource
+                    {:store (:store stored)
+                     :profile p
+                     :page-url "https://victim.co.uk/page"
+                     :credentials :include
+                     :cache? false
+                     :fetch-fn (fn [request]
+                                 (reset! same-site-seen request)
+                                 {:status 200
+                                  :headers {"access-control-allow-origin" "https://victim.co.uk"
+                                            "access-control-allow-credentials" "true"}
+                                  :body "ok"})}
+                    {:url "https://api.victim.co.uk/data" :method :get})
+        cross-site-seen (atom nil)
+        _cross-site (net/fetch-resource
+                     {:store (:store stored)
+                      :profile p
+                      :page-url "https://attacker.co.uk/page"
+                      :credentials :include
+                      :cache? false
+                      :fetch-fn (fn [request]
+                                  (reset! cross-site-seen request)
+                                  {:status 200
+                                   :headers {"access-control-allow-origin" "https://attacker.co.uk"
+                                             "access-control-allow-credentials" "true"}
+                                   :body "ok"})}
+                     {:url "https://api.victim.co.uk/data" :method :get})]
+    (is (= "strict=yes" (get-in @same-site-seen [:headers "cookie"]))
+        "a request whose page is a same-registrable-domain subdomain (api.victim.co.uk under victim.co.uk) still gets the cookie")
+    (is (nil? (get-in @cross-site-seen [:headers "cookie"]))
+        "a request whose page is attacker.co.uk -- an UNRELATED site that merely shares the co.uk public suffix -- must NOT get the SameSite=Strict cookie")))
+
 (deftest cookie-header-defaults-samesite-to-lax-when-omitted
   ;; RFC 6265bis: a Set-Cookie with no SameSite attribute must behave as
   ;; SameSite=Lax, i.e. it must NOT be attached to a cross-site subresource
