@@ -714,6 +714,16 @@
    "<input id=\"click-radio-b\" type=\"radio\" name=\"click-radio-group\">"
    "<div id=\"click-activation-result\">click-activation proof: pending...</div>"
    "</section>"
+   "<section id=\"stop-propagation-proof\" style=\"display:flex; flex-direction:column; gap:8; margin-top:4\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "Real Event.stopPropagation() below -- previously wrongly conflated with "
+   "stopImmediatePropagation() (which did not exist at all), skipping OTHER "
+   "listeners already registered on the SAME target, not just stopping "
+   "propagation to ancestors."
+   "</p>"
+   "<div id=\"stop-propagation-target\">click target</div>"
+   "<div id=\"stop-propagation-result\">stop-propagation proof: pending...</div>"
+   "</section>"
    "<script>"
    "document.title = 'Kotoba Browser: real QuickJS + real cssom layout + real WebGL paint';"
    "</script>"
@@ -959,6 +969,15 @@
    "caRadioB.click();"
    "caResult.textContent = 'click-activation proof: checkbox after click()=' + caCheckbox.checked + "
    "', radio-a after clicking radio-b=' + caRadioA.checked + ', radio-b=' + caRadioB.checked;"
+   "</script>"
+   "<script>"
+   "var spTarget = document.getElementById('stop-propagation-target');"
+   "var spEvents = [];"
+   "spTarget.addEventListener('click', function(e) { spEvents.push('A'); e.stopPropagation(); });"
+   "spTarget.addEventListener('click', function() { spEvents.push('B'); });"
+   "spTarget.dispatchEvent(new Event('click', { bubbles: true }));"
+   "document.getElementById('stop-propagation-result').textContent = "
+   "'stop-propagation proof: same-target listeners after stopPropagation()=' + spEvents.join(',');"
    "</script>"
    "<script>"
    "void 0;"
@@ -1238,6 +1257,7 @@
                  document-body-proof (element-text doc "document-body-result")
                  range-proof (element-text doc "range-proof-result")
                  click-activation-proof (element-text doc "click-activation-result")
+                 stop-propagation-proof (element-text doc "stop-propagation-result")
                  status-badge-proof (pseudo-content doc "status-badge")
                  step-proofs (mapv #(pseudo-content doc %)
                                    ["step-1" "step-2" "step-3" "step-4"])]
@@ -1274,6 +1294,7 @@
              (js/console.log "browser.demo: #document-body-result ->" (pr-str document-body-proof))
              (js/console.log "browser.demo: #range-proof-result ->" (pr-str range-proof))
              (js/console.log "browser.demo: #click-activation-result ->" (pr-str click-activation-proof))
+             (js/console.log "browser.demo: #stop-propagation-result ->" (pr-str stop-propagation-proof))
              (js/console.log "browser.demo: real ::before generated content ->"
                               "#status-badge:" (pr-str status-badge-proof)
                               "#step-counter lis:" (pr-str step-proofs))

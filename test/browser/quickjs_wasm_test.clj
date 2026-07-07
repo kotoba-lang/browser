@@ -870,3 +870,21 @@
     (is (str/includes? source "if (node && !__kotobaDisabledControl(node)) {"))
     (is (str/includes? source "__kotobaSetBooleanAttribute(ref, 'checked', !__kotobaBoolAttr(node, 'checked'));"))
     (is (str/includes? source "} else if (tag === 'input' && type === 'radio' && !__kotobaBoolAttr(node, 'checked')) {"))))
+
+(deftest quickjs-wasm-webapi-shim-stop-propagation-does-not-skip-same-target-listeners
+  ;; Event.stopPropagation() previously conflated with
+  ;; stopImmediatePropagation() (which did not exist at all) via a single
+  ;; cancelBubble flag that __kotobaDispatch's inner per-target listener
+  ;; loop also checked -- wrongly skipping OTHER listeners already
+  ;; registered on the SAME target, not just stopping propagation to
+  ;; ancestors. Confirmed via real CLJS/QuickJS smoke tests
+  ;; (quickjs-stop-propagation-smoke-test) that stopPropagation() now
+  ;; correctly lets sibling same-target listeners still run (while still
+  ;; stopping ancestor bubbling), and that the new stopImmediatePropagation()
+  ;; correctly skips both.
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "event.stopImmediatePropagation = function() {"))
+    (is (str/includes? source "event.immediatePropagationStopped = true;"))
+    (is (str/includes? source "if (event.immediatePropagationStopped) break;"))
+    (is (not (str/includes? source "listeners[i].call(currentTarget, event);\n            if (event.cancelBubble) break;"))
+        "the per-target listener loop must no longer break on plain cancelBubble")))

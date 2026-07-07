@@ -1499,7 +1499,18 @@
           if (event.cancelable) event.defaultPrevented = true;
         };
         event.stopPropagation = function() {
+          // Real spec: stops propagation to ANCESTOR nodes only -- other
+          // listeners already registered on the SAME target must still
+          // run. Previously conflated with stopImmediatePropagation()
+          // (which did not exist at all) via a single cancelBubble flag
+          // that __kotobaDispatch's inner per-target listener loop also
+          // checked, wrongly skipping sibling listeners on the same node
+          // too -- confirmed via a real QuickJS smoke test.
           event.cancelBubble = true;
+        };
+        event.stopImmediatePropagation = function() {
+          event.cancelBubble = true;
+          event.immediatePropagationStopped = true;
         };
         return event;
       }
@@ -1550,7 +1561,7 @@
           event.currentTarget = currentTarget;
           for (var i = 0; i < listeners.length; i++) {
             listeners[i].call(currentTarget, event);
-            if (event.cancelBubble) break;
+            if (event.immediatePropagationStopped) break;
           }
           if (!event.bubbles || event.cancelBubble) break;
           var currentNode = __kotobaNodeById(currentId);
@@ -2849,7 +2860,10 @@
         event.currentTarget = event.target;
         var key = __kotobaGlobalEventKey(target, eventType);
         var listeners = globalThis.__kotobaListeners[key] || [];
-        for (var i = 0; i < listeners.length; i++) listeners[i].call(event.currentTarget, event);
+        for (var i = 0; i < listeners.length; i++) {
+          listeners[i].call(event.currentTarget, event);
+          if (event.immediatePropagationStopped) break;
+        }
         globalThis.__kotobaRequests.push({
           capability: 'event/dispatch',
           'event/target': String(target),
