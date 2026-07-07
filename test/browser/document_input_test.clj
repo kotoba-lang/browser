@@ -956,6 +956,57 @@
     (is (not= true (get-in a-enter [:document :nodes a :attrs :checked]))
         "Enter must not check a radio")))
 
+(deftest non-primary-mouse-button-does-not-activate-checkbox
+  ;; Real HTML5/DOM: only a PRIMARY-button (button 0, the default a real
+  ;; MouseEvent's own `button` defaults to when unspecified) pointer click
+  ;; runs any click default action at all -- a right-click (button 2)
+  ;; produces `contextmenu` instead, never a checkbox toggle.
+  (let [page (browser/load-html {:url "kotoba://right-click"
+                                 :html "<main><input id=\"flag\" type=\"checkbox\"></main>"})
+        document (:browser/document page)
+        flag (bridge/query-selector document "#flag")
+        result (document-input/reduce-event document {:event/type :pointer/click
+                                                      :node/id flag
+                                                      :button 2})]
+    (is (= false (:handled? result))
+        "a right-click must not be handled as a primary click")
+    (is (not= true (get-in result [:document :nodes flag :attrs :checked]))
+        "a right-click must not toggle a checkbox")))
+
+(deftest non-primary-mouse-button-does-not-dispatch-click-listener
+  (let [page (browser/load-html {:url "kotoba://middle-click"
+                                 :html "<main><button id=\"go\">Go</button></main>"})
+        document (:browser/document page)
+        go (bridge/query-selector document "#go")
+        document (dom/add-event-listener document go "click" "click-handler")
+        result (document-input/reduce-event document {:event/type :pointer/click
+                                                      :node/id go
+                                                      :button 1})]
+    (is (= false (:handled? result))
+        "a middle-click must not be handled as a primary click")
+    (is (not= [:dom/dispatch-event "click-handler" {:event/type "click" :target/id go :button 1}]
+              (last (get-in result [:document :ops])))
+        "a middle-click must not dispatch to a real click listener")))
+
+(deftest primary-mouse-button-click-still-activates-as-before
+  ;; No-regression check: an explicit button=0 click, and a click with no
+  ;; :button key at all (matching every pre-existing test in this file),
+  ;; must both still activate exactly as before this fix.
+  (let [page (browser/load-html {:url "kotoba://primary-click"
+                                 :html "<main><input id=\"a\" type=\"checkbox\"><input id=\"b\" type=\"checkbox\"></main>"})
+        document (:browser/document page)
+        a (bridge/query-selector document "#a")
+        b (bridge/query-selector document "#b")
+        explicit-primary (document-input/reduce-event document {:event/type :pointer/click
+                                                                :node/id a
+                                                                :button 0})
+        implicit-primary (document-input/reduce-event document {:event/type :pointer/click
+                                                                :node/id b})]
+    (is (= true (:handled? explicit-primary)))
+    (is (= true (get-in explicit-primary [:document :nodes a :attrs :checked])))
+    (is (= true (:handled? implicit-primary)))
+    (is (= true (get-in implicit-primary [:document :nodes b :attrs :checked])))))
+
 (deftest submit-buttons-dispatch-form-submit
   (let [page (browser/load-html {:url "kotoba://submit"
                                  :html "<main><form id=\"form\"><input id=\"field\" name=\"q\" value=\"Kotoba\"><input id=\"amount\" type=\"number\" name=\"amount\" value=\"7\"><input id=\"volume\" type=\"range\" name=\"volume\" value=\"4\"><input id=\"token\" type=\"hidden\" name=\"token\" value=\"abc\"><input id=\"upload\" type=\"file\" name=\"upload\" value=\"/secret/path.txt\"><input id=\"flag\" type=\"checkbox\" name=\"ok\" checked><input id=\"off\" type=\"checkbox\" name=\"off\"><button id=\"go\" name=\"action\" value=\"go\">Go</button><button id=\"noop\" type=\"button\" name=\"action\" value=\"noop\">Noop</button><input id=\"input-noop\" type=\"button\" name=\"action\" value=\"input-noop\"><input id=\"submit\" type=\"submit\" name=\"action\" value=\"send\"></form></main>"})

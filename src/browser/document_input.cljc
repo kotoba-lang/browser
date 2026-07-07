@@ -270,6 +270,23 @@
   (and (= :key/down (:event/type event))
        (= "Enter" (:key event))))
 
+(defn- primary-button-click?
+  "Real HTML5/DOM: only a PRIMARY-button (button 0, the default a real
+   MouseEvent's own `button` defaults to when unspecified) pointer click
+   runs any click default action at all (link navigation, checkbox/
+   radio toggle, form submit/reset, focus changes) or reaches a real
+   `click` event listener -- a right-click (button 2) instead produces
+   `contextmenu`, and a middle-click (button 1) produces `auxclick`,
+   neither of which this engine models (an honest scope-cut: it simply
+   does nothing for them, rather than wrongly running the primary-click
+   default action, which is what it did before this fix). Confirmed via
+   direct REPL reproduction: a right-click on a real checkbox wrongly
+   toggled it, and a middle-click on a real button with a registered
+   click listener wrongly dispatched to it."
+  [event]
+  (let [button (:button event)]
+    (or (nil? button) (zero? button))))
+
 (defn disabled-control?
   [document node-id]
   (let [node (get-in document [:nodes node-id])]
@@ -1620,7 +1637,8 @@
       (reduce-scroll-event document node-id event)
 
       (and (= :pointer/click (:event/type event))
-           node-id)
+           node-id
+           (primary-button-click? event))
       (reduce-click-event document node-id event)
 
       (and (= :select/change (:event/type event))
