@@ -1534,12 +1534,29 @@
               __kotobaRemoveAttribute(ref, attrName);
               return value == null ? '' : String(value);
             };
+            // cssText previously fell through to the generic per-property
+            // path below, which namespaces it as the literal property name
+            // style/css-text -- a fake property nothing else recognizes.
+            // Real el.style.cssText reads/writes the element's raw inline
+            // style TEXT, the exact same thing the already-correct
+            // setAttribute('style', ...) path reads/writes via the plain,
+            // un-namespaced style attr -- so this reuses that same attr
+            // directly instead of inventing a new one.
+            if (prop === 'cssText') {
+              var node = __kotobaNodeById(__kotobaRefNodeId(ref));
+              var value = __kotobaAttr(node, 'style');
+              return value == null ? '' : String(value);
+            }
             if (typeof prop === 'symbol') return undefined;
             var node = __kotobaNodeById(__kotobaRefNodeId(ref));
             var value = __kotobaAttr(node, __kotobaStyleAttrName(prop));
             return value == null ? '' : String(value);
           },
           set: function(_, prop, value) {
+            if (prop === 'cssText') {
+              __kotobaSetAttribute(ref, 'style', value);
+              return true;
+            }
             __kotobaSetAttribute(ref, __kotobaStyleAttrName(prop), value);
             return true;
           }

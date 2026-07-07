@@ -600,6 +600,20 @@
     (is (str/includes? source "return __kotobaComputedStyle(el && el.__kotobaRef)"))
     (is (str/includes? source "if (prop === 'getPropertyValue') return function(name)"))))
 
+(deftest quickjs-wasm-webapi-shim-style-csstext-reads-and-writes-the-raw-inline-style-attr
+  ;; element.style.cssText previously fell through to the generic
+  ;; per-property path, namespaced as the fake property style/css-text --
+  ;; confirmed via a temporary CLJS/QuickJS smoke test that the real
+  ;; declarations inside a cssText string never actually reached the
+  ;; cascade at all (getComputedStyle stayed unset), even though the
+  ;; getter's own misleading echo of that same fake attr made a naive
+  ;; round-trip check look like it passed. Fixed by special-casing
+  ;; cssText to reuse the exact same, already-correct plain "style" attr
+  ;; setAttribute('style', ...) already writes/reads.
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "if (prop === 'cssText') {\n              var node = __kotobaNodeById(__kotobaRefNodeId(ref));\n              var value = __kotobaAttr(node, 'style');\n              return value == null ? '' : String(value);\n            }"))
+    (is (str/includes? source "if (prop === 'cssText') {\n              __kotobaSetAttribute(ref, 'style', value);\n              return true;\n            }"))))
+
 (deftest quickjs-wasm-webapi-shim-exposes-attribute-convenience-methods
   (let [source quickjs-wasm/webapi-shim-source]
     (is (str/includes? source "toggleAttribute: function(name, force)"))
