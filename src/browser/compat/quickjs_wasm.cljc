@@ -2825,7 +2825,7 @@
             capability: 'cookie/get',
             'cookie/op': 'get'
           });
-          return '';
+          return globalThis.__kotobaCookieSnapshot != null ? String(globalThis.__kotobaCookieSnapshot) : '';
         },
         set: function(value) {
           globalThis.__kotobaRequests.push({
@@ -4056,6 +4056,22 @@
           ";")))
 
 #?(:cljs
+   (defn- cookie-snapshot-source
+     "JS source that installs the real, current cookie header string for this
+     page's URL (`quickjs-execution/cookie-snapshot`, computed host-side from
+     the persisted `:net/context` cookie store) as
+     `globalThis.__kotobaCookieSnapshot`, so the webapi shim's real
+     `document.cookie` getter can read it synchronously instead of always
+     returning `''`. Mirrors `storage-snapshot-source`'s own bare-value
+     treatment exactly (a plain string, no permission-decision wrapper --
+     unlike clipboard/geolocation/notification, real cookies apply same-
+     origin automatically with no permission-prompt concept)."
+     [cookie]
+     (str "globalThis.__kotobaCookieSnapshot = "
+          (js/JSON.stringify (clj->js (jsonable (or cookie ""))))
+          ";")))
+
+#?(:cljs
    (defn- clipboard-snapshot-source
      "JS source that installs the real, current clipboard permission
      decisions + text (`quickjs-execution/clipboard-snapshot`, computed
@@ -4236,10 +4252,10 @@
 #?(:cljs
    (defn- dump-result
      ([module source url modules]
-      (dump-result module source url modules nil false nil nil nil nil nil nil nil nil nil))
+      (dump-result module source url modules nil false nil nil nil nil nil nil nil nil nil nil))
      ([module source url modules module-provider module?]
-      (dump-result module source url modules module-provider module? nil nil nil nil nil nil nil nil nil))
-     ([module source url modules module-provider module? document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot notification-snapshot history-length-snapshot]
+      (dump-result module source url modules module-provider module? nil nil nil nil nil nil nil nil nil nil))
+     ([module source url modules module-provider module? document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot notification-snapshot history-length-snapshot cookie-snapshot]
       (let [^js runtime (.newRuntime ^js module #js {:moduleLoader (module-loader modules module-provider)})
             ^js vm (.newContext runtime)
             _ (eval-dispose! vm (snapshot-source document-snapshot) "kotoba://quickjs/document-snapshot.js")
@@ -4251,6 +4267,7 @@
             _ (eval-dispose! vm (worker-snapshot-source worker-snapshot) "kotoba://quickjs/worker-snapshot.js")
             _ (eval-dispose! vm (fetch-snapshot-source fetch-snapshot) "kotoba://quickjs/fetch-snapshot.js")
             _ (eval-dispose! vm (history-length-snapshot-source history-length-snapshot) "kotoba://quickjs/history-length-snapshot.js")
+            _ (eval-dispose! vm (cookie-snapshot-source cookie-snapshot) "kotoba://quickjs/cookie-snapshot.js")
             _ (eval-dispose! vm webapi-shim-source "kotoba://quickjs/webapi-shim.js")
             response (eval-result vm source url module?)
             requests (dump-requests vm)]
@@ -4277,7 +4294,7 @@
            context))))
 
 #?(:cljs
-   (defn- install-document-shim! [vm document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot notification-snapshot history-length-snapshot]
+   (defn- install-document-shim! [vm document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot notification-snapshot history-length-snapshot cookie-snapshot]
      (eval-dispose! vm (snapshot-source document-snapshot) "kotoba://quickjs/document-snapshot.js")
      (eval-dispose! vm (storage-snapshot-source storage-snapshot) "kotoba://quickjs/storage-snapshot.js")
      (eval-dispose! vm (clipboard-snapshot-source clipboard-snapshot) "kotoba://quickjs/clipboard-snapshot.js")
@@ -4287,12 +4304,13 @@
      (eval-dispose! vm (worker-snapshot-source worker-snapshot) "kotoba://quickjs/worker-snapshot.js")
      (eval-dispose! vm (fetch-snapshot-source fetch-snapshot) "kotoba://quickjs/fetch-snapshot.js")
      (eval-dispose! vm (history-length-snapshot-source history-length-snapshot) "kotoba://quickjs/history-length-snapshot.js")
+     (eval-dispose! vm (cookie-snapshot-source cookie-snapshot) "kotoba://quickjs/cookie-snapshot.js")
      (eval-dispose! vm webapi-shim-source "kotoba://quickjs/webapi-shim.js")))
 
 #?(:cljs
-   (defn- context-eval-result [context source url module? document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot notification-snapshot history-length-snapshot]
+   (defn- context-eval-result [context source url module? document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot notification-snapshot history-length-snapshot cookie-snapshot]
      (let [vm (:vm context)
-           _ (install-document-shim! vm document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot notification-snapshot history-length-snapshot)
+           _ (install-document-shim! vm document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot notification-snapshot history-length-snapshot cookie-snapshot)
            response (eval-result vm source url module?)
            requests (dump-requests vm)]
        (assoc response :requests requests))))
@@ -4549,7 +4567,8 @@
                                                           (:worker/snapshot request)
                                                           (:fetch/snapshot request)
                                                           (:notification/snapshot request)
-                                                          (:history/snapshot request))
+                                                          (:history/snapshot request)
+                                                          (:cookie/snapshot request))
 
                                      :js/module-load
                                      (if-let [source (resolve-module-source modules module-provider (:specifier request))]
@@ -4565,7 +4584,8 @@
                                                             (:worker/snapshot request)
                                                             (:fetch/snapshot request)
                                                             (:notification/snapshot request)
-                                                            (:history/snapshot request))
+                                                            (:history/snapshot request)
+                                                            (:cookie/snapshot request))
                                        {:error :quickjs/module-not-found
                                         :specifier (:specifier request)
                                         :requests []})

@@ -866,6 +866,20 @@
     (is (str/includes? source "'cookie/op': 'set'"))
     (is (str/includes? source "'cookie/value': String(value)"))))
 
+(deftest quickjs-wasm-webapi-shim-document-cookie-getter-reads-a-real-live-snapshot
+  ;; document.cookie's getter previously always returned '' -- a dead read,
+  ;; even though the underlying cookie store + :cookie/set capability
+  ;; handling was already fully real (confirmed via a temporary CLJS/
+  ;; QuickJS smoke test: a cookie set in one <script> tag was still
+  ;; unreadable via document.cookie in a LATER tag on the same page).
+  ;; Fixed by installing globalThis.__kotobaCookieSnapshot (computed
+  ;; host-side by quickjs-execution/cookie-snapshot, the real cookie
+  ;; header string for this page's URL) before each script evaluates,
+  ;; mirroring storage-snapshot-source/localStorage.getItem's own
+  ;; established pattern for this exact class of gap.
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "return globalThis.__kotobaCookieSnapshot != null ? String(globalThis.__kotobaCookieSnapshot) : '';"))))
+
 (deftest quickjs-wasm-webapi-shim-exposes-history-capability
   (let [source quickjs-wasm/webapi-shim-source]
     (is (str/includes? source "globalThis.history = globalThis.history ||"))

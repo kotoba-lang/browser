@@ -62,8 +62,14 @@
   so `quickjs-wasm`'s webapi shim can install it as a VM global before
   running `payload`'s script (`:history/snapshot`) and seed
   `globalThis.history.length`'s STARTING value from it instead of the
-  hardcoded `0` literal."
-  [call payload capability-results document storage clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot notification-snapshot history-length-snapshot]
+  hardcoded `0` literal, and the real, current cookie header string for
+  this page's URL (already computed host-side by `cookie-snapshot`, a
+  bare value like `storage`'s own deref -- no permission gate, real
+  cookies apply same-origin automatically), so `quickjs-wasm`'s webapi
+  shim can install it as a VM global before running `payload`'s script
+  (`:cookie/snapshot`) and answer `document.cookie` synchronously from
+  real host state instead of always returning `''`."
+  [call payload capability-results document storage clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot notification-snapshot history-length-snapshot cookie-snapshot]
   (let [snapshot (cond-> (dom-bridge/document-snapshot document)
                    (:script/node-id payload)
                    (assoc :current-script (:script/node-id payload)))]
@@ -77,7 +83,8 @@
                        :worker/snapshot worker-snapshot
                        :fetch/snapshot fetch-snapshot
                        :notification/snapshot notification-snapshot
-                       :history/snapshot history-length-snapshot)
+                       :history/snapshot history-length-snapshot
+                       :cookie/snapshot cookie-snapshot)
                 capability-results)))
 
 (defn- take-capability-results
@@ -1101,6 +1108,30 @@
     {:ok? false
      :error :cookie/no-net-context}))
 
+(defn- cookie-snapshot
+  "Compute the REAL, current cookie header string for this page's URL from
+  `state`'s persisted `:net/context` cookie store, host-side, BEFORE the
+  script runs -- so `invocation-with-snapshots` can hand it to
+  `quickjs-wasm` as `:cookie/snapshot` and the webapi shim's real
+  `document.cookie` getter can synchronously return it instead of always
+  returning `''`. Mirrors `cookie-get-result`'s exact same computation
+  (same `net/script-cookie-header` call), computed proactively instead of
+  reactively after a capability request -- the same bare-value shape
+  `storage-snapshot`-equivalent (a plain deref, no permission gate: unlike
+  clipboard/geolocation/notification, real cookies apply same-origin
+  automatically with no permission-prompt concept at all). A `document.
+  cookie = ...` write earlier in the SAME script tag is NOT reflected by
+  this same-tick (this snapshot is only ever fresh as of the script's
+  START, re-derived from whatever `:cookie/set` already committed via
+  `apply-capability` from a PREVIOUS script tag) -- the same, already-
+  established convention `localStorage`'s own `setItem`/`removeItem`
+  deliberately follow (see quickjs-wasm's `clear`, \"never optimistically
+  mutating ... locally\")."
+  [state]
+  (if-let [{:keys [store profile page-url]} (cookie-context state)]
+    (or (net/script-cookie-header store profile page-url) "")
+    ""))
+
 (defn- history-entry
   [request]
   {:url (:url request)
@@ -2025,7 +2056,8 @@
                                                             worker-snap
                                                             fetch-snap
                                                             (notification-permission-snapshot state)
-                                                            (history-length-snapshot state))))
+                                                            (history-length-snapshot state)
+                                                            (cookie-snapshot state))))
         state (record-response-errors state response)
         state (apply-requests state (:requests response))]
     (-> state
@@ -2058,7 +2090,8 @@
                                                               worker-snap
                                                               fetch-snap
                                                               (notification-permission-snapshot state)
-                                                              (history-length-snapshot state))))
+                                                              (history-length-snapshot state)
+                                                              (cookie-snapshot state))))
           state (record-response-errors state response)
           state (apply-requests state (:requests response))]
       (-> state
