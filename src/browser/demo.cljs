@@ -1301,6 +1301,26 @@
    "document.getElementById('c1-entity-result').textContent = "
    "'c1-entity proof: codes=' + ceCodes.join(',');"
    "</script>"
+   "<section id=\"dataset-ownkeys-proof\" style=\"display:flex; flex-direction:column; gap:8; margin-top:4\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "The real element below has two real data-* attributes -- "
+   "Object.keys(el.dataset)/for-in/spread below now correctly "
+   "enumerate them, matching direct property access (el.dataset.foo), "
+   "which already worked."
+   "</p>"
+   "<div id=\"dataset-ownkeys-target\" data-foo=\"1\" data-bar-baz=\"2\">dataset target</div>"
+   "<div id=\"dataset-ownkeys-result\">dataset-ownkeys proof: pending...</div>"
+   "</section>"
+   "<script>"
+   "var doTarget = document.getElementById('dataset-ownkeys-target');"
+   "var doKeys = Object.keys(doTarget.dataset);"
+   "var doForin = [];"
+   "for (var doK in doTarget.dataset) { doForin.push(doK); }"
+   "var doSpread = Object.keys(Object.assign({}, doTarget.dataset));"
+   "document.getElementById('dataset-ownkeys-result').textContent = "
+   "'dataset-ownkeys proof: keys=' + doKeys.join(',') + ', forin=' + doForin.join(',') + "
+   "', spread=' + doSpread.join(',');"
+   "</script>"
    "<script>"
    "void 0;"
    "</script>"
@@ -1599,6 +1619,7 @@
                  textarea-leading-lf-proof (element-text doc "textarea-leading-lf-result")
                  mutation-observer-dup-proof (element-text doc "mutation-observer-dup-result")
                  c1-entity-proof (element-text doc "c1-entity-result")
+                 dataset-ownkeys-proof (element-text doc "dataset-ownkeys-result")
                  status-badge-proof (pseudo-content doc "status-badge")
                  step-proofs (mapv #(pseudo-content doc %)
                                    ["step-1" "step-2" "step-3" "step-4"])]
@@ -1654,6 +1675,7 @@
              (js/console.log "browser.demo: #textarea-leading-lf-result ->" (pr-str textarea-leading-lf-proof))
              (js/console.log "browser.demo: #mutation-observer-dup-result ->" (pr-str mutation-observer-dup-proof))
              (js/console.log "browser.demo: #c1-entity-result ->" (pr-str c1-entity-proof))
+             (js/console.log "browser.demo: #dataset-ownkeys-result ->" (pr-str dataset-ownkeys-proof))
              (js/console.log "browser.demo: real ::before generated content ->"
                               "#status-badge:" (pr-str status-badge-proof)
                               "#step-counter lis:" (pr-str step-proofs))
