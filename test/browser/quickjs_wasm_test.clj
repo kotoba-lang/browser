@@ -158,6 +158,29 @@
     (is (str/includes? source "select: function()"))
     (is (str/includes? source "this.setSelectionRange(0, this.value.length);"))))
 
+(deftest quickjs-wasm-webapi-shim-exposes-step-up-down-methods
+  ;; HTMLInputElement.stepUp()/.stepDown() -- previously entirely missing (a
+  ;; repo-wide grep for `stepUp`/`stepDown` returned zero matches anywhere),
+  ;; even though the step/min/max attribute-reading logic they need already
+  ;; existed via __kotobaStepMismatch. Confirmed via a real CLJS/QuickJS
+  ;; smoke test (quickjs-step-up-down-smoke-test) that a real
+  ;; `<input type="number" value="5" step="2">`'s stepUp()/stepDown() now
+  ;; correctly increment/decrement by the real step, clamp to a real max,
+  ;; start from `min` when blank, accept an explicit multiplier argument,
+  ;; and no-op (rather than throw, an honest scope-cut -- no DOMException
+  ;; type exists in this engine) on a real step=any control.
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "function __kotobaApplyStep(node, delta)"))
+    (is (str/includes? source "if (type !== 'number' && type !== 'range') return null;"))
+    (is (str/includes? source "if (rawStep != null && String(rawStep).toLowerCase() === 'any') return null;"))
+    (is (str/includes? source "if (Number.isNaN(current)) current = Number.isNaN(min) ? 0 : min;"))
+    (is (str/includes? source "if (!Number.isNaN(min) && next < min) next = min;"))
+    (is (str/includes? source "if (!Number.isNaN(max) && next > max) next = max;"))
+    (is (str/includes? source "stepUp: function(n)"))
+    (is (str/includes? source "stepDown: function(n)"))
+    (is (str/includes? source "var next = __kotobaApplyStep(node, n == null ? 1 : Number(n));"))
+    (is (str/includes? source "var next = __kotobaApplyStep(node, -(n == null ? 1 : Number(n)));"))))
+
 (deftest quickjs-wasm-webapi-shim-exposes-pattern-mismatch-validation
   ;; A real HTML5 `pattern` attribute -- previously an honest, documented
   ;; scope-cut everywhere (`patternMismatch: false` hardcoded, no check at

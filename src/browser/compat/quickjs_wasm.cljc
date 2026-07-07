@@ -563,6 +563,40 @@
         var frac = steps - Math.floor(steps);
         return frac > 1e-9 && frac < (1 - 1e-9);
       }
+      function __kotobaApplyStep(node, delta) {
+        // Real HTMLInputElement.stepUp()/stepDown() -- same number/range-
+        // only scope as __kotobaStepMismatch above. `delta` already carries
+        // the caller's own sign (positive for stepUp, negative for
+        // stepDown) and multiplier (the optional `n` argument, default 1).
+        // A real step=any control (the literal keyword any, unquoted here
+        // to avoid a Clojure string-termination hazard this codebase has
+        // hit before) makes stepUp()/stepDown() throw an InvalidStateError
+        // in real browsers -- this engine has no DOMException type at all,
+        // so it degrades to a silent no-op instead of crashing, matching
+        // this codebase's own established degrade-don't-throw convention
+        // for malformed/inapplicable constraint state elsewhere (malformed
+        // pattern, step=any itself in __kotobaStepMismatch). A blank/
+        // non-numeric current value
+        // starts from `min` (or 0 if no `min`) rather than throwing, and
+        // the result is clamped to `min`/`max` when present -- an honest
+        // simplification of real HTML5's own step-aligned clamping (which
+        // realigns to the nearest step-valid value at the boundary rather
+        // than the bare boundary itself), reused across both real callers.
+        var type = String(__kotobaAttr(node, 'type') || 'text').toLowerCase();
+        if (type !== 'number' && type !== 'range') return null;
+        var rawStep = __kotobaAttr(node, 'step');
+        if (rawStep != null && String(rawStep).toLowerCase() === 'any') return null;
+        var parsedStep = __kotobaParseNumber(rawStep);
+        var step = (!Number.isNaN(parsedStep) && parsedStep > 0) ? parsedStep : 1;
+        var min = __kotobaParseNumber(__kotobaAttr(node, 'min'));
+        var max = __kotobaParseNumber(__kotobaAttr(node, 'max'));
+        var current = __kotobaParseNumber(__kotobaControlValue(node));
+        if (Number.isNaN(current)) current = Number.isNaN(min) ? 0 : min;
+        var next = current + delta * step;
+        if (!Number.isNaN(min) && next < min) next = min;
+        if (!Number.isNaN(max) && next > max) next = max;
+        return next;
+      }
       function __kotobaCompilePattern(pattern) {
         // Malformed `pattern` degrades to NOT enforced (returns null),
         // matching this fn's own existing min/max/minlength/maxlength
@@ -2333,6 +2367,16 @@
             // only ever renders a caret/selection for a real text-entry
             // input, gated separately at the paint layer).
             this.setSelectionRange(0, this.value.length);
+          },
+          stepUp: function(n) {
+            var node = __kotobaNodeById(__kotobaRefNodeId(ref));
+            var next = __kotobaApplyStep(node, n == null ? 1 : Number(n));
+            if (next != null) this.value = String(next);
+          },
+          stepDown: function(n) {
+            var node = __kotobaNodeById(__kotobaRefNodeId(ref));
+            var next = __kotobaApplyStep(node, -(n == null ? 1 : Number(n)));
+            if (next != null) this.value = String(next);
           },
           checkValidity: function() {
             return __kotobaValidityState(__kotobaNodeById(__kotobaRefNodeId(ref))).valid;

@@ -483,6 +483,15 @@
    "<button id=\"event-modifier-keys-target\">click target</button>"
    "<div id=\"event-modifier-keys-result\">event-modifier-keys proof: pending...</div>"
    "</section>"
+   "<section id=\"step-up-down-proof\" style=\"display:flex; flex-direction:column; gap:8\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "Real HTMLInputElement.stepUp()/.stepDown() below -- previously entirely "
+   "missing. This step=2 field's own value after one stepUp() and one "
+   "stepDown() call is read back by script below."
+   "</p>"
+   "<input id=\"step-up-down-target\" type=\"number\" value=\"5\" step=\"2\">"
+   "<div id=\"step-up-down-result\">step-up-down proof: pending...</div>"
+   "</section>"
    "<section id=\"font-family-proof\" style=\"display:flex; flex-direction:column; gap:8\">"
    "<p style=\"color:#9fb0c9; font-size:13\">"
    "Real CSS font-family below -- previously read from NOWHERE at all, "
@@ -791,6 +800,16 @@
    "emkTarget.dispatchEvent(new MouseEvent('click', {shiftKey: true, ctrlKey: true}));"
    "</script>"
    "<script>"
+   "var sudTarget = document.getElementById('step-up-down-target');"
+   "var sudResult = document.getElementById('step-up-down-result');"
+   "sudTarget.stepUp();"
+   "var afterStepUp = sudTarget.value;"
+   "sudTarget.stepDown();"
+   "sudTarget.stepDown();"
+   "sudResult.textContent = 'step-up-down proof: after stepUp()=' + afterStepUp + "
+   "', after two more stepDown()=' + sudTarget.value;"
+   "</script>"
+   "<script>"
    "var w = new Worker(" (pr-str worker-url) ");"
    "w.onmessage = function(e) { document.getElementById('worker-proof').textContent = "
    "'Worker proof: real 2nd QuickJS context computed 21 * 2 -> ' + e.data; };"
@@ -1070,6 +1089,7 @@
                  step-mismatch-proof (element-text doc "step-mismatch-result")
                  validation-message-proof (element-text doc "validation-message-result")
                  event-modifier-keys-proof (element-text doc "event-modifier-keys-result")
+                 step-up-down-proof (element-text doc "step-up-down-result")
                  status-badge-proof (pseudo-content doc "status-badge")
                  step-proofs (mapv #(pseudo-content doc %)
                                    ["step-1" "step-2" "step-3" "step-4"])]
@@ -1098,6 +1118,7 @@
              (js/console.log "browser.demo: #step-mismatch-result ->" (pr-str step-mismatch-proof))
              (js/console.log "browser.demo: #validation-message-result ->" (pr-str validation-message-proof))
              (js/console.log "browser.demo: #event-modifier-keys-result ->" (pr-str event-modifier-keys-proof))
+             (js/console.log "browser.demo: #step-up-down-result ->" (pr-str step-up-down-proof))
              (js/console.log "browser.demo: real ::before generated content ->"
                               "#status-badge:" (pr-str status-badge-proof)
                               "#step-counter lis:" (pr-str step-proofs))
