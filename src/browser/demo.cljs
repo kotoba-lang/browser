@@ -1167,6 +1167,23 @@
    "document.getElementById('cookie-result').textContent = "
    "'cookie proof: document.cookie=' + JSON.stringify(document.cookie);"
    "</script>"
+   "<section id=\"csstext-proof\" style=\"display:flex; flex-direction:column; gap:8; margin-top:4\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "style.cssText below -- previously silently namespaced as a fake "
+   "property, so its real declarations never actually reached the "
+   "cascade at all."
+   "</p>"
+   "<p id=\"csstext-target\">cssText target</p>"
+   "<div id=\"csstext-result\">csstext proof: pending...</div>"
+   "</section>"
+   "<script>"
+   "document.getElementById('csstext-target').style.cssText = 'color: #4fd1c5';"
+   "</script>"
+   "<script>"
+   "var ctComputed = getComputedStyle(document.getElementById('csstext-target'));"
+   "document.getElementById('csstext-result').textContent = "
+   "'csstext proof: color=' + ctComputed.color;"
+   "</script>"
    "<script>"
    "void 0;"
    "</script>"
@@ -1457,6 +1474,7 @@
                  location-proof (element-text doc "location-result")
                  comment-parse-proof (element-text doc "comment-parse-result")
                  cookie-proof (element-text doc "cookie-result")
+                 csstext-proof (element-text doc "csstext-result")
                  status-badge-proof (pseudo-content doc "status-badge")
                  step-proofs (mapv #(pseudo-content doc %)
                                    ["step-1" "step-2" "step-3" "step-4"])]
@@ -1504,6 +1522,7 @@
              (js/console.log "browser.demo: #location-result ->" (pr-str location-proof))
              (js/console.log "browser.demo: #comment-parse-result ->" (pr-str comment-parse-proof))
              (js/console.log "browser.demo: #cookie-result ->" (pr-str cookie-proof))
+             (js/console.log "browser.demo: #csstext-result ->" (pr-str csstext-proof))
              (js/console.log "browser.demo: real ::before generated content ->"
                               "#status-badge:" (pr-str status-badge-proof)
                               "#step-counter lis:" (pr-str step-proofs))
