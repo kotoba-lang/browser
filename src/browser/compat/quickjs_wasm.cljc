@@ -2922,8 +2922,9 @@
           observe: function(target, options) {
             if (!target || !target.__kotobaRef) throw new TypeError('MutationObserver target must be a Node');
             options = options || {};
-            observer.targets.push({
-              nodeId: __kotobaRefNodeId(target.__kotobaRef),
+            var nodeId = __kotobaRefNodeId(target.__kotobaRef);
+            var entry = {
+              nodeId: nodeId,
               options: {
                 attributes: Boolean(options.attributes),
                 childList: Boolean(options.childList),
@@ -2932,7 +2933,27 @@
                 attributeOldValue: Boolean(options.attributeOldValue),
                 characterDataOldValue: Boolean(options.characterDataOldValue)
               }
-            });
+            };
+            // Real MutationObserver.observe() called AGAIN on a node
+            // already being watched by THIS SAME observer replaces that
+            // registration's options, it does not add a second one --
+            // previously this unconditionally pushed a new entry, so
+            // observing the same target twice (a real, common defensive/
+            // re-init pattern) meant __kotobaQueueMutation's dispatch loop
+            // (below) iterated over TWO entries for one real mutation,
+            // delivering duplicate MutationRecords for a single change.
+            var existingIndex = -1;
+            for (var e = 0; e < observer.targets.length; e++) {
+              if (observer.targets[e].nodeId === nodeId) {
+                existingIndex = e;
+                break;
+              }
+            }
+            if (existingIndex >= 0) {
+              observer.targets[existingIndex] = entry;
+            } else {
+              observer.targets.push(entry);
+            }
             if (globalThis.__kotobaMutationObservers.indexOf(observer) < 0) {
               globalThis.__kotobaMutationObservers.push(observer);
             }

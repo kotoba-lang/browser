@@ -426,6 +426,30 @@
     (is (str/includes? source "attributeOldValue"))
     (is (str/includes? source "characterDataOldValue"))))
 
+(deftest quickjs-wasm-webapi-shim-mutation-observer-observe-replaces-an-existing-same-target-registration
+  ;; observe() previously unconditionally pushed a new {nodeId, options}
+  ;; entry with no check for an existing entry on the same node --
+  ;; confirmed via a real CLJS/QuickJS smoke test before touching source
+  ;; that observing the same target twice then mutating it once delivered
+  ;; 2 MutationRecords via takeRecords() instead of the correct 1. Fixed
+  ;; by finding any existing entry for the same nodeId first and
+  ;; replacing it in place (matching real spec: a second observe() call
+  ;; REPLACES the prior registration's options, it doesn't add a second
+  ;; one) instead of always pushing.
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source (str "var existingIndex = -1;\n"
+                                    "            for (var e = 0; e < observer.targets.length; e++) {\n"
+                                    "              if (observer.targets[e].nodeId === nodeId) {\n"
+                                    "                existingIndex = e;\n"
+                                    "                break;\n"
+                                    "              }\n"
+                                    "            }\n"
+                                    "            if (existingIndex >= 0) {\n"
+                                    "              observer.targets[existingIndex] = entry;\n"
+                                    "            } else {\n"
+                                    "              observer.targets.push(entry);\n"
+                                    "            }")))))
+
 (deftest quickjs-wasm-webapi-shim-exposes-dom-traversal-properties
   (let [source quickjs-wasm/webapi-shim-source]
     (is (str/includes? source "function __kotobaChildNodeId(nodeId, elementsOnly, last)"))
