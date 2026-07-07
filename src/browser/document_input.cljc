@@ -21,7 +21,8 @@
 
 (def scrollable-overflows #{"auto" "scroll"})
 
-(def activation-keys #{" " "Space" "Spacebar" "Enter"})
+(def space-activation-keys #{" " "Space" "Spacebar"})
+(def activation-keys (conj space-activation-keys "Enter"))
 
 (defn target-node-id
   [document event]
@@ -249,9 +250,20 @@
            (contains? #{"Backspace" "Delete"} (:key event)))))
 
 (defn- activation-key?
-  [event]
+  "Real HTML5 keyboard activation: Space activates every activatable
+   control (button/checkbox/radio/submit/reset/summary); Enter also
+   activates all of THOSE except checkbox/radio, which respond to Space
+   only -- confirmed via direct observation against real Chrome (a
+   focused checkbox/radio's Enter keydown/keyup fire but produce no
+   click and no checked change at all; only Space toggles it)."
+  [document node-id event]
   (and (= :key/down (:event/type event))
-       (contains? activation-keys (:key event))))
+       (let [key (:key event)]
+         (cond
+           (contains? space-activation-keys key) true
+           (= "Enter" key) (not (or (checkbox-control? document node-id)
+                                     (radio-control? document node-id)))
+           :else false))))
 
 (defn- link-activation-key?
   [event]
@@ -1623,8 +1635,8 @@
            node-id)
       (reduce-key-listener-event document node-id event "keyup")
 
-      (and (activation-key? event)
-           node-id
+      (and node-id
+           (activation-key? document node-id event)
            (activatable-control? document node-id))
       (reduce-click-event document node-id (assoc event :event/type :pointer/click))
 

@@ -930,6 +930,32 @@
     (is (= false (get-in two-key [:document :nodes one :attrs :checked])))
     (is (= true (get-in two-key [:document :nodes two :attrs :checked])))))
 
+(deftest enter-key-does-not-activate-checkbox-or-radio
+  ;; Real HTML5 keyboard activation: Space toggles a focused checkbox/
+  ;; radio, but Enter does NOT -- confirmed via direct observation against
+  ;; real Chrome (a focused checkbox/radio's Enter keydown/keyup fire but
+  ;; produce no click and no checked change at all). Enter still activates
+  ;; every OTHER activatable control (button/submit/reset/summary),
+  ;; unaffected by this fix.
+  (let [page (browser/load-html
+              {:url "kotoba://enter-checkbox"
+               :html "<main><input id=\"flag\" type=\"checkbox\"><input id=\"a\" type=\"radio\" name=\"g\"><input id=\"b\" type=\"radio\" name=\"g\"></main>"})
+        document (:browser/document page)
+        flag (bridge/query-selector document "#flag")
+        a (bridge/query-selector document "#a")
+        flag-enter (document-input/reduce-event (assoc document :focus flag)
+                                                {:event/type :key/down :key "Enter"})
+        a-enter (document-input/reduce-event (assoc document :focus a)
+                                             {:event/type :key/down :key "Enter"})]
+    (is (= false (:handled? flag-enter))
+        "Enter on a focused checkbox must not be handled as an activation key")
+    (is (not= true (get-in flag-enter [:document :nodes flag :attrs :checked]))
+        "Enter must not toggle a checkbox")
+    (is (= false (:handled? a-enter))
+        "Enter on a focused radio must not be handled as an activation key")
+    (is (not= true (get-in a-enter [:document :nodes a :attrs :checked]))
+        "Enter must not check a radio")))
+
 (deftest submit-buttons-dispatch-form-submit
   (let [page (browser/load-html {:url "kotoba://submit"
                                  :html "<main><form id=\"form\"><input id=\"field\" name=\"q\" value=\"Kotoba\"><input id=\"amount\" type=\"number\" name=\"amount\" value=\"7\"><input id=\"volume\" type=\"range\" name=\"volume\" value=\"4\"><input id=\"token\" type=\"hidden\" name=\"token\" value=\"abc\"><input id=\"upload\" type=\"file\" name=\"upload\" value=\"/secret/path.txt\"><input id=\"flag\" type=\"checkbox\" name=\"ok\" checked><input id=\"off\" type=\"checkbox\" name=\"off\"><button id=\"go\" name=\"action\" value=\"go\">Go</button><button id=\"noop\" type=\"button\" name=\"action\" value=\"noop\">Noop</button><input id=\"input-noop\" type=\"button\" name=\"action\" value=\"input-noop\"><input id=\"submit\" type=\"submit\" name=\"action\" value=\"send\"></form></main>"})
