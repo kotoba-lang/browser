@@ -2112,15 +2112,24 @@
         submitted (session/apply-document-input-event! loaded {:event/type :pointer/click
                                                               :x (+ (:x go-op) 2)
                                                               :y (+ (:y go-op) 2)})
-        expected-url "https://app.example/submit?action=go&outside=ok&legend=ok"]
+        ;; Real document/tree order: #go is inside <form>; of the two
+        ;; external (form=) controls, <legend> (and its own
+        ;; #legend-external child, which escapes the fieldset's own
+        ;; disabling per real HTML5's legend carve-out) comes BEFORE the
+        ;; trailing #outside sibling. This was previously
+        ;; action=go&outside=ok&legend=ok, an incidental Clojure hash-map
+        ;; iteration order form-associated-node-ids used to rely on (see
+        ;; that function's own docstring in document_input.cljc) -- fixed
+        ;; together with the same bug in document-input-test.
+        expected-url "https://app.example/submit?action=go&legend=ok&outside=ok"]
     ;; No explicit referrerpolicy + same-origin destination -> full page-url referer.
     (is (= [{:headers {"referer" "https://app.example/form"}
              :url expected-url :method :get}]
            @calls))
     (is (= expected-url (get-in submitted [:browser.session/page :browser/url])))
     (is (= [{:name "action" :value "go" :node/id go}
-            {:name "outside" :value "ok" :node/id outside}
-            {:name "legend" :value "ok" :node/id legend-external}]
+            {:name "legend" :value "ok" :node/id legend-external}
+            {:name "outside" :value "ok" :node/id outside}]
            (get-in submitted [:browser.session/document-input-result :form/data])))
     (is (nil? (some #(= blocked (:node/id %))
                     (get-in submitted [:browser.session/document-input-result :form/data]))))

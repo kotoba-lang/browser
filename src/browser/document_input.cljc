@@ -711,6 +711,20 @@
         :else nil))))
 
 (defn- form-associated-node-ids
+  "Real HTMLFormElement/form-submission semantics gather every associated
+   control in tree (document) order, not any incidental storage order.
+   `owned-descendants` already gets this for free from `descendant-node-ids`'s
+   own real child-vector walk; `associated` (elements elsewhere in the
+   document referencing this form via `form=\"id\"`) previously found those
+   by iterating `(:nodes document)` directly -- an ordinary Clojure hash-map,
+   whose iteration order is NOT a language guarantee (confirmed via a real
+   ClojureWasm run against this exact function: it genuinely differs from
+   JVM Clojure's own hash-map iteration order for the same document,
+   producing a different -- but equally arbitrary -- external-control
+   order). Fixed by walking the same real tree-order primitive
+   (`descendant-node-ids`) from the document's own `:root` instead,
+   filtering it down to `form=\"id\"`-referencing elements -- deterministic,
+   and matching real DOM tree order, not merely *a* fixed order."
   [document form-id]
   (let [descendants (vec (descendant-node-ids document form-id))
         descendant-set (set descendants)
@@ -720,13 +734,13 @@
                                       (or (nil? form-attr)
                                           (= form-dom-id form-attr))))
                                   descendants)
-        associated (when (seq (str form-dom-id))
-                     (keep (fn [[node-id node]]
+        associated (when (and (seq (str form-dom-id)) (:root document))
+                     (keep (fn [node-id]
                              (when (and (not= node-id form-id)
                                         (not (contains? descendant-set node-id))
-                                        (= form-dom-id (get-in node [:attrs :form])))
+                                        (= form-dom-id (get-in document [:nodes node-id :attrs :form])))
                                node-id))
-                           (:nodes document)))]
+                           (descendant-node-ids document (:root document))))]
     (vec (distinct (concat owned-descendants associated)))))
 
 (defn- form-data

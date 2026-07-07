@@ -1715,6 +1715,42 @@
                          {:name "action" :value "external" :node/id go}]}]
            (last (get-in submitted [:document :ops]))))))
 
+(deftest form-associated-external-controls-are-in-real-tree-order-not-hash-order
+  ;; The confirmed bug: form-associated-node-ids previously found form=
+  ;; -associated elements elsewhere in the document by iterating (:nodes
+  ;; document) directly -- an ordinary Clojure hash-map, whose iteration
+  ;; order is not a language guarantee. Confirmed via a real ClojureWasm
+  ;; run against this exact function (a genuinely different Clojure
+  ;; runtime, not just a hypothetical): the SAME document produced a
+  ;; DIFFERENT external-control order than JVM Clojure did for the exact
+  ;; scenario in form-attribute-associates-external-controls-and-
+  ;; submitters above. Deliberately named so real tree/creation order
+  ;; ("zzz-first" then "aaa-second") is the OPPOSITE of alphabetical order
+  ;; -- this test could not coincidentally pass if some other incidental
+  ;; deterministic order (e.g. sorting by name) were substituted instead
+  ;; of real tree order.
+  (let [page (browser/load-html
+              {:url "kotoba://order"
+               :html (str "<main><form id=\"form\"><input id=\"inside\" name=\"inside\" value=\"one\">"
+                          "<button id=\"go\" name=\"go\" value=\"submitted\">Go</button></form>"
+                          "<input id=\"zzz-first\" form=\"form\" name=\"zzz-first\" value=\"two\">"
+                          "<input id=\"aaa-second\" form=\"form\" name=\"aaa-second\" value=\"three\">"
+                          "</main>")})
+        document (:browser/document page)
+        form (bridge/query-selector document "#form")
+        go (bridge/query-selector document "#go")
+        inside (bridge/query-selector document "#inside")
+        zzz-first (bridge/query-selector document "#zzz-first")
+        aaa-second (bridge/query-selector document "#aaa-second")
+        document (dom/add-event-listener document form "submit" "submit-handler")
+        submitted (document-input/reduce-event document {:event/type :pointer/click :node/id go})]
+    (is (= [{:name "inside" :value "one" :node/id inside}
+            {:name "go" :value "submitted" :node/id go}
+            {:name "zzz-first" :value "two" :node/id zzz-first}
+            {:name "aaa-second" :value "three" :node/id aaa-second}]
+           (:form/data submitted))
+        "external form= controls must appear in real document/tree order, not alphabetical or any other incidental order")))
+
 (deftest select-option-click-updates-value-and-form-data
   (let [page (browser/load-html {:url "kotoba://select"
                                  :html "<main><form id=\"form\"><select id=\"mode\" name=\"mode\"><option id=\"one\" value=\"one\" selected>One</option><option id=\"two\" value=\"two\">Two</option><option id=\"locked\" value=\"locked\" disabled>Locked</option></select><button id=\"go\">Go</button></form></main>"})
