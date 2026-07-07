@@ -1451,20 +1451,30 @@
                 document (cond-> (if focusable?
                                    (focus-editable document node-id)
                                    (blur-focused document nil))
+                           ;; Real click order (Chrome/Firefox): the
+                           ;; checked/open state flips synchronously as
+                           ;; part of pre-click activation, `click` fires
+                           ;; NEXT, and only afterward do `input`/`change`/
+                           ;; `toggle` fire -- previously this dispatched
+                           ;; input/change/toggle BEFORE click (confirmed
+                           ;; via direct REPL reproduction: registering
+                           ;; click/input/change listeners on the same
+                           ;; checkbox recorded input, then change, then
+                           ;; click, backwards from every real browser).
                            checkbox? (dom/set-attribute node-id :checked checked?)
-                           checkbox? (clear-node-validation-state node-id)
-                           checkbox? (dom/dispatch-event node-id "input" (checked-event node-id "input" checked?))
-                           checkbox? (dom/dispatch-event node-id "change" (checked-event node-id "change" checked?))
                            radio-changed? (as-> d
                                             (reduce #(dom/set-attribute %1 %2 :checked (= %2 node-id))
                                                     d
                                                     (radio-group-node-ids d node-id)))
+                           details-id (dom/set-attribute details-id :open details-open?)
+                           click-listener? (dispatch-pointer-event node-id "click" event)
+                           checkbox? (clear-node-validation-state node-id)
+                           checkbox? (dom/dispatch-event node-id "input" (checked-event node-id "input" checked?))
+                           checkbox? (dom/dispatch-event node-id "change" (checked-event node-id "change" checked?))
                            radio-changed? (clear-node-validation-state node-id)
                            radio-changed? (dom/dispatch-event node-id "input" (checked-event node-id "input" true))
                            radio-changed? (dom/dispatch-event node-id "change" (checked-event node-id "change" true))
-                           details-id (dom/set-attribute details-id :open details-open?)
-                           details-id (dom/dispatch-event details-id "toggle" (toggle-event details-id details-open?))
-                           click-listener? (dispatch-pointer-event node-id "click" event))
+                           details-id (dom/dispatch-event details-id "toggle" (toggle-event details-id details-open?)))
                 submit-result (when (and (not disabled?)
                                          (submit-control? document node-id))
                                 (apply-submit-default-action document node-id event))

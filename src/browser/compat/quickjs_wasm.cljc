@@ -2482,22 +2482,34 @@
             // -- previously click() only dispatched a bare click event,
             // confirmed via a real QuickJS smoke test to never toggle
             // checked or fire input/change at all.
+            //
+            // Real click order (Chrome/Firefox): checked flips
+            // synchronously as part of pre-click activation, `click`
+            // fires NEXT, and only afterward do `input`/`change` fire --
+            // this previously fired input/change BEFORE click, backwards
+            // from every real browser, confirmed via a real QuickJS smoke
+            // test (a target with click/input/change listeners recorded
+            // input, then change, then click).
             var node = __kotobaNodeById(__kotobaRefNodeId(ref));
             var tag = node && String(node.tag || '').toLowerCase();
             var type = node && String(__kotobaAttr(node, 'type') || 'text').toLowerCase();
+            var stateChanged = false;
             if (node && !__kotobaDisabledControl(node)) {
               if (tag === 'input' && type === 'checkbox') {
                 __kotobaSetBooleanAttribute(ref, 'checked', !__kotobaBoolAttr(node, 'checked'));
-                __kotobaDispatch(ref, __kotobaEvent('input', { bubbles: true }));
-                __kotobaDispatch(ref, __kotobaEvent('change', { bubbles: true }));
+                stateChanged = true;
               } else if (tag === 'input' && type === 'radio' && !__kotobaBoolAttr(node, 'checked')) {
                 __kotobaSetBooleanAttribute(ref, 'checked', true);
                 __kotobaClearRadioGroupSiblings(node);
-                __kotobaDispatch(ref, __kotobaEvent('input', { bubbles: true }));
-                __kotobaDispatch(ref, __kotobaEvent('change', { bubbles: true }));
+                stateChanged = true;
               }
             }
-            return __kotobaDispatch(ref, __kotobaEvent('click', { bubbles: true, cancelable: true }));
+            var result = __kotobaDispatch(ref, __kotobaEvent('click', { bubbles: true, cancelable: true }));
+            if (stateChanged) {
+              __kotobaDispatch(ref, __kotobaEvent('input', { bubbles: true }));
+              __kotobaDispatch(ref, __kotobaEvent('change', { bubbles: true }));
+            }
+            return result;
           },
           focus: function() {
             // Real element.focus() is a no-op on a disabled form control --

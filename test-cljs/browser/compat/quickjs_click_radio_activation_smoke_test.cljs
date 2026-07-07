@@ -185,3 +185,30 @@
                   (is false (str "QuickJS WASM engine initialization / page load failed: "
                                  (or (.-message err) err)))
                   (done))))))
+
+(deftest quickjs-real-checkbox-click-dispatches-click-before-input-and-change-test
+  ;; Real Chrome/Firefox order: checked flips synchronously as part of
+  ;; pre-click activation, click fires NEXT, and only afterward do
+  ;; input/change fire -- previously this fired input/change BEFORE click.
+  (async done
+    (-> (run-page-and-read-title!
+         (str "<main><input id=\"box\" type=\"checkbox\">"
+              "<script>"
+              "var box = document.getElementById('box');"
+              "var events = [];"
+              "box.addEventListener('click', function() { events.push('click'); });"
+              "box.addEventListener('input', function() { events.push('input'); });"
+              "box.addEventListener('change', function() { events.push('change'); });"
+              "box.click();"
+              "document.title = events.join(',');"
+              "</script></main>"))
+        (.then (fn [title]
+                 (println "quickjs real checkbox click order ->" (pr-str title))
+                 (is (= "click,input,change" title)
+                     (str "click must fire before input, which must fire before change, "
+                          "got document.title = " (pr-str title)))
+                 (done)))
+        (.catch (fn [err]
+                  (is false (str "QuickJS WASM engine initialization / page load failed: "
+                                 (or (.-message err) err)))
+                  (done))))))

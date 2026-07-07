@@ -578,6 +578,51 @@
     (is (nil? (get-in typed [:document :nodes flag :attrs :value])))
     (is (= false (get-in unchecked [:document :nodes flag :attrs :checked])))))
 
+(deftest checkbox-click-dispatches-click-before-input-and-change
+  ;; Real Chrome/Firefox order: the checked state flips synchronously as
+  ;; part of pre-click activation, `click` fires NEXT, and only afterward
+  ;; do `input`/`change` fire -- previously this engine dispatched
+  ;; input/change BEFORE click, backwards from every real browser.
+  (let [page (browser/load-html {:url "kotoba://checkbox-order"
+                                 :html "<main><input id=\"flag\" type=\"checkbox\"></main>"})
+        document (:browser/document page)
+        flag (bridge/query-selector document "#flag")
+        document (-> document
+                     (dom/add-event-listener flag "click" "click-handler")
+                     (dom/add-event-listener flag "input" "input-handler")
+                     (dom/add-event-listener flag "change" "change-handler"))
+        result (document-input/reduce-event document {:event/type :pointer/click :node/id flag})]
+    (is (= [[:dom/dispatch-event "click-handler" {:event/type "click" :target/id flag}]
+            [:dom/dispatch-event
+             "input-handler"
+             {:event/type "input" :target/id flag :checked true}]
+            [:dom/dispatch-event
+             "change-handler"
+             {:event/type "change" :target/id flag :checked true}]]
+           (filter #(= :dom/dispatch-event (first %)) (get-in result [:document :ops])))
+        "click must fire before input, which must fire before change")))
+
+(deftest radio-click-dispatches-click-before-input-and-change
+  (let [page (browser/load-html {:url "kotoba://radio-order"
+                                 :html (str "<main><input id=\"a\" type=\"radio\" name=\"g\">"
+                                            "<input id=\"b\" type=\"radio\" name=\"g\"></main>")})
+        document (:browser/document page)
+        b (bridge/query-selector document "#b")
+        document (-> document
+                     (dom/add-event-listener b "click" "click-handler")
+                     (dom/add-event-listener b "input" "input-handler")
+                     (dom/add-event-listener b "change" "change-handler"))
+        result (document-input/reduce-event document {:event/type :pointer/click :node/id b})]
+    (is (= [[:dom/dispatch-event "click-handler" {:event/type "click" :target/id b}]
+            [:dom/dispatch-event
+             "input-handler"
+             {:event/type "input" :target/id b :checked true}]
+            [:dom/dispatch-event
+             "change-handler"
+             {:event/type "change" :target/id b :checked true}]]
+           (filter #(= :dom/dispatch-event (first %)) (get-in result [:document :ops])))
+        "click must fire before input, which must fire before change")))
+
 (deftest summary-click-toggles-parent-details-open-and-dispatches-toggle
   ;; Real HTML5: clicking a <summary> toggles its parent <details>'s real
   ;; `open` attribute and dispatches a real `toggle` event -- before this
@@ -601,6 +646,24 @@
            (take-last 1 (get-in opened [:document :ops]))))
     (is (= false (get-in closed [:document :nodes details :attrs :open]))
         "a second click toggles it back closed")))
+
+(deftest summary-click-dispatches-click-before-toggle
+  ;; Same real-browser ordering fix as checkbox/radio above: a real click
+  ;; on <summary> fires the click event before its parent <details>'
+  ;; own toggle event, not after.
+  (let [page (browser/load-html {:url "kotoba://details-order"
+                                 :html "<main><details id=\"d\"><summary id=\"s\">Click me</summary><p>Body</p></details></main>"})
+        document (:browser/document page)
+        details (bridge/query-selector document "#d")
+        summary (bridge/query-selector document "#s")
+        document (-> document
+                     (dom/add-event-listener summary "click" "click-handler")
+                     (dom/add-event-listener details "toggle" "toggle-handler"))
+        result (document-input/reduce-event document {:event/type :pointer/click :node/id summary})]
+    (is (= [[:dom/dispatch-event "click-handler" {:event/type "click" :target/id summary}]
+            [:dom/dispatch-event "toggle-handler" {:event/type "toggle" :target/id details :open true}]]
+           (take-last 2 (get-in result [:document :ops])))
+        "click must fire before toggle")))
 
 (deftest summary-click-with-no-details-parent-is-not-handled
   ;; Real HTML5: only a <summary> that is the DIRECT child of a real

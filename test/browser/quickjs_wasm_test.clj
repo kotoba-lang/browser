@@ -888,3 +888,16 @@
     (is (str/includes? source "if (event.immediatePropagationStopped) break;"))
     (is (not (str/includes? source "listeners[i].call(currentTarget, event);\n            if (event.cancelBubble) break;"))
         "the per-target listener loop must no longer break on plain cancelBubble")))
+
+(deftest quickjs-wasm-webapi-shim-click-dispatches-click-before-input-and-change
+  ;; Real Chrome/Firefox order: checked flips synchronously as part of
+  ;; pre-click activation, click fires NEXT, and only afterward do
+  ;; input/change fire -- previously click() fired input/change BEFORE
+  ;; click, backwards from every real browser. Confirmed via a real
+  ;; CLJS/QuickJS smoke test (quickjs-click-radio-activation-smoke-test)
+  ;; that click/input/change listeners on the same checkbox now correctly
+  ;; observe click first.
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "var result = __kotobaDispatch(ref, __kotobaEvent('click', { bubbles: true, cancelable: true }));"))
+    (is (str/includes? source "if (stateChanged) {\n              __kotobaDispatch(ref, __kotobaEvent('input', { bubbles: true }));\n              __kotobaDispatch(ref, __kotobaEvent('change', { bubbles: true }));\n            }"))
+    (is (str/includes? source "return result;"))))

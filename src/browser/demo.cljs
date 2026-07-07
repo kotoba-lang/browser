@@ -734,6 +734,15 @@
    "<div id=\"box-shadow-spread-target\" class=\"box-shadow-spread-box\" style=\"padding:8\">shadow box</div>"
    "<div id=\"box-shadow-spread-result\">box-shadow-spread proof: pending...</div>"
    "</section>"
+   "<section id=\"click-order-proof\" style=\"display:flex; flex-direction:column; gap:8; margin-top:4\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "Real click() event order below -- previously this engine dispatched "
+   "input/change BEFORE click, backwards from every real browser, which "
+   "always fires click first."
+   "</p>"
+   "<input id=\"click-order-checkbox\" type=\"checkbox\">"
+   "<div id=\"click-order-result\">click-order proof: pending...</div>"
+   "</section>"
    "<script>"
    "document.title = 'Kotoba Browser: real QuickJS + real cssom layout + real WebGL paint';"
    "</script>"
@@ -995,6 +1004,16 @@
    "document.getElementById('box-shadow-spread-result').textContent = "
    "'box-shadow-spread proof: color=' + bsComputed.getPropertyValue('box-shadow-color') + "
    "', spread=' + bsComputed.getPropertyValue('box-shadow-spread');"
+   "</script>"
+   "<script>"
+   "var coCheckbox = document.getElementById('click-order-checkbox');"
+   "var coEvents = [];"
+   "coCheckbox.addEventListener('click', function() { coEvents.push('click'); });"
+   "coCheckbox.addEventListener('input', function() { coEvents.push('input'); });"
+   "coCheckbox.addEventListener('change', function() { coEvents.push('change'); });"
+   "coCheckbox.click();"
+   "document.getElementById('click-order-result').textContent = "
+   "'click-order proof: ' + coEvents.join(',');"
    "</script>"
    "<script>"
    "void 0;"
@@ -1276,6 +1295,7 @@
                  click-activation-proof (element-text doc "click-activation-result")
                  stop-propagation-proof (element-text doc "stop-propagation-result")
                  box-shadow-spread-proof (element-text doc "box-shadow-spread-result")
+                 click-order-proof (element-text doc "click-order-result")
                  status-badge-proof (pseudo-content doc "status-badge")
                  step-proofs (mapv #(pseudo-content doc %)
                                    ["step-1" "step-2" "step-3" "step-4"])]
@@ -1314,6 +1334,7 @@
              (js/console.log "browser.demo: #click-activation-result ->" (pr-str click-activation-proof))
              (js/console.log "browser.demo: #stop-propagation-result ->" (pr-str stop-propagation-proof))
              (js/console.log "browser.demo: #box-shadow-spread-result ->" (pr-str box-shadow-spread-proof))
+             (js/console.log "browser.demo: #click-order-result ->" (pr-str click-order-proof))
              (js/console.log "browser.demo: real ::before generated content ->"
                               "#status-badge:" (pr-str status-badge-proof)
                               "#step-counter lis:" (pr-str step-proofs))
