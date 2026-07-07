@@ -149,6 +149,7 @@
             [browser.origin :as origin]
             [browser.profile :as profile]
             [browser.session :as session]
+            [browser.storage :as storage]
             [clojure.string :as str]
             [kotoba.wasm.host :as host]
             [kotoba.wasm.host.webgl :as webgl]))
@@ -1152,6 +1153,20 @@
    "document.getElementById('comment-parse-result').textContent = "
    "'comment-parse proof: marker=' + (cpMarker ? cpMarker.textContent : 'MISSING (bug: rest of document swallowed)');"
    "</script>"
+   "<section id=\"cookie-proof\" style=\"display:flex; flex-direction:column; gap:8; margin-top:4\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "document.cookie below -- previously always read '' no matter what "
+   "was set, even though the underlying cookie store was already real."
+   "</p>"
+   "<div id=\"cookie-result\">cookie proof: pending...</div>"
+   "</section>"
+   "<script>"
+   "document.cookie = 'demoCookie=kotobaProof';"
+   "</script>"
+   "<script>"
+   "document.getElementById('cookie-result').textContent = "
+   "'cookie proof: document.cookie=' + JSON.stringify(document.cookie);"
+   "</script>"
    "<script>"
    "void 0;"
    "</script>"
@@ -1332,6 +1347,7 @@
                                   {:host host
                                    :viewport [viewport-width viewport-height]
                                    :profile demo-profile
+                                   :store (storage/empty-store)
                                    :fetch-fn (synchronous-fetch-fn prefetched)
                                    :websocket-fn (ws/websocket-fn)}))]
                (js/console.log "browser.demo: starting real QuickJS script engine...")
@@ -1440,6 +1456,7 @@
                  serialize-attr-leak-proof (element-text doc "serialize-attr-leak-result")
                  location-proof (element-text doc "location-result")
                  comment-parse-proof (element-text doc "comment-parse-result")
+                 cookie-proof (element-text doc "cookie-result")
                  status-badge-proof (pseudo-content doc "status-badge")
                  step-proofs (mapv #(pseudo-content doc %)
                                    ["step-1" "step-2" "step-3" "step-4"])]
@@ -1486,6 +1503,7 @@
              (js/console.log "browser.demo: #serialize-attr-leak-result ->" (pr-str serialize-attr-leak-proof))
              (js/console.log "browser.demo: #location-result ->" (pr-str location-proof))
              (js/console.log "browser.demo: #comment-parse-result ->" (pr-str comment-parse-proof))
+             (js/console.log "browser.demo: #cookie-result ->" (pr-str cookie-proof))
              (js/console.log "browser.demo: real ::before generated content ->"
                               "#status-badge:" (pr-str status-badge-proof)
                               "#step-counter lis:" (pr-str step-proofs))
