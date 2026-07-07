@@ -949,3 +949,22 @@
     (is (str/includes? source "function __kotobaDispatchClickWithActivation(ref, event)"))
     (is (str/includes? source "if (eventType === 'click') return __kotobaDispatchClickWithActivation(ref, event);"))
     (is (str/includes? source "return __kotobaDispatchClickWithActivation(\n              ref, __kotobaEvent('click', { bubbles: true, cancelable: true }));"))))
+
+(deftest quickjs-wasm-webapi-shim-serialize-node-filters-internal-attrs-and-closes-void-elements
+  ;; .attributes/innerHTML/outerHTML previously enumerated Object.keys(attrs)
+  ;; with zero filtering, so this engine's own internal bookkeeping attrs
+  ;; (default-value/scroll-top/selection-start/composition/invalid/
+  ;; dirty-value/files, every cascade-resolved style/<prop> longhand, and
+  ;; style-inline/style-inline-important) all leaked as if they were real,
+  ;; author-visible HTML attributes -- confirmed via a temporary diagnostic
+  ;; CLJS/QuickJS smoke test before touching source (a plain <input
+  ;; value="hi"> serialized as <input default-value="hi" ... style-
+  ;; inline="[object Object]" style/color="red" ...>). Also fixes a second,
+  ;; adjacent bug found in the same __kotobaSerializeNode function: void
+  ;; elements were serialized with a bogus closing tag.
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "function __kotobaPublicAttrName(name)"))
+    (is (str/includes? source "&& name.indexOf('style/') !== 0;"))
+    (is (str/includes? source "Object.keys(attrs).filter(__kotobaPublicAttrName).sort().map(function(name) {"))
+    (is (str/includes? source "var names = Object.keys(attrs).filter(__kotobaPublicAttrName).sort();"))
+    (is (str/includes? source "if (Object.prototype.hasOwnProperty.call(__kotobaVoidTags, tag)) {"))))

@@ -1237,6 +1237,35 @@
           .replace(/>/g, '&gt;')
           .split(String.fromCharCode(34)).join('&quot;');
       }
+      // Real HTML has no default-value/scroll-top/selection-start/etc
+      // attribute -- these are this engine's own internal bookkeeping,
+      // stored via the exact same generic dom/set-attribute path real
+      // attributes use (see htmldom.core/initialize-form-node,
+      // document_input.cljc's selection/composition/validation/file-list
+      // tracking) so JS-side property getters like .defaultValue/.scrollTop/
+      // .selectionStart/.files can read them back via __kotobaAttr. Real
+      // author-visible surfaces -- .attributes and innerHTML/outerHTML --
+      // must not enumerate them; every style-namespaced cascade-resolved
+      // longhand (a plain style/ prefix here, no colon) is the same kind
+      // of internal-only value and gets the same treatment.
+      var __kotobaInternalAttrNames = {
+        'style-inline': true, 'style-inline-important': true,
+        'default-value': true, 'default-checked': true, 'default-selected': true,
+        'scroll-top': true, 'scroll-left': true,
+        'selection-start': true, 'selection-end': true,
+        'composition': true, 'composing': true,
+        'invalid': true, 'validation-reason': true,
+        'dirty-value': true, 'files': true
+      };
+      function __kotobaPublicAttrName(name) {
+        return !Object.prototype.hasOwnProperty.call(__kotobaInternalAttrNames, name)
+          && name.indexOf('style/') !== 0;
+      }
+      var __kotobaVoidTags = {
+        area: true, base: true, br: true, col: true, embed: true, hr: true,
+        img: true, input: true, link: true, meta: true, param: true,
+        source: true, track: true, wbr: true
+      };
       function __kotobaSerializeNode(node) {
         if (!node) return '';
         if (node['node/type'] === 'text') return __kotobaEscapeHtml(node.text || '');
@@ -1245,9 +1274,12 @@
         }
         var tag = String(node.tag || '').toLowerCase();
         var attrs = node.attrs || {};
-        var attrText = Object.keys(attrs).sort().map(function(name) {
+        var attrText = Object.keys(attrs).filter(__kotobaPublicAttrName).sort().map(function(name) {
           return ' ' + name + '=' + String.fromCharCode(34) + __kotobaEscapeHtml(attrs[name]) + String.fromCharCode(34);
         }).join('');
+        if (Object.prototype.hasOwnProperty.call(__kotobaVoidTags, tag)) {
+          return '<' + tag + attrText + '>';
+        }
         var body = (node.children || []).map(function(id) { return __kotobaSerializeNode(__kotobaNodeById(id)); }).join('');
         return '<' + tag + attrText + '>' + body + '</' + tag + '>';
       }
@@ -1399,7 +1431,7 @@
       function __kotobaAttributes(ref) {
         var node = __kotobaNodeById(__kotobaRefNodeId(ref));
         var attrs = node && node.attrs ? node.attrs : {};
-        var names = Object.keys(attrs).sort();
+        var names = Object.keys(attrs).filter(__kotobaPublicAttrName).sort();
         var result = names.map(function(name) {
           return { name: name, value: String(attrs[name]), nodeName: name, nodeValue: String(attrs[name]) };
         });

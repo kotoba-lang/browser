@@ -783,6 +783,16 @@
    "<div id=\"currentcolor-target\" class=\"currentcolor-box\" style=\"padding:8\">currentColor box</div>"
    "<div id=\"currentcolor-result\">currentcolor proof: pending...</div>"
    "</section>"
+   "<section id=\"serialize-attr-leak-proof\" style=\"display:flex; flex-direction:column; gap:8; margin-top:4\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "outerHTML/.attributes below -- previously leaked this engine's own "
+   "internal bookkeeping (default-value, style/* longhands, ...) as if "
+   "they were real HTML attributes, and serialized void elements with a "
+   "bogus closing tag."
+   "</p>"
+   "<input id=\"serialize-attr-leak-target\" value=\"hi\" style=\"color:#e07a3f\">"
+   "<div id=\"serialize-attr-leak-result\">serialize-attr-leak proof: pending...</div>"
+   "</section>"
    "<script>"
    "document.title = 'Kotoba Browser: real QuickJS + real cssom layout + real WebGL paint';"
    "</script>"
@@ -1093,6 +1103,13 @@
    "'currentcolor proof: color=' + ccComputed.color + ', border-color=' + ccComputed.getPropertyValue('border-color');"
    "</script>"
    "<script>"
+   "var salTarget = document.getElementById('serialize-attr-leak-target');"
+   "var salNames = [];"
+   "for (var sali = 0; sali < salTarget.attributes.length; sali++) { salNames.push(salTarget.attributes[sali].name); }"
+   "document.getElementById('serialize-attr-leak-result').textContent = "
+   "'serialize-attr-leak proof: outerHTML=' + salTarget.outerHTML + ', attrs=' + salNames.sort().join(',');"
+   "</script>"
+   "<script>"
    "void 0;"
    "</script>"
    "</main>"))
@@ -1377,6 +1394,7 @@
                  focus-blur-events-proof (element-text doc "focus-blur-events-result")
                  dispatchevent-click-activation-proof (element-text doc "dispatchevent-click-activation-result")
                  currentcolor-proof (element-text doc "currentcolor-result")
+                 serialize-attr-leak-proof (element-text doc "serialize-attr-leak-result")
                  status-badge-proof (pseudo-content doc "status-badge")
                  step-proofs (mapv #(pseudo-content doc %)
                                    ["step-1" "step-2" "step-3" "step-4"])]
@@ -1420,6 +1438,7 @@
              (js/console.log "browser.demo: #focus-blur-events-result ->" (pr-str focus-blur-events-proof))
              (js/console.log "browser.demo: #dispatchevent-click-activation-result ->" (pr-str dispatchevent-click-activation-proof))
              (js/console.log "browser.demo: #currentcolor-result ->" (pr-str currentcolor-proof))
+             (js/console.log "browser.demo: #serialize-attr-leak-result ->" (pr-str serialize-attr-leak-proof))
              (js/console.log "browser.demo: real ::before generated content ->"
                               "#status-badge:" (pr-str status-badge-proof)
                               "#step-counter lis:" (pr-str step-proofs))
