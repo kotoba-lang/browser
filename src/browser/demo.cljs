@@ -1184,6 +1184,21 @@
    "document.getElementById('csstext-result').textContent = "
    "'csstext proof: color=' + ctComputed.color;"
    "</script>"
+   "<section id=\"select-disabled-proof\" style=\"display:flex; flex-direction:column; gap:8; margin-top:4\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "select.value below -- a disabled-but-selected option previously "
+   "reported '' instead of its own value."
+   "</p>"
+   "<select id=\"select-disabled-target\">"
+   "<option value=\"placeholder\" disabled selected>Choose one...</option>"
+   "<option value=\"real\">Real option</option>"
+   "</select>"
+   "<div id=\"select-disabled-result\">select-disabled proof: pending...</div>"
+   "</section>"
+   "<script>"
+   "document.getElementById('select-disabled-result').textContent = "
+   "'select-disabled proof: value=' + document.getElementById('select-disabled-target').value;"
+   "</script>"
    "<script>"
    "void 0;"
    "</script>"
@@ -1475,6 +1490,7 @@
                  comment-parse-proof (element-text doc "comment-parse-result")
                  cookie-proof (element-text doc "cookie-result")
                  csstext-proof (element-text doc "csstext-result")
+                 select-disabled-proof (element-text doc "select-disabled-result")
                  status-badge-proof (pseudo-content doc "status-badge")
                  step-proofs (mapv #(pseudo-content doc %)
                                    ["step-1" "step-2" "step-3" "step-4"])]
@@ -1523,6 +1539,7 @@
              (js/console.log "browser.demo: #comment-parse-result ->" (pr-str comment-parse-proof))
              (js/console.log "browser.demo: #cookie-result ->" (pr-str cookie-proof))
              (js/console.log "browser.demo: #csstext-result ->" (pr-str csstext-proof))
+             (js/console.log "browser.demo: #select-disabled-result ->" (pr-str select-disabled-proof))
              (js/console.log "browser.demo: real ::before generated content ->"
                               "#status-badge:" (pr-str status-badge-proof)
                               "#step-counter lis:" (pr-str step-proofs))
