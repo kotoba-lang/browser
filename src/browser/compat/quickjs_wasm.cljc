@@ -3374,6 +3374,79 @@
           return '00000000-0000-4000-8000-000000000000';
         }
       };
+      function __kotobaBase64Chars() {
+        return 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+      }
+      function __kotobaIsAsciiWhitespace(ch) {
+        return ch === ' ' || ch === '\\t' || ch === '\\n' || ch === '\\f' || ch === '\\r';
+      }
+      globalThis.btoa = function(data) {
+        // Real btoa() encodes a binary (Latin1) string -- every char code
+        // must be 0-255, else a real InvalidCharacterError DOMException is
+        // thrown (this engine has no DOMException type at all, so a plain
+        // Error is thrown instead, an honest simplification matching this
+        // file's own established posture elsewhere, e.g. MutationObserver's
+        // plain TypeError). Deliberately avoids regex entirely (unlike a
+        // naive implementation) to sidestep this file's own known Clojure-
+        // string-escaping hazard for JS regex literals.
+        var s = String(data);
+        var chars = __kotobaBase64Chars();
+        for (var i = 0; i < s.length; i++) {
+          if (s.charCodeAt(i) > 255) {
+            throw new Error('InvalidCharacterError: btoa() argument must be a Latin1 (binary) string');
+          }
+        }
+        var result = '';
+        for (var j = 0; j < s.length; j += 3) {
+          var hasB1 = j + 1 < s.length;
+          var hasB2 = j + 2 < s.length;
+          var b0 = s.charCodeAt(j);
+          var b1 = hasB1 ? s.charCodeAt(j + 1) : 0;
+          var b2 = hasB2 ? s.charCodeAt(j + 2) : 0;
+          var triplet = (b0 << 16) | (b1 << 8) | b2;
+          result += chars.charAt((triplet >> 18) & 63);
+          result += chars.charAt((triplet >> 12) & 63);
+          result += hasB1 ? chars.charAt((triplet >> 6) & 63) : '=';
+          result += hasB2 ? chars.charAt(triplet & 63) : '=';
+        }
+        return result;
+      };
+      globalThis.atob = function(data) {
+        // Real atob() first strips all ASCII whitespace, then requires the
+        // remainder to be legal base64 (only the 64-symbol alphabet plus
+        // trailing '=' padding, at most 2 padding characters, and a real
+        // length-mod-4 of 1 is never legal) -- any violation throws a real
+        // InvalidCharacterError DOMException, mirrored here as a plain
+        // Error for the same no-DOMException-type reason btoa() above is.
+        var raw = String(data);
+        var chars = __kotobaBase64Chars();
+        var s = '';
+        for (var i = 0; i < raw.length; i++) {
+          if (!__kotobaIsAsciiWhitespace(raw.charAt(i))) s += raw.charAt(i);
+        }
+        var paddingStart = s.length;
+        while (paddingStart > 0 && s.charAt(paddingStart - 1) === '=') paddingStart--;
+        if (s.length - paddingStart > 2 || paddingStart % 4 === 1) {
+          throw new Error('InvalidCharacterError: atob() argument is not correctly encoded');
+        }
+        for (var k = 0; k < paddingStart; k++) {
+          if (chars.indexOf(s.charAt(k)) === -1) {
+            throw new Error('InvalidCharacterError: atob() argument is not correctly encoded');
+          }
+        }
+        var result = '';
+        var buffer = 0;
+        var bits = 0;
+        for (var m = 0; m < paddingStart; m++) {
+          buffer = (buffer << 6) | chars.indexOf(s.charAt(m));
+          bits += 6;
+          if (bits >= 8) {
+            bits -= 8;
+            result += String.fromCharCode((buffer >> bits) & 255);
+          }
+        }
+        return result;
+      };
       globalThis.Worker = function(url, options) {
         var workerId = 'worker-' + globalThis.__kotobaNextWorkerId;
         globalThis.__kotobaNextWorkerId = globalThis.__kotobaNextWorkerId + 1;

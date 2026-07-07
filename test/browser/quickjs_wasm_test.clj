@@ -231,6 +231,37 @@
   (let [source quickjs-wasm/webapi-shim-source]
     (is (str/includes? source "if (__kotobaDisabledControl(__kotobaNodeById(__kotobaRefNodeId(ref)))) return;"))))
 
+(deftest quickjs-wasm-webapi-shim-exposes-atob-btoa
+  ;; atob()/btoa() -- previously entirely missing (a repo-wide grep for
+  ;; atob/btoa returned zero matches anywhere). Confirmed via a real
+  ;; CLJS/QuickJS smoke test (quickjs-atob-btoa-smoke-test) that a real
+  ;; page script's own btoa('hello') now correctly encodes to the
+  ;; well-known base64 aGVsbG8=, atob() decodes it back losslessly, a
+  ;; round trip through both real functions is lossless, an empty string
+  ;; encodes to itself, and each function throws on genuinely invalid
+  ;; input (a non-Latin1 character for btoa, malformed base64 for atob).
+  ;; Deliberately avoids regex entirely to sidestep this file's own known
+  ;; Clojure-string-escaping hazard for JS regex literals -- hit a
+  ;; DIFFERENT instance of that same hazard class mid-implementation:
+  ;; single-backslash JS escapes (\\t/\\n/\\f/\\r) written directly in the
+  ;; Clojure source were consumed by the CLOJURE reader itself into raw,
+  ;; unescaped control characters embedded in the resulting JS source
+  ;; text -- a real, unescaped newline/tab/formfeed/CR sitting inside a
+  ;; plain JS string literal is a JS syntax error, confirmed via
+  ;; `node --check` on the raw extracted webapi-shim-source (not just a
+  ;; ClojureScript compile failure, since this is a plain string constant
+  ;; from CLJS's own perspective) -- fixed by doubling each backslash in
+  ;; the Clojure source so the JS text itself carries the literal 2-char
+  ;; escape sequence for the JS parser to interpret at QuickJS eval time.
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "function __kotobaBase64Chars() {"))
+    (is (str/includes? source "globalThis.btoa = function(data) {"))
+    (is (str/includes? source "throw new Error('InvalidCharacterError: btoa() argument must be a Latin1 (binary) string');"))
+    (is (str/includes? source "globalThis.atob = function(data) {"))
+    (is (str/includes? source "throw new Error('InvalidCharacterError: atob() argument is not correctly encoded');"))
+    (is (str/includes? source "function __kotobaIsAsciiWhitespace(ch) {"))
+    (is (str/includes? source "return ch === ' ' || ch === '\\t' || ch === '\\n' || ch === '\\f' || ch === '\\r';"))))
+
 (deftest quickjs-wasm-webapi-shim-exposes-pattern-mismatch-validation
   ;; A real HTML5 `pattern` attribute -- previously an honest, documented
   ;; scope-cut everywhere (`patternMismatch: false` hardcoded, no check at

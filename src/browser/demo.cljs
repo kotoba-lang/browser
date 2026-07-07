@@ -445,6 +445,13 @@
    "<input id=\"focus-disabled-target\" disabled value=\"disabled, cannot really focus\">"
    "<div id=\"focus-disabled-result\">focus-disabled proof: pending...</div>"
    "</section>"
+   "<section id=\"atob-btoa-proof\" style=\"display:flex; flex-direction:column; gap:8\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "Real atob()/btoa() below -- previously entirely missing. A real "
+   "string is base64-encoded, decoded back, and read by script."
+   "</p>"
+   "<div id=\"atob-btoa-result\">atob-btoa proof: pending...</div>"
+   "</section>"
    "<section id=\"check-validity-proof\" style=\"display:flex; flex-direction:column; gap:8\">"
    "<p style=\"color:#9fb0c9; font-size:13\">"
    "Real element.checkValidity()/.validity/.willValidate below -- previously "
@@ -831,6 +838,13 @@
    "(document.activeElement === fdTarget);"
    "</script>"
    "<script>"
+   "var encoded = btoa('kotoba browser');"
+   "var decoded = atob(encoded);"
+   "var abResult = document.getElementById('atob-btoa-result');"
+   "abResult.textContent = 'atob-btoa proof: btoa(\\'kotoba browser\\')=' + encoded + "
+   "', atob(that)=' + decoded;"
+   "</script>"
+   "<script>"
    "var cvTarget = document.getElementById('check-validity-target');"
    "var cvResult = document.getElementById('check-validity-result');"
    "cvResult.textContent = 'checkValidity proof: checkValidity()=' + cvTarget.checkValidity() + "
@@ -1170,6 +1184,7 @@
                  focus-within-proof (element-text doc "focus-within-result")
                  local-storage-proof (element-text doc "local-storage-result")
                  focus-disabled-proof (element-text doc "focus-disabled-result")
+                 atob-btoa-proof (element-text doc "atob-btoa-result")
                  check-validity-proof (element-text doc "check-validity-result")
                  select-proof (element-text doc "select-result")
                  pattern-proof (element-text doc "pattern-result")
@@ -1203,6 +1218,7 @@
              (js/console.log "browser.demo: #focus-within-result ->" (pr-str focus-within-proof))
              (js/console.log "browser.demo: #local-storage-result ->" (pr-str local-storage-proof))
              (js/console.log "browser.demo: #focus-disabled-result ->" (pr-str focus-disabled-proof))
+             (js/console.log "browser.demo: #atob-btoa-result ->" (pr-str atob-btoa-proof))
              (js/console.log "browser.demo: #check-validity-result ->" (pr-str check-validity-proof))
              (js/console.log "browser.demo: #select-result ->" (pr-str select-proof))
              (js/console.log "browser.demo: #pattern-result ->" (pr-str pattern-proof))
