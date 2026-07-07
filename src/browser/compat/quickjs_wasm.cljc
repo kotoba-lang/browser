@@ -3079,19 +3079,62 @@
         return null;
       };
       globalThis.location = globalThis.location || {
-        href: 'about:blank',
+        // Real spec: location.href always reflects the CURRENT document's
+        // URL, exactly like document.URL's own live getter above (see
+        // get URL() nearby) -- previously a plain, never-updated data
+        // property fixed at 'about:blank' forever, and none of pathname/
+        // search/hash/host/protocol/origin existed at all. A getter here,
+        // not a value captured once at init time, so it stays correct
+        // across every navigation without needing this whole object
+        // rebuilt. location.href = someUrl (a real, extremely common
+        // navigation idiom, more common than calling .assign() directly)
+        // was ALSO a silent no-op before -- a plain property assignment
+        // with no navigation side effect at all -- now routed through the
+        // same setter as .assign().
+        get href() {
+          return globalThis.__kotobaSnapshot && globalThis.__kotobaSnapshot.url != null
+            ? String(globalThis.__kotobaSnapshot.url)
+            : 'about:blank';
+        },
+        set href(url) {
+          this.assign(url);
+        },
+        get protocol() {
+          return __kotobaSplitUrl(this.href).protocol;
+        },
+        get host() {
+          return __kotobaSplitUrl(this.href).authority;
+        },
+        get hostname() {
+          return __kotobaSplitUrl(this.href).authority.split(':')[0] || '';
+        },
+        get port() {
+          var hostParts = __kotobaSplitUrl(this.href).authority.split(':');
+          return hostParts.length > 1 ? hostParts.slice(1).join(':') : '';
+        },
+        get pathname() {
+          return __kotobaSplitUrl(this.href).pathname || '/';
+        },
+        get search() {
+          return __kotobaSplitUrl(this.href).search;
+        },
+        get hash() {
+          return __kotobaSplitUrl(this.href).hash;
+        },
+        get origin() {
+          var parts = __kotobaSplitUrl(this.href);
+          return parts.authority ? parts.protocol + '//' + parts.authority : 'null';
+        },
         assign: function(url) {
-          this.href = String(url);
           globalThis.__kotobaRequests.push({
             capability: 'location/assign',
-            url: this.href
+            url: String(url)
           });
         },
         replace: function(url) {
-          this.href = String(url);
           globalThis.__kotobaRequests.push({
             capability: 'location/replace',
-            url: this.href
+            url: String(url)
           });
         },
         reload: function() {

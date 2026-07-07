@@ -702,6 +702,33 @@
     (is (str/includes? source "capability: 'location/reload'"))
     (is (str/includes? source "'location/op': 'reload'"))))
 
+(deftest quickjs-wasm-webapi-shim-location-href-is-a-live-getter-not-a-fixed-value
+  ;; location.href was previously a plain, never-updated data property fixed
+  ;; at the literal string 'about:blank' forever -- previously confirmed via
+  ;; a temporary CLJS/QuickJS smoke test that location.href stayed
+  ;; 'about:blank' while document.URL correctly showed the real navigated
+  ;; URL, and location.pathname/search/hash/host/protocol/origin were all
+  ;; undefined (didn't exist at all). Now a getter mirroring document.URL's
+  ;; own live-read pattern, with the sub-parts derived from the same
+  ;; __kotobaSplitUrl helper the URL constructor already uses.
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source
+                        (str "get href() {\n"
+                             "          return globalThis.__kotobaSnapshot && globalThis.__kotobaSnapshot.url != null\n"
+                             "            ? String(globalThis.__kotobaSnapshot.url)\n"
+                             "            : 'about:blank';\n"
+                             "        },")))
+    (is (str/includes? source "set href(url) {\n          this.assign(url);\n        },"))
+    (is (str/includes? source "get protocol() {\n          return __kotobaSplitUrl(this.href).protocol;\n        },"))
+    (is (str/includes? source "get pathname() {\n          return __kotobaSplitUrl(this.href).pathname || '/';\n        },"))
+    (is (str/includes? source "get search() {\n          return __kotobaSplitUrl(this.href).search;\n        },"))
+    (is (str/includes? source "get hash() {\n          return __kotobaSplitUrl(this.href).hash;\n        },"))
+    (is (str/includes? source
+                        (str "get origin() {\n"
+                             "          var parts = __kotobaSplitUrl(this.href);\n"
+                             "          return parts.authority ? parts.protocol + '//' + parts.authority : 'null';\n"
+                             "        },")))))
+
 (deftest quickjs-wasm-webapi-shim-exposes-url-and-search-params
   (let [source quickjs-wasm/webapi-shim-source]
     (is (str/includes? source "globalThis.URLSearchParams = function(init)"))
