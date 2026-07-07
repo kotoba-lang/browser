@@ -702,6 +702,18 @@
    "<input id=\"range-proof-ok\" class=\"range-proof-input\" type=\"number\" min=\"1\" max=\"10\" value=\"5\">"
    "<div id=\"range-proof-result\">range proof: pending...</div>"
    "</section>"
+   "<section id=\"click-activation-proof\" style=\"display:flex; flex-direction:column; gap:8; margin-top:4\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "Real element.click() checkbox/radio activation below -- previously "
+   "click() only dispatched a bare click event, never toggling checked or "
+   "clearing sibling radios the way a real user click already does via "
+   "this engine's own pointer-click pipeline."
+   "</p>"
+   "<input id=\"click-checkbox\" type=\"checkbox\">"
+   "<input id=\"click-radio-a\" type=\"radio\" name=\"click-radio-group\" checked>"
+   "<input id=\"click-radio-b\" type=\"radio\" name=\"click-radio-group\">"
+   "<div id=\"click-activation-result\">click-activation proof: pending...</div>"
+   "</section>"
    "<script>"
    "document.title = 'Kotoba Browser: real QuickJS + real cssom layout + real WebGL paint';"
    "</script>"
@@ -937,6 +949,16 @@
    "var rangeResult = document.getElementById('range-proof-result');"
    "rangeResult.textContent = 'range proof: value=15 (min=1,max=10) color=' + "
    "getComputedStyle(rangeBad).color + ', value=5 color=' + getComputedStyle(rangeOk).color;"
+   "</script>"
+   "<script>"
+   "var caCheckbox = document.getElementById('click-checkbox');"
+   "var caRadioA = document.getElementById('click-radio-a');"
+   "var caRadioB = document.getElementById('click-radio-b');"
+   "var caResult = document.getElementById('click-activation-result');"
+   "caCheckbox.click();"
+   "caRadioB.click();"
+   "caResult.textContent = 'click-activation proof: checkbox after click()=' + caCheckbox.checked + "
+   "', radio-a after clicking radio-b=' + caRadioA.checked + ', radio-b=' + caRadioB.checked;"
    "</script>"
    "<script>"
    "void 0;"
@@ -1215,6 +1237,7 @@
                  step-up-down-proof (element-text doc "step-up-down-result")
                  document-body-proof (element-text doc "document-body-result")
                  range-proof (element-text doc "range-proof-result")
+                 click-activation-proof (element-text doc "click-activation-result")
                  status-badge-proof (pseudo-content doc "status-badge")
                  step-proofs (mapv #(pseudo-content doc %)
                                    ["step-1" "step-2" "step-3" "step-4"])]
@@ -1250,6 +1273,7 @@
              (js/console.log "browser.demo: #step-up-down-result ->" (pr-str step-up-down-proof))
              (js/console.log "browser.demo: #document-body-result ->" (pr-str document-body-proof))
              (js/console.log "browser.demo: #range-proof-result ->" (pr-str range-proof))
+             (js/console.log "browser.demo: #click-activation-result ->" (pr-str click-activation-proof))
              (js/console.log "browser.demo: real ::before generated content ->"
                               "#status-badge:" (pr-str status-badge-proof)
                               "#step-counter lis:" (pr-str step-proofs))

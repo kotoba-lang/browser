@@ -504,6 +504,23 @@
         }
         return false;
       }
+      function __kotobaClearRadioGroupSiblings(node) {
+        // Real HTML5: whenever a radio button's checkedness is set to true
+        // (by script OR real user interaction), every OTHER checked radio
+        // in the same name/form group is un-checked -- the exact real
+        // pointer-click reduce-event pipeline in document_input.cljc
+        // already does this (radio-group-node-ids); this JS-facing
+        // shim previously had no equivalent for scripted .click()/
+        // .checked= (confirmed via a real QuickJS smoke test: setting
+        // one radio's .checked left a sibling radio in the same group
+        // still wrongly checked too).
+        var group = __kotobaRadioGroupNodes(node);
+        for (var i = 0; i < group.length; i++) {
+          if (group[i]['node/id'] !== node['node/id'] && __kotobaBoolAttr(group[i], 'checked')) {
+            __kotobaRemoveAttribute({ nodeId: group[i]['node/id'] }, 'checked');
+          }
+        }
+      }
       function __kotobaControlValue(node) {
         var textValue = __kotobaAttr(node, 'text/value');
         if (textValue != null) return String(textValue);
@@ -1660,6 +1677,11 @@
           },
           set checked(value) {
             __kotobaSetBooleanAttribute(ref, 'checked', value);
+            var node = __kotobaNodeById(__kotobaRefNodeId(ref));
+            if (value && node && String(node.tag || '').toLowerCase() === 'input' &&
+                String(__kotobaAttr(node, 'type') || 'text').toLowerCase() === 'radio') {
+              __kotobaClearRadioGroupSiblings(node);
+            }
           },
           get defaultChecked() {
             var node = __kotobaNodeById(__kotobaRefNodeId(ref));
@@ -2442,6 +2464,28 @@
             return __kotobaDispatch(ref, event || __kotobaEvent('event', {}));
           },
           click: function() {
+            // Real click() activation behavior for checkbox/radio controls
+            // -- mirrors the ALREADY-correct real pointer-click path in
+            // document_input.cljc (checkbox toggles; radio checks itself
+            // and clears group siblings, but only if not already checked)
+            // -- previously click() only dispatched a bare click event,
+            // confirmed via a real QuickJS smoke test to never toggle
+            // checked or fire input/change at all.
+            var node = __kotobaNodeById(__kotobaRefNodeId(ref));
+            var tag = node && String(node.tag || '').toLowerCase();
+            var type = node && String(__kotobaAttr(node, 'type') || 'text').toLowerCase();
+            if (node && !__kotobaDisabledControl(node)) {
+              if (tag === 'input' && type === 'checkbox') {
+                __kotobaSetBooleanAttribute(ref, 'checked', !__kotobaBoolAttr(node, 'checked'));
+                __kotobaDispatch(ref, __kotobaEvent('input', { bubbles: true }));
+                __kotobaDispatch(ref, __kotobaEvent('change', { bubbles: true }));
+              } else if (tag === 'input' && type === 'radio' && !__kotobaBoolAttr(node, 'checked')) {
+                __kotobaSetBooleanAttribute(ref, 'checked', true);
+                __kotobaClearRadioGroupSiblings(node);
+                __kotobaDispatch(ref, __kotobaEvent('input', { bubbles: true }));
+                __kotobaDispatch(ref, __kotobaEvent('change', { bubbles: true }));
+              }
+            }
             return __kotobaDispatch(ref, __kotobaEvent('click', { bubbles: true, cancelable: true }));
           },
           focus: function() {

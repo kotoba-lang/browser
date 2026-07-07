@@ -850,3 +850,23 @@
     (is (str/includes? source "capability: 'history/traverse'"))
     (is (str/includes? source "this.go(-1)"))
     (is (str/includes? source "this.go(1)"))))
+
+(deftest quickjs-wasm-webapi-shim-click-and-checked-setter-run-real-activation
+  ;; element.click() previously only dispatched a bare click event -- never
+  ;; toggled a checkbox's checked state, never checked a radio + cleared its
+  ;; group siblings, never fired input/change -- unlike the ALREADY-correct
+  ;; real pointer-click path in document_input.cljc. The .checked= IDL
+  ;; setter also never cleared sibling radios in the same group. Confirmed
+  ;; via real CLJS/QuickJS smoke tests
+  ;; (quickjs-click-radio-activation-smoke-test) that click() now correctly
+  ;; toggles a checkbox and checks/exclusive-clears a radio (firing
+  ;; input/change only on real state change, matching a real click on an
+  ;; already-checked radio being a no-op), is skipped entirely on a disabled
+  ;; control, and that .checked = true on a radio clears sibling radios too.
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "function __kotobaClearRadioGroupSiblings(node)"))
+    (is (str/includes? source "__kotobaRemoveAttribute({ nodeId: group[i]['node/id'] }, 'checked');"))
+    (is (str/includes? source "__kotobaClearRadioGroupSiblings(node);"))
+    (is (str/includes? source "if (node && !__kotobaDisabledControl(node)) {"))
+    (is (str/includes? source "__kotobaSetBooleanAttribute(ref, 'checked', !__kotobaBoolAttr(node, 'checked'));"))
+    (is (str/includes? source "} else if (tag === 'input' && type === 'radio' && !__kotobaBoolAttr(node, 'checked')) {"))))
