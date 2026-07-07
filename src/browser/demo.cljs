@@ -182,6 +182,7 @@
        ".range-proof-input:in-range { color: #7fce7f; border-color: #7fce7f } "
        ".box-shadow-spread-box { box-shadow: 0 1px 2px 4px rgba(80,160,220,0.6) } "
        ".currentcolor-box { color: #e07a3f; border: 3px solid currentColor } "
+       ".var-fallback-box { background: var(--missing-bg, rgba(224,122,63,0.6)); border-width: 3px; border-style: solid; border-color: var(--missing-border, rgba(79,179,166,0.8)) } "
        ".flex-shrink-row { display: flex; gap: 8; background: #1a2333; padding: 8 } "
        ".flex-shrink-row button { background: #e0a458 }"))
 
@@ -786,6 +787,15 @@
    "<div id=\"currentcolor-target\" class=\"currentcolor-box\" style=\"padding:8\">currentColor box</div>"
    "<div id=\"currentcolor-result\">currentcolor proof: pending...</div>"
    "</section>"
+   "<section id=\"var-fallback-proof\" style=\"display:flex; flex-direction:column; gap:8; margin-top:4\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "var() with a fallback containing a nested function call below -- "
+   "previously failed to resolve at all, leaving the literal unresolved "
+   "text instead of the fallback color."
+   "</p>"
+   "<div id=\"var-fallback-target\" class=\"var-fallback-box\" style=\"padding:8\">var() fallback box</div>"
+   "<div id=\"var-fallback-result\">var-fallback proof: pending...</div>"
+   "</section>"
    "<section id=\"serialize-attr-leak-proof\" style=\"display:flex; flex-direction:column; gap:8; margin-top:4\">"
    "<p style=\"color:#9fb0c9; font-size:13\">"
    "outerHTML/.attributes below -- previously leaked this engine's own "
@@ -1123,6 +1133,13 @@
    "var ccComputed = getComputedStyle(ccTarget);"
    "document.getElementById('currentcolor-result').textContent = "
    "'currentcolor proof: color=' + ccComputed.color + ', border-color=' + ccComputed.getPropertyValue('border-color');"
+   "</script>"
+   "<script>"
+   "var vfTarget = document.getElementById('var-fallback-target');"
+   "var vfComputed = getComputedStyle(vfTarget);"
+   "document.getElementById('var-fallback-result').textContent = "
+   "'var-fallback proof: background=' + vfComputed.getPropertyValue('background') + "
+   "', border-color=' + vfComputed.getPropertyValue('border-color');"
    "</script>"
    "<script>"
    "var salTarget = document.getElementById('serialize-attr-leak-target');"
@@ -1503,6 +1520,7 @@
                  focus-blur-events-proof (element-text doc "focus-blur-events-result")
                  dispatchevent-click-activation-proof (element-text doc "dispatchevent-click-activation-result")
                  currentcolor-proof (element-text doc "currentcolor-result")
+                 var-fallback-proof (element-text doc "var-fallback-result")
                  serialize-attr-leak-proof (element-text doc "serialize-attr-leak-result")
                  location-proof (element-text doc "location-result")
                  comment-parse-proof (element-text doc "comment-parse-result")
@@ -1553,6 +1571,7 @@
              (js/console.log "browser.demo: #focus-blur-events-result ->" (pr-str focus-blur-events-proof))
              (js/console.log "browser.demo: #dispatchevent-click-activation-result ->" (pr-str dispatchevent-click-activation-proof))
              (js/console.log "browser.demo: #currentcolor-result ->" (pr-str currentcolor-proof))
+             (js/console.log "browser.demo: #var-fallback-result ->" (pr-str var-fallback-proof))
              (js/console.log "browser.demo: #serialize-attr-leak-result ->" (pr-str serialize-attr-leak-proof))
              (js/console.log "browser.demo: #location-result ->" (pr-str location-proof))
              (js/console.log "browser.demo: #comment-parse-result ->" (pr-str comment-parse-proof))
