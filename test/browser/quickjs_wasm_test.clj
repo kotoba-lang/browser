@@ -898,8 +898,8 @@
   ;; that click/input/change listeners on the same checkbox now correctly
   ;; observe click first.
   (let [source quickjs-wasm/webapi-shim-source]
-    (is (str/includes? source "var result = __kotobaDispatch(ref, __kotobaEvent('click', { bubbles: true, cancelable: true }));"))
-    (is (str/includes? source "if (result) {\n                __kotobaDispatch(ref, __kotobaEvent('input', { bubbles: true }));\n                __kotobaDispatch(ref, __kotobaEvent('change', { bubbles: true }));"))
+    (is (str/includes? source "var result = __kotobaDispatch(ref, event);"))
+    (is (str/includes? source "if (result) {\n            __kotobaDispatch(ref, __kotobaEvent('input', { bubbles: true }));\n            __kotobaDispatch(ref, __kotobaEvent('change', { bubbles: true }));"))
     (is (str/includes? source "return result;"))))
 
 (deftest quickjs-wasm-webapi-shim-click-preventdefault-reverts-checked-state
@@ -933,3 +933,19 @@
     (is (str/includes? source "__kotobaDispatch(ref, __kotobaEvent('focus', {}));"))
     (is (str/includes? source "if (globalThis.__kotobaSnapshot.focus !== __kotobaRefNodeId(ref)) return;"))
     (is (str/includes? source "__kotobaDispatch(ref, __kotobaEvent('blur', {}));"))))
+
+(deftest quickjs-wasm-webapi-shim-dispatchevent-click-runs-real-activation
+  ;; el.dispatchEvent(new MouseEvent('click', ...)) previously only ran
+  ;; registered listeners -- no checkbox/radio activation at all -- unlike
+  ;; .click(), even though per real HTML5/DOM the activation behavior is
+  ;; part of the generic event-dispatch algorithm for a click event,
+  ;; independent of the trigger mechanism. Confirmed against real Chrome
+  ;; (dispatchEvent-triggered clicks DO toggle a real checkbox and fire
+  ;; input/change) and via real CLJS/QuickJS smoke tests
+  ;; (quickjs-dispatchevent-click-activation-smoke-test) that click() and
+  ;; dispatchEvent() now share the identical activation logic via a new
+  ;; __kotobaDispatchClickWithActivation helper.
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "function __kotobaDispatchClickWithActivation(ref, event)"))
+    (is (str/includes? source "if (eventType === 'click') return __kotobaDispatchClickWithActivation(ref, event);"))
+    (is (str/includes? source "return __kotobaDispatchClickWithActivation(\n              ref, __kotobaEvent('click', { bubbles: true, cancelable: true }));"))))

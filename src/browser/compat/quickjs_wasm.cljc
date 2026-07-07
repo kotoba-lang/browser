@@ -521,6 +521,63 @@
           }
         }
       }
+      function __kotobaDispatchClickWithActivation(ref, event) {
+        // Real checkbox/radio click activation behavior -- mirrors the
+        // ALREADY-correct real pointer-click path in document_input.cljc
+        // (checkbox toggles; radio checks itself and clears group
+        // siblings, but only if not already checked), including real
+        // click order (checked flips synchronously BEFORE click fires,
+        // input/change fire only afterward) and real canceled-activation-
+        // steps behavior (a click listener calling preventDefault()
+        // reverts the tentative checked flip and fires neither input nor
+        // change). Shared between click() and dispatchEvent() of a
+        // script-constructed click event -- per real HTML5/DOM, this
+        // activation behavior is part of the generic event-dispatch
+        // algorithm for a `click` event, independent of whether dispatch
+        // was triggered by .click(), a real user click, or
+        // el.dispatchEvent(new MouseEvent('click')) (confirmed against
+        // real Chrome: dispatchEvent-triggered clicks DO toggle a real
+        // checkbox and fire input/change) -- previously only .click()
+        // got this, dispatchEvent() only ever ran listeners, confirmed
+        // via a real QuickJS smoke test.
+        var node = __kotobaNodeById(__kotobaRefNodeId(ref));
+        var tag = node && String(node.tag || '').toLowerCase();
+        var type = node && String(__kotobaAttr(node, 'type') || 'text').toLowerCase();
+        var stateChanged = false;
+        var previousChecked = null;
+        var previousGroupCheckedIds = null;
+        if (node && !__kotobaDisabledControl(node)) {
+          if (tag === 'input' && type === 'checkbox') {
+            previousChecked = __kotobaBoolAttr(node, 'checked');
+            __kotobaSetBooleanAttribute(ref, 'checked', !previousChecked);
+            stateChanged = true;
+          } else if (tag === 'input' && type === 'radio' && !__kotobaBoolAttr(node, 'checked')) {
+            var group = __kotobaRadioGroupNodes(node);
+            previousGroupCheckedIds = group.filter(function(n) { return __kotobaBoolAttr(n, 'checked'); })
+              .map(function(n) { return n['node/id']; });
+            __kotobaSetBooleanAttribute(ref, 'checked', true);
+            __kotobaClearRadioGroupSiblings(node);
+            stateChanged = true;
+          }
+        }
+        var result = __kotobaDispatch(ref, event);
+        if (stateChanged) {
+          if (result) {
+            __kotobaDispatch(ref, __kotobaEvent('input', { bubbles: true }));
+            __kotobaDispatch(ref, __kotobaEvent('change', { bubbles: true }));
+          } else {
+            if (tag === 'input' && type === 'checkbox') {
+              __kotobaSetBooleanAttribute(ref, 'checked', previousChecked);
+            } else if (tag === 'input' && type === 'radio') {
+              __kotobaSetBooleanAttribute(ref, 'checked', false);
+              for (var i = 0; i < previousGroupCheckedIds.length; i++) {
+                __kotobaSetBooleanAttribute({ nodeId: previousGroupCheckedIds[i] }, 'checked', true);
+              }
+            }
+          }
+        }
+        return result;
+      }
       function __kotobaControlValue(node) {
         var textValue = __kotobaAttr(node, 'text/value');
         if (textValue != null) return String(textValue);
@@ -2472,66 +2529,14 @@
             globalThis.__kotobaRequests.push(request);
           },
           dispatchEvent: function(event) {
-            return __kotobaDispatch(ref, event || __kotobaEvent('event', {}));
+            event = event || __kotobaEvent('event', {});
+            var eventType = String(event['event/type'] || event.type || 'event');
+            if (eventType === 'click') return __kotobaDispatchClickWithActivation(ref, event);
+            return __kotobaDispatch(ref, event);
           },
           click: function() {
-            // Real click() activation behavior for checkbox/radio controls
-            // -- mirrors the ALREADY-correct real pointer-click path in
-            // document_input.cljc (checkbox toggles; radio checks itself
-            // and clears group siblings, but only if not already checked)
-            // -- previously click() only dispatched a bare click event,
-            // confirmed via a real QuickJS smoke test to never toggle
-            // checked or fire input/change at all.
-            //
-            // Real click order (Chrome/Firefox): checked flips
-            // synchronously as part of pre-click activation, `click`
-            // fires NEXT, and only afterward do `input`/`change` fire --
-            // this previously fired input/change BEFORE click, backwards
-            // from every real browser, confirmed via a real QuickJS smoke
-            // test (a target with click/input/change listeners recorded
-            // input, then change, then click).
-            var node = __kotobaNodeById(__kotobaRefNodeId(ref));
-            var tag = node && String(node.tag || '').toLowerCase();
-            var type = node && String(__kotobaAttr(node, 'type') || 'text').toLowerCase();
-            var stateChanged = false;
-            var previousChecked = null;
-            var previousGroupCheckedIds = null;
-            if (node && !__kotobaDisabledControl(node)) {
-              if (tag === 'input' && type === 'checkbox') {
-                previousChecked = __kotobaBoolAttr(node, 'checked');
-                __kotobaSetBooleanAttribute(ref, 'checked', !previousChecked);
-                stateChanged = true;
-              } else if (tag === 'input' && type === 'radio' && !__kotobaBoolAttr(node, 'checked')) {
-                var group = __kotobaRadioGroupNodes(node);
-                previousGroupCheckedIds = group.filter(function(n) { return __kotobaBoolAttr(n, 'checked'); })
-                  .map(function(n) { return n['node/id']; });
-                __kotobaSetBooleanAttribute(ref, 'checked', true);
-                __kotobaClearRadioGroupSiblings(node);
-                stateChanged = true;
-              }
-            }
-            var result = __kotobaDispatch(ref, __kotobaEvent('click', { bubbles: true, cancelable: true }));
-            if (stateChanged) {
-              if (result) {
-                __kotobaDispatch(ref, __kotobaEvent('input', { bubbles: true }));
-                __kotobaDispatch(ref, __kotobaEvent('change', { bubbles: true }));
-              } else {
-                // Real canceled-activation-steps behavior: a click listener
-                // calling preventDefault() reverts the tentative checked
-                // flip and fires NEITHER input nor change -- previously
-                // this engine always kept the flip and always fired both,
-                // confirmed via a real QuickJS smoke test.
-                if (tag === 'input' && type === 'checkbox') {
-                  __kotobaSetBooleanAttribute(ref, 'checked', previousChecked);
-                } else if (tag === 'input' && type === 'radio') {
-                  __kotobaSetBooleanAttribute(ref, 'checked', false);
-                  for (var i = 0; i < previousGroupCheckedIds.length; i++) {
-                    __kotobaSetBooleanAttribute({ nodeId: previousGroupCheckedIds[i] }, 'checked', true);
-                  }
-                }
-              }
-            }
-            return result;
+            return __kotobaDispatchClickWithActivation(
+              ref, __kotobaEvent('click', { bubbles: true, cancelable: true }));
           },
           focus: function() {
             // Real element.focus() is a no-op on a disabled form control --

@@ -763,6 +763,16 @@
    "<input id=\"focus-blur-events-b\" value=\"b\">"
    "<div id=\"focus-blur-events-result\">focus-blur-events proof: pending...</div>"
    "</section>"
+   "<section id=\"dispatchevent-click-activation-proof\" style=\"display:flex; flex-direction:column; gap:8; margin-top:4\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "Real el.dispatchEvent(new MouseEvent('click')) below -- previously "
+   "only .click() ran real checkbox activation; dispatchEvent() only ever "
+   "ran listeners, unlike every real browser (confirmed against real "
+   "Chrome: a dispatched click DOES toggle a real checkbox)."
+   "</p>"
+   "<input id=\"dispatchevent-click-checkbox\" type=\"checkbox\">"
+   "<div id=\"dispatchevent-click-activation-result\">dispatchevent-click-activation proof: pending...</div>"
+   "</section>"
    "<script>"
    "document.title = 'Kotoba Browser: real QuickJS + real cssom layout + real WebGL paint';"
    "</script>"
@@ -1057,6 +1067,16 @@
    "'focus-blur-events proof: ' + fbEvents.join(',');"
    "</script>"
    "<script>"
+   "var deCheckbox = document.getElementById('dispatchevent-click-checkbox');"
+   "var deEvents = [];"
+   "deCheckbox.addEventListener('input', function() { deEvents.push('input'); });"
+   "deCheckbox.addEventListener('change', function() { deEvents.push('change'); });"
+   "deCheckbox.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));"
+   "document.getElementById('dispatchevent-click-activation-result').textContent = "
+   "'dispatchevent-click-activation proof: checked=' + deCheckbox.checked + "
+   "', events=' + deEvents.join(',');"
+   "</script>"
+   "<script>"
    "void 0;"
    "</script>"
    "</main>"))
@@ -1339,6 +1359,7 @@
                  click-order-proof (element-text doc "click-order-result")
                  click-preventdefault-proof (element-text doc "click-preventdefault-result")
                  focus-blur-events-proof (element-text doc "focus-blur-events-result")
+                 dispatchevent-click-activation-proof (element-text doc "dispatchevent-click-activation-result")
                  status-badge-proof (pseudo-content doc "status-badge")
                  step-proofs (mapv #(pseudo-content doc %)
                                    ["step-1" "step-2" "step-3" "step-4"])]
@@ -1380,6 +1401,7 @@
              (js/console.log "browser.demo: #click-order-result ->" (pr-str click-order-proof))
              (js/console.log "browser.demo: #click-preventdefault-result ->" (pr-str click-preventdefault-proof))
              (js/console.log "browser.demo: #focus-blur-events-result ->" (pr-str focus-blur-events-proof))
+             (js/console.log "browser.demo: #dispatchevent-click-activation-result ->" (pr-str dispatchevent-click-activation-proof))
              (js/console.log "browser.demo: real ::before generated content ->"
                               "#status-badge:" (pr-str status-badge-proof)
                               "#step-counter lis:" (pr-str step-proofs))
