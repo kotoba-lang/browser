@@ -915,3 +915,21 @@
     (is (str/includes? source "previousGroupCheckedIds = group.filter(function(n) { return __kotobaBoolAttr(n, 'checked'); })"))
     (is (str/includes? source "__kotobaSetBooleanAttribute(ref, 'checked', previousChecked);"))
     (is (str/includes? source "__kotobaSetBooleanAttribute({ nodeId: previousGroupCheckedIds[i] }, 'checked', true);"))))
+
+(deftest quickjs-wasm-webapi-shim-focus-and-blur-dispatch-real-events
+  ;; element.focus()/.blur() previously never dispatched a real focus/blur
+  ;; event at all -- only the host mutate request and __kotobaSnapshot.focus
+  ;; were updated -- unlike the ALREADY-correct real pointer-click focus
+  ;; path in document_input.cljc (focus-editable/blur-focused), which blurs
+  ;; whatever was previously focused THEN fires focus on the new target,
+  ;; and is a no-op if the target is already focused. Confirmed via real
+  ;; CLJS/QuickJS smoke tests (quickjs-focus-blur-events-smoke-test) that
+  ;; focus()/blur() now correctly fire, moving focus blurs the previous
+  ;; target first, and both methods are no-ops (no event) when the target
+  ;; is already in the requested state.
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "if (previousFocusId === newFocusId) return;"))
+    (is (str/includes? source "__kotobaDispatch({ nodeId: previousFocusId }, __kotobaEvent('blur', {}));"))
+    (is (str/includes? source "__kotobaDispatch(ref, __kotobaEvent('focus', {}));"))
+    (is (str/includes? source "if (globalThis.__kotobaSnapshot.focus !== __kotobaRefNodeId(ref)) return;"))
+    (is (str/includes? source "__kotobaDispatch(ref, __kotobaEvent('blur', {}));"))))

@@ -753,6 +753,16 @@
    "<input id=\"click-preventdefault-checkbox\" type=\"checkbox\">"
    "<div id=\"click-preventdefault-result\">click-preventdefault proof: pending...</div>"
    "</section>"
+   "<section id=\"focus-blur-events-proof\" style=\"display:flex; flex-direction:column; gap:8; margin-top:4\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "Real focus()/blur() events below -- previously neither method ever "
+   "dispatched a real focus/blur event at all, only updating internal "
+   "state, unlike every real browser."
+   "</p>"
+   "<input id=\"focus-blur-events-a\" value=\"a\">"
+   "<input id=\"focus-blur-events-b\" value=\"b\">"
+   "<div id=\"focus-blur-events-result\">focus-blur-events proof: pending...</div>"
+   "</section>"
    "<script>"
    "document.title = 'Kotoba Browser: real QuickJS + real cssom layout + real WebGL paint';"
    "</script>"
@@ -1036,6 +1046,17 @@
    "'click-preventdefault proof: checked=' + cpCheckbox.checked + ', events=' + cpEvents.join(',');"
    "</script>"
    "<script>"
+   "var fbA = document.getElementById('focus-blur-events-a');"
+   "var fbB = document.getElementById('focus-blur-events-b');"
+   "var fbEvents = [];"
+   "fbA.addEventListener('blur', function() { fbEvents.push('a-blur'); });"
+   "fbB.addEventListener('focus', function() { fbEvents.push('b-focus'); });"
+   "fbA.focus();"
+   "fbB.focus();"
+   "document.getElementById('focus-blur-events-result').textContent = "
+   "'focus-blur-events proof: ' + fbEvents.join(',');"
+   "</script>"
+   "<script>"
    "void 0;"
    "</script>"
    "</main>"))
@@ -1317,6 +1338,7 @@
                  box-shadow-spread-proof (element-text doc "box-shadow-spread-result")
                  click-order-proof (element-text doc "click-order-result")
                  click-preventdefault-proof (element-text doc "click-preventdefault-result")
+                 focus-blur-events-proof (element-text doc "focus-blur-events-result")
                  status-badge-proof (pseudo-content doc "status-badge")
                  step-proofs (mapv #(pseudo-content doc %)
                                    ["step-1" "step-2" "step-3" "step-4"])]
@@ -1357,6 +1379,7 @@
              (js/console.log "browser.demo: #box-shadow-spread-result ->" (pr-str box-shadow-spread-proof))
              (js/console.log "browser.demo: #click-order-result ->" (pr-str click-order-proof))
              (js/console.log "browser.demo: #click-preventdefault-result ->" (pr-str click-preventdefault-proof))
+             (js/console.log "browser.demo: #focus-blur-events-result ->" (pr-str focus-blur-events-proof))
              (js/console.log "browser.demo: real ::before generated content ->"
                               "#status-badge:" (pr-str status-badge-proof)
                               "#step-counter lis:" (pr-str step-proofs))

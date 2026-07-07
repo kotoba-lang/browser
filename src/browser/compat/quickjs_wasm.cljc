@@ -2540,24 +2540,43 @@
             // disabled-gated behavior in this file already does
             // (checkValidity/:disabled pseudo-class matching/etc.).
             if (__kotobaDisabledControl(__kotobaNodeById(__kotobaRefNodeId(ref)))) return;
+            // Real focus/blur events -- previously never dispatched at all
+            // (only the host mutate request and __kotobaSnapshot.focus were
+            // updated), unlike the ALREADY-correct real pointer-click focus
+            // path in document_input.cljc (focus-editable/blur-focused),
+            // which blurs whatever was previously focused THEN fires focus
+            // on the new target, and is a no-op if the target is already
+            // focused. Confirmed via a real QuickJS smoke test: a real
+            // focus/blur listener pair never fired at all.
+            var newFocusId = __kotobaRefNodeId(ref);
+            var previousFocusId = globalThis.__kotobaSnapshot.focus;
+            if (previousFocusId === newFocusId) return;
             var request = {
               capability: 'dom/mutate',
               'dom/op': 'focus-node'
             };
             Object.assign(request, __kotobaNodeRequest(ref, 'node'));
             globalThis.__kotobaRequests.push(request);
-            globalThis.__kotobaSnapshot.focus = __kotobaRefNodeId(ref);
+            if (previousFocusId != null) {
+              __kotobaDispatch({ nodeId: previousFocusId }, __kotobaEvent('blur', {}));
+            }
+            globalThis.__kotobaSnapshot.focus = newFocusId;
+            __kotobaDispatch(ref, __kotobaEvent('focus', {}));
           },
           blur: function() {
+            // A real .blur() call on an element that is NOT the currently
+            // focused element is a no-op (no event, no mutation) -- mirrors
+            // the same was-this-element-actually-focused gate
+            // document_input.cljc's blur-focused already applies.
+            if (globalThis.__kotobaSnapshot.focus !== __kotobaRefNodeId(ref)) return;
             var request = {
               capability: 'dom/mutate',
               'dom/op': 'blur-node'
             };
             Object.assign(request, __kotobaNodeRequest(ref, 'node'));
             globalThis.__kotobaRequests.push(request);
-            if (globalThis.__kotobaSnapshot.focus === __kotobaRefNodeId(ref)) {
-              globalThis.__kotobaSnapshot.focus = null;
-            }
+            globalThis.__kotobaSnapshot.focus = null;
+            __kotobaDispatch(ref, __kotobaEvent('blur', {}));
           },
           requestFullscreen: function(options) {
             var request = {
