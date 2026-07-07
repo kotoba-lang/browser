@@ -176,7 +176,9 @@
        ".style-prop-box { color: #4fb3a6 } "
        ".computed-style-box { color: #e0a458; font-weight: bold } "
        ".focus-within-box { background: #16202f } "
-       ".focus-within-box:focus-within { background: #2d4a63 }"))
+       ".focus-within-box:focus-within { background: #2d4a63 } "
+       ".range-proof-input:out-of-range { color: #e05a4f; border-color: #e05a4f } "
+       ".range-proof-input:in-range { color: #7fce7f; border-color: #7fce7f }"))
 
 (defn sample-html
   "The demo page's real HTML, parameterized on `worker-url`/`fetch-url` (the
@@ -689,6 +691,17 @@
    "<input id=\"selection-proof\" value=\"kotoba engine\" selection-start=\"3\" selection-end=\"9\" "
    "style=\"font-size:16\">"
    "</section>"
+   "<section id=\"range-proof\" style=\"display:flex; flex-direction:column; gap:8; margin-top:4\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "Real CSS :in-range/:out-of-range below -- previously never matched at "
+   "all, not even for a plainly out-of-range numeric value. Both share the "
+   "same min=1/max=10; only each input's own value differs, read back via "
+   "getComputedStyle below."
+   "</p>"
+   "<input id=\"range-proof-bad\" class=\"range-proof-input\" type=\"number\" min=\"1\" max=\"10\" value=\"15\">"
+   "<input id=\"range-proof-ok\" class=\"range-proof-input\" type=\"number\" min=\"1\" max=\"10\" value=\"5\">"
+   "<div id=\"range-proof-result\">range proof: pending...</div>"
+   "</section>"
    "<script>"
    "document.title = 'Kotoba Browser: real QuickJS + real cssom layout + real WebGL paint';"
    "</script>"
@@ -917,6 +930,13 @@
    ".then(function(r) { return r.text(); })"
    ".then(function(t) { document.getElementById('fetch-proof').textContent = "
    "'fetch() proof: real HTTP response body -> \"' + t + '\"'; });"
+   "</script>"
+   "<script>"
+   "var rangeBad = document.getElementById('range-proof-bad');"
+   "var rangeOk = document.getElementById('range-proof-ok');"
+   "var rangeResult = document.getElementById('range-proof-result');"
+   "rangeResult.textContent = 'range proof: value=15 (min=1,max=10) color=' + "
+   "getComputedStyle(rangeBad).color + ', value=5 color=' + getComputedStyle(rangeOk).color;"
    "</script>"
    "<script>"
    "void 0;"
@@ -1194,6 +1214,7 @@
                  event-modifier-keys-proof (element-text doc "event-modifier-keys-result")
                  step-up-down-proof (element-text doc "step-up-down-result")
                  document-body-proof (element-text doc "document-body-result")
+                 range-proof (element-text doc "range-proof-result")
                  status-badge-proof (pseudo-content doc "status-badge")
                  step-proofs (mapv #(pseudo-content doc %)
                                    ["step-1" "step-2" "step-3" "step-4"])]
@@ -1228,6 +1249,7 @@
              (js/console.log "browser.demo: #event-modifier-keys-result ->" (pr-str event-modifier-keys-proof))
              (js/console.log "browser.demo: #step-up-down-result ->" (pr-str step-up-down-proof))
              (js/console.log "browser.demo: #document-body-result ->" (pr-str document-body-proof))
+             (js/console.log "browser.demo: #range-proof-result ->" (pr-str range-proof))
              (js/console.log "browser.demo: real ::before generated content ->"
                               "#status-badge:" (pr-str status-badge-proof)
                               "#step-counter lis:" (pr-str step-proofs))
