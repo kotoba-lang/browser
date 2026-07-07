@@ -12,6 +12,27 @@
   [n lo hi]
   (max lo (min hi (or n lo))))
 
+(defn- code-unit-at
+  [s idx]
+  #?(:clj (int (.charAt ^String s idx))
+     :cljs (.charCodeAt s idx)))
+
+(defn- surrogate-pair-boundary?
+  "True when position `p` in `value` sits strictly INSIDE a real UTF-16
+   surrogate pair (e.g. most emoji, some rare CJK-B ideographs) -- i.e.
+   `value`'s code unit immediately before `p` is a high surrogate
+   (0xD800-0xDBFF) and the one at `p` is its low surrogate (0xDC00-0xDFFF).
+   Every caret-moving/deleting position below is computed by raw code-unit
+   arithmetic (`dec`/`inc`/`+delta`); without this check, landing exactly
+   here corrupts the string into two lone, invalid surrogates -- confirmed
+   via a real REPL reproduction before this fix: typing an emoji then
+   pressing Backspace, Delete, or an arrow key that lands mid-pair all
+   produced a value containing an unpaired surrogate code unit."
+  [value p]
+  (and (pos? p) (< p (count value))
+       (<= 0xD800 (code-unit-at value (dec p)) 0xDBFF)
+       (<= 0xDC00 (code-unit-at value p) 0xDFFF)))
+
 (defn normalize-selection
   [state]
   (let [value (:text/value state "")
@@ -59,7 +80,7 @@
       (insert-text state "")
 
       (pos? start)
-      (let [caret (dec start)]
+      (let [caret (if (surrogate-pair-boundary? value (dec start)) (- start 2) (dec start))]
         (assoc state
                :text/value (str (subs value 0 caret) (subs value start))
                :text/caret caret
@@ -77,10 +98,11 @@
       (insert-text state "")
 
       (< end (count value))
-      (assoc state
-             :text/value (str (subs value 0 start) (subs value (inc end)))
-             :text/caret start
-             :text/selection [start start])
+      (let [delete-end (if (surrogate-pair-boundary? value (inc end)) (+ end 2) (inc end))]
+        (assoc state
+               :text/value (str (subs value 0 start) (subs value delete-end))
+               :text/caret start
+               :text/selection [start start]))
 
       :else state)))
 
@@ -103,7 +125,11 @@
                              (if (neg? delta) start end)
                              (+ caret delta))
                            0
-                           (count value))]
+                           (count value))
+         next-caret (cond
+                      (and (neg? delta) (surrogate-pair-boundary? value next-caret)) (dec next-caret)
+                      (and (pos? delta) (surrogate-pair-boundary? value next-caret)) (inc next-caret)
+                      :else next-caret)]
      (if extend?
        (select state (selection-anchor state) next-caret)
        (collapse state next-caret)))))
