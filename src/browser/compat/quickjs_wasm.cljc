@@ -2271,8 +2271,18 @@
               });
             }
             __kotobaRefreshText(parentId);
+            // Real ParentNode.replaceChildren(...nodes) accepts (Node or
+            // DOMString) for each argument, exactly like append/prepend/
+            // before/after/replaceWith below -- unlike those siblings,
+            // this loop previously called appendChild directly without
+            // wrapping a bare string into a real text node first via
+            // __kotobaNodeArg. appendChild only recognizes a real node
+            // (it reads child.__kotobaRef), so a plain string arg had no
+            // __kotobaRef and was silently dropped: el.replaceChildren(
+            // 'hello') cleared el's real children and then added
+            // nothing at all, leaving el completely empty.
             for (var i = 0; i < arguments.length; i++) {
-              this.appendChild(arguments[i]);
+              this.appendChild(__kotobaNodeArg(arguments[i]));
             }
           },
           appendChild: function(child) {

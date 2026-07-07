@@ -1037,3 +1037,20 @@
     (is (str/includes? source "Object.keys(attrs).filter(__kotobaPublicAttrName).sort().map(function(name) {"))
     (is (str/includes? source "var names = Object.keys(attrs).filter(__kotobaPublicAttrName).sort();"))
     (is (str/includes? source "if (Object.prototype.hasOwnProperty.call(__kotobaVoidTags, tag)) {"))))
+
+(deftest quickjs-wasm-webapi-shim-replacechildren-wraps-bare-string-arguments-in-a-text-node
+  ;; replaceChildren(...nodes) previously called this.appendChild(arguments[i])
+  ;; directly, unlike its siblings append/prepend/before/after/replaceWith
+  ;; which all wrap each argument through __kotobaNodeArg first.
+  ;; appendChild only recognizes a real node (it reads child.__kotobaRef),
+  ;; so a bare string argument had no __kotobaRef and was silently dropped
+  ;; -- confirmed via a temporary CLJS/QuickJS smoke test before touching
+  ;; source that el.replaceChildren('hello') cleared el's real children
+  ;; and then added nothing at all, leaving el completely empty
+  ;; (textContent "", childNodes.length 0) instead of containing "hello".
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source (str "// nothing at all, leaving el completely empty.\n"
+                                    "            for (var i = 0; i < arguments.length; i++) {\n"
+                                    "              this.appendChild(__kotobaNodeArg(arguments[i]));\n"
+                                    "            }\n"
+                                    "          },")))))
