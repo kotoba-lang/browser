@@ -461,6 +461,19 @@
         return options.length && !__kotobaBoolAttr(selectNode, 'multiple') ? 0 : -1;
       }
       function __kotobaSelectValue(node) {
+        // Real HTML5 (confirmed against real Chrome before touching
+        // source): an explicit selected attr wins outright regardless of
+        // disabled -- previously this only returned early when the
+        // selected candidate was ALSO enabled, so a select whose ONLY
+        // selected option was disabled (the common disabled-placeholder-
+        // with-a-real-value idiom) fell through and reported '' instead
+        // of that option's own value. The fallback path below (no
+        // explicit selected at all) is unaffected and already correctly
+        // disabled-aware -- confirmed live that a disabled first option
+        // with nothing explicitly selected defaults to the next, enabled
+        // option, never the disabled one, and that an all-disabled
+        // select with nothing selected reports '' (selects nothing at
+        // all), not a fallback to the plain first option regardless.
         var descendants = __kotobaDescendantNodeIds(node);
         var firstEnabledOption = null;
         var hasSelectedOption = false;
@@ -472,7 +485,7 @@
             if (!firstEnabledOption && !disabled) firstEnabledOption = candidate;
             if (__kotobaBoolAttr(candidate, 'selected')) {
               hasSelectedOption = true;
-              if (!disabled) return __kotobaOptionValue(candidate);
+              return __kotobaOptionValue(candidate);
             }
           }
         }

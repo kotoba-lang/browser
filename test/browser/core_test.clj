@@ -80,7 +80,12 @@
     (is (= true (:selected (attrs "#locked"))))
     (is (= true (:default-selected (attrs "#locked"))))
     (is (= false (:selected (attrs "#open"))))
-    (is (= "" (:value (attrs "#optgroup-disabled"))))))
+    ;; Real HTML5 (re-confirmed against real Chrome while fixing
+    ;; initialize-select-state): an explicitly selected option wins the
+    ;; select's own .value regardless of disabled, including disabled
+    ;; via an ancestor <optgroup> -- this assertion previously encoded
+    ;; the pre-fix bug ("" instead of the selected option's own value).
+    (is (= "locked" (:value (attrs "#optgroup-disabled"))))))
 
 (deftest form-controls-project-value-state-into-draw-ops
   (let [page (browser/load-html

@@ -614,6 +614,20 @@
     (is (str/includes? source "if (prop === 'cssText') {\n              var node = __kotobaNodeById(__kotobaRefNodeId(ref));\n              var value = __kotobaAttr(node, 'style');\n              return value == null ? '' : String(value);\n            }"))
     (is (str/includes? source "if (prop === 'cssText') {\n              __kotobaSetAttribute(ref, 'style', value);\n              return true;\n            }"))))
 
+(deftest quickjs-wasm-webapi-shim-select-value-returns-a-disabled-but-selected-option
+  ;; __kotobaSelectValue previously only returned a candidate's value
+  ;; when it was BOTH selected AND enabled -- confirmed via a temporary
+  ;; CLJS/QuickJS smoke test (cross-checked against real Chrome for
+  ;; every scenario) that a <select> whose ONLY selected option was
+  ;; disabled reported '' instead of that option's own value. Fixed by
+  ;; returning unconditionally once the candidate is selected, regardless
+  ;; of disabled -- the no-explicit-selection fallback path (skip
+  ;; disabled options; select nothing if ALL are disabled) is untouched
+  ;; and was already correct.
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "if (__kotobaBoolAttr(candidate, 'selected')) {\n              hasSelectedOption = true;\n              return __kotobaOptionValue(candidate);\n            }"))
+    (is (str/includes? source "return !hasSelectedOption && !multiple && firstEnabledOption ? __kotobaOptionValue(firstEnabledOption) : '';"))))
+
 (deftest quickjs-wasm-webapi-shim-exposes-attribute-convenience-methods
   (let [source quickjs-wasm/webapi-shim-source]
     (is (str/includes? source "toggleAttribute: function(name, force)"))
