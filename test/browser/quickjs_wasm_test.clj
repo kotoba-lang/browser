@@ -868,7 +868,7 @@
     (is (str/includes? source "__kotobaRemoveAttribute({ nodeId: group[i]['node/id'] }, 'checked');"))
     (is (str/includes? source "__kotobaClearRadioGroupSiblings(node);"))
     (is (str/includes? source "if (node && !__kotobaDisabledControl(node)) {"))
-    (is (str/includes? source "__kotobaSetBooleanAttribute(ref, 'checked', !__kotobaBoolAttr(node, 'checked'));"))
+    (is (str/includes? source "__kotobaSetBooleanAttribute(ref, 'checked', !previousChecked);"))
     (is (str/includes? source "} else if (tag === 'input' && type === 'radio' && !__kotobaBoolAttr(node, 'checked')) {"))))
 
 (deftest quickjs-wasm-webapi-shim-stop-propagation-does-not-skip-same-target-listeners
@@ -899,5 +899,19 @@
   ;; observe click first.
   (let [source quickjs-wasm/webapi-shim-source]
     (is (str/includes? source "var result = __kotobaDispatch(ref, __kotobaEvent('click', { bubbles: true, cancelable: true }));"))
-    (is (str/includes? source "if (stateChanged) {\n              __kotobaDispatch(ref, __kotobaEvent('input', { bubbles: true }));\n              __kotobaDispatch(ref, __kotobaEvent('change', { bubbles: true }));\n            }"))
+    (is (str/includes? source "if (result) {\n                __kotobaDispatch(ref, __kotobaEvent('input', { bubbles: true }));\n                __kotobaDispatch(ref, __kotobaEvent('change', { bubbles: true }));"))
     (is (str/includes? source "return result;"))))
+
+(deftest quickjs-wasm-webapi-shim-click-preventdefault-reverts-checked-state
+  ;; Real canceled-activation-steps behavior: a click listener calling
+  ;; preventDefault() must revert the tentative checked flip and fire
+  ;; NEITHER input nor change -- previously click() always kept the flip
+  ;; and always fired both regardless of preventDefault(). Confirmed via
+  ;; real CLJS/QuickJS smoke tests (quickjs-click-radio-activation-smoke-
+  ;; test) for both checkbox (reverts to its own previous value) and radio
+  ;; (restores the previously-checked group sibling).
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "previousChecked = __kotobaBoolAttr(node, 'checked');"))
+    (is (str/includes? source "previousGroupCheckedIds = group.filter(function(n) { return __kotobaBoolAttr(n, 'checked'); })"))
+    (is (str/includes? source "__kotobaSetBooleanAttribute(ref, 'checked', previousChecked);"))
+    (is (str/includes? source "__kotobaSetBooleanAttribute({ nodeId: previousGroupCheckedIds[i] }, 'checked', true);"))))

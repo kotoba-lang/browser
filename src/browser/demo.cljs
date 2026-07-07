@@ -743,6 +743,16 @@
    "<input id=\"click-order-checkbox\" type=\"checkbox\">"
    "<div id=\"click-order-result\">click-order proof: pending...</div>"
    "</section>"
+   "<section id=\"click-preventdefault-proof\" style=\"display:flex; flex-direction:column; gap:8; margin-top:4\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "Real click() preventDefault() below -- previously this engine always "
+   "kept the checked flip and always fired input/change regardless of "
+   "preventDefault(), unlike every real browser's canceled-activation-"
+   "steps behavior."
+   "</p>"
+   "<input id=\"click-preventdefault-checkbox\" type=\"checkbox\">"
+   "<div id=\"click-preventdefault-result\">click-preventdefault proof: pending...</div>"
+   "</section>"
    "<script>"
    "document.title = 'Kotoba Browser: real QuickJS + real cssom layout + real WebGL paint';"
    "</script>"
@@ -1014,6 +1024,16 @@
    "coCheckbox.click();"
    "document.getElementById('click-order-result').textContent = "
    "'click-order proof: ' + coEvents.join(',');"
+   "</script>"
+   "<script>"
+   "var cpCheckbox = document.getElementById('click-preventdefault-checkbox');"
+   "var cpEvents = [];"
+   "cpCheckbox.addEventListener('click', function(e) { e.preventDefault(); });"
+   "cpCheckbox.addEventListener('input', function() { cpEvents.push('input'); });"
+   "cpCheckbox.addEventListener('change', function() { cpEvents.push('change'); });"
+   "cpCheckbox.click();"
+   "document.getElementById('click-preventdefault-result').textContent = "
+   "'click-preventdefault proof: checked=' + cpCheckbox.checked + ', events=' + cpEvents.join(',');"
    "</script>"
    "<script>"
    "void 0;"
@@ -1296,6 +1316,7 @@
                  stop-propagation-proof (element-text doc "stop-propagation-result")
                  box-shadow-spread-proof (element-text doc "box-shadow-spread-result")
                  click-order-proof (element-text doc "click-order-result")
+                 click-preventdefault-proof (element-text doc "click-preventdefault-result")
                  status-badge-proof (pseudo-content doc "status-badge")
                  step-proofs (mapv #(pseudo-content doc %)
                                    ["step-1" "step-2" "step-3" "step-4"])]
@@ -1335,6 +1356,7 @@
              (js/console.log "browser.demo: #stop-propagation-result ->" (pr-str stop-propagation-proof))
              (js/console.log "browser.demo: #box-shadow-spread-result ->" (pr-str box-shadow-spread-proof))
              (js/console.log "browser.demo: #click-order-result ->" (pr-str click-order-proof))
+             (js/console.log "browser.demo: #click-preventdefault-result ->" (pr-str click-preventdefault-proof))
              (js/console.log "browser.demo: real ::before generated content ->"
                               "#status-badge:" (pr-str status-badge-proof)
                               "#step-counter lis:" (pr-str step-proofs))

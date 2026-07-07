@@ -2494,11 +2494,17 @@
             var tag = node && String(node.tag || '').toLowerCase();
             var type = node && String(__kotobaAttr(node, 'type') || 'text').toLowerCase();
             var stateChanged = false;
+            var previousChecked = null;
+            var previousGroupCheckedIds = null;
             if (node && !__kotobaDisabledControl(node)) {
               if (tag === 'input' && type === 'checkbox') {
-                __kotobaSetBooleanAttribute(ref, 'checked', !__kotobaBoolAttr(node, 'checked'));
+                previousChecked = __kotobaBoolAttr(node, 'checked');
+                __kotobaSetBooleanAttribute(ref, 'checked', !previousChecked);
                 stateChanged = true;
               } else if (tag === 'input' && type === 'radio' && !__kotobaBoolAttr(node, 'checked')) {
+                var group = __kotobaRadioGroupNodes(node);
+                previousGroupCheckedIds = group.filter(function(n) { return __kotobaBoolAttr(n, 'checked'); })
+                  .map(function(n) { return n['node/id']; });
                 __kotobaSetBooleanAttribute(ref, 'checked', true);
                 __kotobaClearRadioGroupSiblings(node);
                 stateChanged = true;
@@ -2506,8 +2512,24 @@
             }
             var result = __kotobaDispatch(ref, __kotobaEvent('click', { bubbles: true, cancelable: true }));
             if (stateChanged) {
-              __kotobaDispatch(ref, __kotobaEvent('input', { bubbles: true }));
-              __kotobaDispatch(ref, __kotobaEvent('change', { bubbles: true }));
+              if (result) {
+                __kotobaDispatch(ref, __kotobaEvent('input', { bubbles: true }));
+                __kotobaDispatch(ref, __kotobaEvent('change', { bubbles: true }));
+              } else {
+                // Real canceled-activation-steps behavior: a click listener
+                // calling preventDefault() reverts the tentative checked
+                // flip and fires NEITHER input nor change -- previously
+                // this engine always kept the flip and always fired both,
+                // confirmed via a real QuickJS smoke test.
+                if (tag === 'input' && type === 'checkbox') {
+                  __kotobaSetBooleanAttribute(ref, 'checked', previousChecked);
+                } else if (tag === 'input' && type === 'radio') {
+                  __kotobaSetBooleanAttribute(ref, 'checked', false);
+                  for (var i = 0; i < previousGroupCheckedIds.length; i++) {
+                    __kotobaSetBooleanAttribute({ nodeId: previousGroupCheckedIds[i] }, 'checked', true);
+                  }
+                }
+              }
             }
             return result;
           },

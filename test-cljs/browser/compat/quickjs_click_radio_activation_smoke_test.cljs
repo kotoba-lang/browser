@@ -212,3 +212,59 @@
                   (is false (str "QuickJS WASM engine initialization / page load failed: "
                                  (or (.-message err) err)))
                   (done))))))
+
+
+(deftest quickjs-real-checkbox-click-preventdefault-reverts-checked-and-suppresses-events-test
+  ;; Real "canceled activation steps": a click listener calling
+  ;; preventDefault() reverts the tentative checked flip and fires NEITHER
+  ;; input nor change -- previously this engine always kept the flip and
+  ;; always fired both regardless of preventDefault().
+  (async done
+    (-> (run-page-and-read-title!
+         (str "<main><input id=\"box\" type=\"checkbox\">"
+              "<script>"
+              "var box = document.getElementById('box');"
+              "var events = [];"
+              "box.addEventListener('click', function(e) { e.preventDefault(); });"
+              "box.addEventListener('input', function() { events.push('input'); });"
+              "box.addEventListener('change', function() { events.push('change'); });"
+              "box.click();"
+              "document.title = box.checked + ':' + events.join(',');"
+              "</script></main>"))
+        (.then (fn [title]
+                 (println "quickjs real checkbox click preventDefault ->" (pr-str title))
+                 (is (= "false:" title)
+                     (str "preventDefault() must revert checked to false and fire no "
+                          "input/change, got document.title = " (pr-str title)))
+                 (done)))
+        (.catch (fn [err]
+                  (is false (str "QuickJS WASM engine initialization / page load failed: "
+                                 (or (.-message err) err)))
+                  (done))))))
+
+(deftest quickjs-real-radio-click-preventdefault-restores-previous-checked-sibling-test
+  (async done
+    (-> (run-page-and-read-title!
+         (str "<main>"
+              "<input id=\"a\" type=\"radio\" name=\"g\" checked>"
+              "<input id=\"b\" type=\"radio\" name=\"g\">"
+              "<script>"
+              "var a = document.getElementById('a');"
+              "var b = document.getElementById('b');"
+              "var events = [];"
+              "b.addEventListener('click', function(e) { e.preventDefault(); });"
+              "b.addEventListener('input', function() { events.push('input'); });"
+              "b.addEventListener('change', function() { events.push('change'); });"
+              "b.click();"
+              "document.title = a.checked + ':' + b.checked + ':' + events.join(',');"
+              "</script></main>"))
+        (.then (fn [title]
+                 (println "quickjs real radio click preventDefault ->" (pr-str title))
+                 (is (= "true:false:" title)
+                     (str "preventDefault() must restore the previously-checked sibling "
+                          "and fire no input/change, got document.title = " (pr-str title)))
+                 (done)))
+        (.catch (fn [err]
+                  (is false (str "QuickJS WASM engine initialization / page load failed: "
+                                 (or (.-message err) err)))
+                  (done))))))
