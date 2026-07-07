@@ -200,6 +200,26 @@
     (is (not (str/includes? source "body: __kotobaElement({ selector: 'body' }),"))
         "the old plain, once-evaluated data property must be gone -- fully replaced by the getter")))
 
+(deftest quickjs-wasm-webapi-shim-exposes-local-storage-length-key-clear
+  ;; localStorage.length/.key(n)/.clear() -- previously entirely missing
+  ;; (only getItem/setItem/removeItem existed on the shim). Confirmed via
+  ;; a real CLJS/QuickJS smoke test
+  ;; (quickjs-local-storage-length-key-clear-smoke-test) that a real page
+  ;; script's own localStorage.length/.key() now correctly reflect what
+  ;; earlier <script> tags on the same page wrote (reusing the already-
+  ;; real __kotobaStorageSnapshot re-injected before each script
+  ;; evaluates), and .clear() genuinely removes every real key, composed
+  ;; entirely from the already-real per-key storage/delete capability
+  ;; (no new host-side capability needed).
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "get length() {"))
+    (is (str/includes? source "return Object.keys(snapshot).length;"))
+    (is (str/includes? source "key: function(index) {"))
+    (is (str/includes? source "var keys = Object.keys(snapshot).sort();"))
+    (is (str/includes? source "return i >= 0 && i < keys.length ? keys[i] : null;"))
+    (is (str/includes? source "clear: function() {"))
+    (is (str/includes? source "var keys = Object.keys(snapshot);"))))
+
 (deftest quickjs-wasm-webapi-shim-exposes-pattern-mismatch-validation
   ;; A real HTML5 `pattern` attribute -- previously an honest, documented
   ;; scope-cut everywhere (`patternMismatch: false` hardcoded, no check at

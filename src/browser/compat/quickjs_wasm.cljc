@@ -3097,6 +3097,34 @@
             capability: 'storage/delete',
             'storage/key': String(key)
           });
+        },
+        get length() {
+          var snapshot = globalThis.__kotobaStorageSnapshot || {};
+          return Object.keys(snapshot).length;
+        },
+        key: function(index) {
+          var snapshot = globalThis.__kotobaStorageSnapshot || {};
+          var keys = Object.keys(snapshot).sort();
+          var i = Number(index);
+          return i >= 0 && i < keys.length ? keys[i] : null;
+        },
+        clear: function() {
+          // No dedicated storage/clear capability exists -- composed from
+          // the already-real, per-key storage/delete op instead (the same
+          // reuse-an-existing-primitive-over-adding-a-new-capability
+          // posture other composed methods in this file already follow),
+          // matching removeItem's own established behavior of never
+          // optimistically mutating __kotobaStorageSnapshot locally --
+          // the snapshot only ever reflects the host's own post-commit
+          // truth, re-injected fresh before each script evaluates.
+          var snapshot = globalThis.__kotobaStorageSnapshot || {};
+          var keys = Object.keys(snapshot);
+          for (var i = 0; i < keys.length; i++) {
+            globalThis.__kotobaRequests.push({
+              capability: 'storage/delete',
+              'storage/key': keys[i]
+            });
+          }
         }
       };
       globalThis.navigator = globalThis.navigator || {};

@@ -428,6 +428,14 @@
    "</div>"
    "<div id=\"focus-within-result\">focus-within proof: pending...</div>"
    "</section>"
+   "<section id=\"local-storage-proof\" style=\"display:flex; flex-direction:column; gap:8\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "Real localStorage.length/.key()/.clear() below -- previously entirely "
+   "missing (only getItem/setItem/removeItem existed). Two keys are set by "
+   "one script, read back by the next, then cleared by a third."
+   "</p>"
+   "<div id=\"local-storage-result\">local-storage proof: pending...</div>"
+   "</section>"
    "<section id=\"check-validity-proof\" style=\"display:flex; flex-direction:column; gap:8\">"
    "<p style=\"color:#9fb0c9; font-size:13\">"
    "Real element.checkValidity()/.validity/.willValidate below -- previously "
@@ -795,6 +803,18 @@
    "', after focusing its real child input=' + fwAfter;"
    "</script>"
    "<script>"
+   "localStorage.setItem('demo-alpha', '1');"
+   "localStorage.setItem('demo-beta', '2');"
+   "</script>"
+   "<script>"
+   "var lsBefore = localStorage.length + ':' + localStorage.key(0) + ':' + localStorage.key(1);"
+   "localStorage.clear();"
+   "var lsAfter = localStorage.length + ':' + localStorage.getItem('demo-alpha');"
+   "var lsResult = document.getElementById('local-storage-result');"
+   "lsResult.textContent = 'local-storage proof: length:key0:key1 before clear=' + lsBefore + "
+   "', length:alpha after clear()=' + lsAfter;"
+   "</script>"
+   "<script>"
    "var cvTarget = document.getElementById('check-validity-target');"
    "var cvResult = document.getElementById('check-validity-result');"
    "cvResult.textContent = 'checkValidity proof: checkValidity()=' + cvTarget.checkValidity() + "
@@ -1132,6 +1152,7 @@
                  remove-attr-proof (element-text doc "remove-attr-result")
                  get-computed-style-proof (element-text doc "get-computed-style-result")
                  focus-within-proof (element-text doc "focus-within-result")
+                 local-storage-proof (element-text doc "local-storage-result")
                  check-validity-proof (element-text doc "check-validity-result")
                  select-proof (element-text doc "select-result")
                  pattern-proof (element-text doc "pattern-result")
@@ -1163,6 +1184,7 @@
              (js/console.log "browser.demo: #remove-attr-result ->" (pr-str remove-attr-proof))
              (js/console.log "browser.demo: #get-computed-style-result ->" (pr-str get-computed-style-proof))
              (js/console.log "browser.demo: #focus-within-result ->" (pr-str focus-within-proof))
+             (js/console.log "browser.demo: #local-storage-result ->" (pr-str local-storage-proof))
              (js/console.log "browser.demo: #check-validity-result ->" (pr-str check-validity-proof))
              (js/console.log "browser.demo: #select-result ->" (pr-str select-proof))
              (js/console.log "browser.demo: #pattern-result ->" (pr-str pattern-proof))
