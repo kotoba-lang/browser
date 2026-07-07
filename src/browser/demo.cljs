@@ -1262,6 +1262,26 @@
    "document.getElementById('textarea-leading-lf-result').textContent = "
    "'textarea-leading-lf proof: value=' + JSON.stringify(taTarget.value);"
    "</script>"
+   "<section id=\"mutation-observer-dup-proof\" style=\"display:flex; flex-direction:column; gap:8; margin-top:4\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "Below, a real MutationObserver observes the same real element twice "
+   "(a common defensive re-init pattern) then the element is mutated "
+   "once -- previously this delivered two duplicate records for one "
+   "real mutation instead of one."
+   "</p>"
+   "<div id=\"mutation-observer-dup-target\">mo target</div>"
+   "<div id=\"mutation-observer-dup-result\">mutation-observer-dup proof: pending...</div>"
+   "</section>"
+   "<script>"
+   "var moTarget = document.getElementById('mutation-observer-dup-target');"
+   "var mo = new MutationObserver(function() {});"
+   "mo.observe(moTarget, {attributes: true});"
+   "mo.observe(moTarget, {attributes: true});"
+   "moTarget.setAttribute('data-mo', '1');"
+   "var moRecords = mo.takeRecords();"
+   "document.getElementById('mutation-observer-dup-result').textContent = "
+   "'mutation-observer-dup proof: records=' + moRecords.length;"
+   "</script>"
    "<script>"
    "void 0;"
    "</script>"
@@ -1558,6 +1578,7 @@
                  replacechildren-proof (element-text doc "replacechildren-result")
                  pre-leading-lf-proof (element-text doc "pre-leading-lf-result")
                  textarea-leading-lf-proof (element-text doc "textarea-leading-lf-result")
+                 mutation-observer-dup-proof (element-text doc "mutation-observer-dup-result")
                  status-badge-proof (pseudo-content doc "status-badge")
                  step-proofs (mapv #(pseudo-content doc %)
                                    ["step-1" "step-2" "step-3" "step-4"])]
@@ -1611,6 +1632,7 @@
              (js/console.log "browser.demo: #replacechildren-result ->" (pr-str replacechildren-proof))
              (js/console.log "browser.demo: #pre-leading-lf-result ->" (pr-str pre-leading-lf-proof))
              (js/console.log "browser.demo: #textarea-leading-lf-result ->" (pr-str textarea-leading-lf-proof))
+             (js/console.log "browser.demo: #mutation-observer-dup-result ->" (pr-str mutation-observer-dup-proof))
              (js/console.log "browser.demo: real ::before generated content ->"
                               "#status-badge:" (pr-str status-badge-proof)
                               "#step-counter lis:" (pr-str step-proofs))
