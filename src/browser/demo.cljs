@@ -1321,6 +1321,21 @@
    "'dataset-ownkeys proof: keys=' + doKeys.join(',') + ', forin=' + doForin.join(',') + "
    "', spread=' + doSpread.join(',');"
    "</script>"
+   "<section id=\"inline-style-calc-proof\" style=\"display:flex; flex-direction:column; gap:8; margin-top:4\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "The real box below is sized by an inline style=\"width: calc(100px + 20px)\" "
+   "attribute -- previously only a stylesheet rule's own calc() resolved "
+   "correctly; an inline attribute's calc() silently fell through unresolved."
+   "</p>"
+   "<div id=\"inline-style-calc-target\" style=\"width: calc(100px + 20px); height: 20px; background: #5b8dd6\"></div>"
+   "<div id=\"inline-style-calc-result\">inline-style-calc proof: pending...</div>"
+   "</section>"
+   "<script>"
+   "var iscTarget = document.getElementById('inline-style-calc-target');"
+   "var iscComputed = getComputedStyle(iscTarget);"
+   "document.getElementById('inline-style-calc-result').textContent = "
+   "'inline-style-calc proof: width=' + iscComputed.width;"
+   "</script>"
    "<script>"
    "void 0;"
    "</script>"
@@ -1620,6 +1635,7 @@
                  mutation-observer-dup-proof (element-text doc "mutation-observer-dup-result")
                  c1-entity-proof (element-text doc "c1-entity-result")
                  dataset-ownkeys-proof (element-text doc "dataset-ownkeys-result")
+                 inline-style-calc-proof (element-text doc "inline-style-calc-result")
                  status-badge-proof (pseudo-content doc "status-badge")
                  step-proofs (mapv #(pseudo-content doc %)
                                    ["step-1" "step-2" "step-3" "step-4"])]
@@ -1676,6 +1692,7 @@
              (js/console.log "browser.demo: #mutation-observer-dup-result ->" (pr-str mutation-observer-dup-proof))
              (js/console.log "browser.demo: #c1-entity-result ->" (pr-str c1-entity-proof))
              (js/console.log "browser.demo: #dataset-ownkeys-result ->" (pr-str dataset-ownkeys-proof))
+             (js/console.log "browser.demo: #inline-style-calc-result ->" (pr-str inline-style-calc-proof))
              (js/console.log "browser.demo: real ::before generated content ->"
                               "#status-badge:" (pr-str status-badge-proof)
                               "#step-counter lis:" (pr-str step-proofs))
