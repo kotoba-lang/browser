@@ -174,7 +174,9 @@
        "#step-counter li { counter-increment: step } "
        "#step-counter li::before { content: counter(step) \". \"; color: #e0a458; font-size: 12 } "
        ".style-prop-box { color: #4fb3a6 } "
-       ".computed-style-box { color: #e0a458; font-weight: bold }"))
+       ".computed-style-box { color: #e0a458; font-weight: bold } "
+       ".focus-within-box { background: #16202f } "
+       ".focus-within-box:focus-within { background: #2d4a63 }"))
 
 (defn sample-html
   "The demo page's real HTML, parameterized on `worker-url`/`fetch-url` (the
@@ -413,6 +415,18 @@
    "</p>"
    "<div id=\"computed-style-box\" class=\"computed-style-box\">styled only by the stylesheet, read back by script below</div>"
    "<div id=\"get-computed-style-result\">getComputedStyle proof: pending...</div>"
+   "</section>"
+   "<section id=\"focus-within-proof\" style=\"display:flex; flex-direction:column; gap:8\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "Real CSS :focus-within below -- previously never matched at all, even "
+   "with a genuinely focused descendant. This wrapper's own background "
+   "(via \".focus-within-box:focus-within\" above) changes once its real "
+   "child input below is focused by script, read back via getComputedStyle."
+   "</p>"
+   "<div id=\"focus-within-wrapper\" class=\"focus-within-box\" style=\"padding:8\">"
+   "<input id=\"focus-within-input\" value=\"focus me via script\">"
+   "</div>"
+   "<div id=\"focus-within-result\">focus-within proof: pending...</div>"
    "</section>"
    "<section id=\"check-validity-proof\" style=\"display:flex; flex-direction:column; gap:8\">"
    "<p style=\"color:#9fb0c9; font-size:13\">"
@@ -771,6 +785,16 @@
    "', fontWeight=' + csComputed.fontWeight + ', inline style attr=' + csTarget.getAttribute('style');"
    "</script>"
    "<script>"
+   "var fwWrapper = document.getElementById('focus-within-wrapper');"
+   "var fwInput = document.getElementById('focus-within-input');"
+   "var fwResult = document.getElementById('focus-within-result');"
+   "var fwBefore = getComputedStyle(fwWrapper).backgroundColor;"
+   "fwInput.focus();"
+   "var fwAfter = getComputedStyle(fwWrapper).backgroundColor;"
+   "fwResult.textContent = 'focus-within proof: wrapper background before focus=' + fwBefore + "
+   "', after focusing its real child input=' + fwAfter;"
+   "</script>"
+   "<script>"
    "var cvTarget = document.getElementById('check-validity-target');"
    "var cvResult = document.getElementById('check-validity-result');"
    "cvResult.textContent = 'checkValidity proof: checkValidity()=' + cvTarget.checkValidity() + "
@@ -1107,6 +1131,7 @@
                  style-property-proof (element-text doc "style-prop-result")
                  remove-attr-proof (element-text doc "remove-attr-result")
                  get-computed-style-proof (element-text doc "get-computed-style-result")
+                 focus-within-proof (element-text doc "focus-within-result")
                  check-validity-proof (element-text doc "check-validity-result")
                  select-proof (element-text doc "select-result")
                  pattern-proof (element-text doc "pattern-result")
@@ -1137,6 +1162,7 @@
              (js/console.log "browser.demo: #style-prop-result ->" (pr-str style-property-proof))
              (js/console.log "browser.demo: #remove-attr-result ->" (pr-str remove-attr-proof))
              (js/console.log "browser.demo: #get-computed-style-result ->" (pr-str get-computed-style-proof))
+             (js/console.log "browser.demo: #focus-within-result ->" (pr-str focus-within-proof))
              (js/console.log "browser.demo: #check-validity-result ->" (pr-str check-validity-proof))
              (js/console.log "browser.demo: #select-result ->" (pr-str select-proof))
              (js/console.log "browser.demo: #pattern-result ->" (pr-str pattern-proof))
