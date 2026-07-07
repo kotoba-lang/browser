@@ -2445,6 +2445,12 @@
             return __kotobaDispatch(ref, __kotobaEvent('click', { bubbles: true, cancelable: true }));
           },
           focus: function() {
+            // Real element.focus() is a no-op on a disabled form control --
+            // document.activeElement never becomes a disabled element.
+            // Reuses the same __kotobaDisabledControl helper every other
+            // disabled-gated behavior in this file already does
+            // (checkValidity/:disabled pseudo-class matching/etc.).
+            if (__kotobaDisabledControl(__kotobaNodeById(__kotobaRefNodeId(ref)))) return;
             var request = {
               capability: 'dom/mutate',
               'dom/op': 'focus-node'

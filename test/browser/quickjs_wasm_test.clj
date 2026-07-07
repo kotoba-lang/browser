@@ -220,6 +220,17 @@
     (is (str/includes? source "clear: function() {"))
     (is (str/includes? source "var keys = Object.keys(snapshot);"))))
 
+(deftest quickjs-wasm-webapi-shim-focus-is-a-no-op-on-a-disabled-control
+  ;; element.focus() -- previously entirely ignoring the disabled
+  ;; attribute, deferred across 18+ prior scoping passes as the safest
+  ;; trivial close-out. Confirmed via a real CLJS/QuickJS smoke test
+  ;; (quickjs-focus-disabled-smoke-test) that focus() on a real disabled
+  ;; input is now correctly a no-op (document.activeElement never becomes
+  ;; the disabled control), while focus() on a real enabled control still
+  ;; works exactly as before.
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "if (__kotobaDisabledControl(__kotobaNodeById(__kotobaRefNodeId(ref)))) return;"))))
+
 (deftest quickjs-wasm-webapi-shim-exposes-pattern-mismatch-validation
   ;; A real HTML5 `pattern` attribute -- previously an honest, documented
   ;; scope-cut everywhere (`patternMismatch: false` hardcoded, no check at

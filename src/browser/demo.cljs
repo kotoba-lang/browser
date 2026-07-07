@@ -436,6 +436,15 @@
    "</p>"
    "<div id=\"local-storage-result\">local-storage proof: pending...</div>"
    "</section>"
+   "<section id=\"focus-disabled-proof\" style=\"display:flex; flex-direction:column; gap:8\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "Real element.focus() below -- previously ignoring the disabled "
+   "attribute entirely. This disabled input's own .focus() call is now a "
+   "real no-op, read back via document.activeElement by script."
+   "</p>"
+   "<input id=\"focus-disabled-target\" disabled value=\"disabled, cannot really focus\">"
+   "<div id=\"focus-disabled-result\">focus-disabled proof: pending...</div>"
+   "</section>"
    "<section id=\"check-validity-proof\" style=\"display:flex; flex-direction:column; gap:8\">"
    "<p style=\"color:#9fb0c9; font-size:13\">"
    "Real element.checkValidity()/.validity/.willValidate below -- previously "
@@ -815,6 +824,13 @@
    "', length:alpha after clear()=' + lsAfter;"
    "</script>"
    "<script>"
+   "var fdTarget = document.getElementById('focus-disabled-target');"
+   "var fdResult = document.getElementById('focus-disabled-result');"
+   "fdTarget.focus();"
+   "fdResult.textContent = 'focus-disabled proof: document.activeElement === target after focus()=' + "
+   "(document.activeElement === fdTarget);"
+   "</script>"
+   "<script>"
    "var cvTarget = document.getElementById('check-validity-target');"
    "var cvResult = document.getElementById('check-validity-result');"
    "cvResult.textContent = 'checkValidity proof: checkValidity()=' + cvTarget.checkValidity() + "
@@ -1153,6 +1169,7 @@
                  get-computed-style-proof (element-text doc "get-computed-style-result")
                  focus-within-proof (element-text doc "focus-within-result")
                  local-storage-proof (element-text doc "local-storage-result")
+                 focus-disabled-proof (element-text doc "focus-disabled-result")
                  check-validity-proof (element-text doc "check-validity-result")
                  select-proof (element-text doc "select-result")
                  pattern-proof (element-text doc "pattern-result")
@@ -1185,6 +1202,7 @@
              (js/console.log "browser.demo: #get-computed-style-result ->" (pr-str get-computed-style-proof))
              (js/console.log "browser.demo: #focus-within-result ->" (pr-str focus-within-proof))
              (js/console.log "browser.demo: #local-storage-result ->" (pr-str local-storage-proof))
+             (js/console.log "browser.demo: #focus-disabled-result ->" (pr-str focus-disabled-proof))
              (js/console.log "browser.demo: #check-validity-result ->" (pr-str check-validity-proof))
              (js/console.log "browser.demo: #select-result ->" (pr-str select-proof))
              (js/console.log "browser.demo: #pattern-result ->" (pr-str pattern-proof))
