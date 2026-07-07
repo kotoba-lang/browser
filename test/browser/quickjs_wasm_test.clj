@@ -181,6 +181,25 @@
     (is (str/includes? source "var next = __kotobaApplyStep(node, n == null ? 1 : Number(n));"))
     (is (str/includes? source "var next = __kotobaApplyStep(node, -(n == null ? 1 : Number(n)));"))))
 
+(deftest quickjs-wasm-webapi-shim-document-body-is-a-null-safe-live-getter
+  ;; document.body -- previously a plain, once-evaluated DATA property
+  ;; built from a selector ref (`__kotobaElement({selector: 'body'})`),
+  ;; the only non-getter, non-null-checked accessor in the whole document
+  ;; object literal -- __kotobaElement never itself returns null, so
+  ;; document.body was always a truthy stub object even on a real
+  ;; document with no <body> element at all (this engine's own HTML
+  ;; parser never synthesizes an implicit <html>/<body> wrapper, so a
+  ;; bodyless page is a real, reachable case). Confirmed via a real
+  ;; CLJS/QuickJS smoke test (quickjs-document-body-smoke-test) that
+  ;; document.body now correctly returns null on a bodyless document and
+  ;; the real <body> element otherwise, matching every sibling accessor's
+  ;; own established null-safe getter shape (documentElement/head).
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "get body() {"))
+    (is (str/includes? source "var id = __kotobaElementByTag('body');"))
+    (is (not (str/includes? source "body: __kotobaElement({ selector: 'body' }),"))
+        "the old plain, once-evaluated data property must be gone -- fully replaced by the getter")))
+
 (deftest quickjs-wasm-webapi-shim-exposes-pattern-mismatch-validation
   ;; A real HTML5 `pattern` attribute -- previously an honest, documented
   ;; scope-cut everywhere (`patternMismatch: false` hardcoded, no check at

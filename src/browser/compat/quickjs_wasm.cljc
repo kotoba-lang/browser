@@ -2480,7 +2480,22 @@
         element.replaceChildren(__kotobaTextNode(value));
       }
       globalThis.document = {
-        body: __kotobaElement({ selector: 'body' }),
+        get body() {
+          // Real document.body is a live, null-safe accessor -- returns
+          // null when no real <body> element exists at all (this engine's
+          // own HTML parser never synthesizes an implicit <html>/<body>
+          // wrapper, so a bodyless page, e.g. a bare root element with no
+          // <body> tag anywhere, is a real, reachable case), matching
+          // every sibling accessor's own established shape (documentElement/
+          // head below). Previously a plain, once-evaluated DATA property
+          // built from a selector ref -- __kotobaElement never itself
+          // returns null, so `document.body` was always a truthy stub
+          // object even on a document with no real <body> at all, the
+          // only non-getter, non-null-checked accessor in this entire
+          // object literal.
+          var id = __kotobaElementByTag('body');
+          return id == null ? null : __kotobaElement({ nodeId: id });
+        },
         get URL() {
           return globalThis.__kotobaSnapshot && globalThis.__kotobaSnapshot.url != null
             ? String(globalThis.__kotobaSnapshot.url)

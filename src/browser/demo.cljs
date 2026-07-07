@@ -492,6 +492,15 @@
    "<input id=\"step-up-down-target\" type=\"number\" value=\"5\" step=\"2\">"
    "<div id=\"step-up-down-result\">step-up-down proof: pending...</div>"
    "</section>"
+   "<section id=\"document-body-proof\" style=\"display:flex; flex-direction:column; gap:8\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "Real document.body below -- previously always a truthy stub object, "
+   "even on a document (like this real demo page itself, which has no "
+   "&lt;body&gt; tag at all) with no real &lt;body&gt; element. Now "
+   "correctly null-safe, read back by script below."
+   "</p>"
+   "<div id=\"document-body-result\">document-body proof: pending...</div>"
+   "</section>"
    "<section id=\"font-shorthand-proof\" style=\"display:flex; flex-direction:column; gap:8\">"
    "<p style=\"color:#9fb0c9; font-size:13\">"
    "Real CSS font shorthand below -- previously stored verbatim as a single "
@@ -821,6 +830,11 @@
    "', after two more stepDown()=' + sudTarget.value;"
    "</script>"
    "<script>"
+   "var dbResult = document.getElementById('document-body-result');"
+   "dbResult.textContent = 'document-body proof: document.body === null -> ' + (document.body === null) + "
+   "' (this real page has no <body> tag anywhere)';"
+   "</script>"
+   "<script>"
    "var w = new Worker(" (pr-str worker-url) ");"
    "w.onmessage = function(e) { document.getElementById('worker-proof').textContent = "
    "'Worker proof: real 2nd QuickJS context computed 21 * 2 -> ' + e.data; };"
@@ -1101,6 +1115,7 @@
                  validation-message-proof (element-text doc "validation-message-result")
                  event-modifier-keys-proof (element-text doc "event-modifier-keys-result")
                  step-up-down-proof (element-text doc "step-up-down-result")
+                 document-body-proof (element-text doc "document-body-result")
                  status-badge-proof (pseudo-content doc "status-badge")
                  step-proofs (mapv #(pseudo-content doc %)
                                    ["step-1" "step-2" "step-3" "step-4"])]
@@ -1130,6 +1145,7 @@
              (js/console.log "browser.demo: #validation-message-result ->" (pr-str validation-message-proof))
              (js/console.log "browser.demo: #event-modifier-keys-result ->" (pr-str event-modifier-keys-proof))
              (js/console.log "browser.demo: #step-up-down-result ->" (pr-str step-up-down-proof))
+             (js/console.log "browser.demo: #document-body-result ->" (pr-str document-body-proof))
              (js/console.log "browser.demo: real ::before generated content ->"
                               "#status-badge:" (pr-str status-badge-proof)
                               "#step-counter lis:" (pr-str step-proofs))
