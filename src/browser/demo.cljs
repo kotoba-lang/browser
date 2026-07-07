@@ -1234,6 +1234,34 @@
    "document.getElementById('replacechildren-result').textContent = "
    "'replacechildren proof: text=' + rcTarget.textContent + '|children=' + rcTarget.childNodes.length;"
    "</script>"
+   "<section id=\"pre-leading-lf-proof\" style=\"display:flex; flex-direction:column; gap:8; margin-top:4\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "The real preformatted block below has a source HTML newline "
+   "immediately after its opening tag -- per spec that one leading LF "
+   "is silently dropped, previously left in the parsed text content."
+   "</p>"
+   "<pre id=\"pre-leading-lf-target\">\nhello from pre</pre>"
+   "<div id=\"pre-leading-lf-result\">pre-leading-lf proof: pending...</div>"
+   "</section>"
+   "<script>"
+   "var preTarget = document.getElementById('pre-leading-lf-target');"
+   "document.getElementById('pre-leading-lf-result').textContent = "
+   "'pre-leading-lf proof: text=' + JSON.stringify(preTarget.textContent);"
+   "</script>"
+   "<section id=\"textarea-leading-lf-proof\" style=\"display:flex; flex-direction:column; gap:8; margin-top:4\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "The real text area below has the same source HTML newline right "
+   "after its opening tag -- the same spec rule, previously left in "
+   ".value too."
+   "</p>"
+   "<textarea id=\"textarea-leading-lf-target\">\nhello from textarea</textarea>"
+   "<div id=\"textarea-leading-lf-result\">textarea-leading-lf proof: pending...</div>"
+   "</section>"
+   "<script>"
+   "var taTarget = document.getElementById('textarea-leading-lf-target');"
+   "document.getElementById('textarea-leading-lf-result').textContent = "
+   "'textarea-leading-lf proof: value=' + JSON.stringify(taTarget.value);"
+   "</script>"
    "<script>"
    "void 0;"
    "</script>"
@@ -1528,6 +1556,8 @@
                  csstext-proof (element-text doc "csstext-result")
                  select-disabled-proof (element-text doc "select-disabled-result")
                  replacechildren-proof (element-text doc "replacechildren-result")
+                 pre-leading-lf-proof (element-text doc "pre-leading-lf-result")
+                 textarea-leading-lf-proof (element-text doc "textarea-leading-lf-result")
                  status-badge-proof (pseudo-content doc "status-badge")
                  step-proofs (mapv #(pseudo-content doc %)
                                    ["step-1" "step-2" "step-3" "step-4"])]
@@ -1579,6 +1609,8 @@
              (js/console.log "browser.demo: #csstext-result ->" (pr-str csstext-proof))
              (js/console.log "browser.demo: #select-disabled-result ->" (pr-str select-disabled-proof))
              (js/console.log "browser.demo: #replacechildren-result ->" (pr-str replacechildren-proof))
+             (js/console.log "browser.demo: #pre-leading-lf-result ->" (pr-str pre-leading-lf-proof))
+             (js/console.log "browser.demo: #textarea-leading-lf-result ->" (pr-str textarea-leading-lf-proof))
              (js/console.log "browser.demo: real ::before generated content ->"
                               "#status-badge:" (pr-str status-badge-proof)
                               "#step-counter lis:" (pr-str step-proofs))
