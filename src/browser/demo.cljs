@@ -180,7 +180,9 @@
        ".range-proof-input:out-of-range { color: #e05a4f; border-color: #e05a4f } "
        ".range-proof-input:in-range { color: #7fce7f; border-color: #7fce7f } "
        ".box-shadow-spread-box { box-shadow: 0 1px 2px 4px rgba(80,160,220,0.6) } "
-       ".currentcolor-box { color: #e07a3f; border: 3px solid currentColor }"))
+       ".currentcolor-box { color: #e07a3f; border: 3px solid currentColor } "
+       ".flex-shrink-row { display: flex; gap: 8; background: #1a2333; padding: 8 } "
+       ".flex-shrink-row button { background: #e0a458 }"))
 
 (defn sample-html
   "The demo page's real HTML, parameterized on `worker-url`/`fetch-url` (the
@@ -792,6 +794,17 @@
    "</p>"
    "<input id=\"serialize-attr-leak-target\" value=\"hi\" style=\"color:#e07a3f\">"
    "<div id=\"serialize-attr-leak-result\">serialize-attr-leak proof: pending...</div>"
+   "</section>"
+   "<section id=\"flex-shrink-proof\" style=\"display:flex; flex-direction:column; gap:8; margin-top:4\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "The two orange buttons below (no CSS width authored) should shrink-"
+   "wrap to their own short labels -- previously each rendered at the "
+   "FULL row width instead, ballooning the row to fit them."
+   "</p>"
+   "<div class=\"flex-shrink-row\">"
+   "<button id=\"flex-shrink-ok\">OK</button>"
+   "<button id=\"flex-shrink-cancel\">Cancel</button>"
+   "</div>"
    "</section>"
    "<script>"
    "document.title = 'Kotoba Browser: real QuickJS + real cssom layout + real WebGL paint';"
