@@ -1137,6 +1137,21 @@
    "', host=' + location.host + ', protocol=' + location.protocol + "
    "', matchesDocumentURL=' + (location.href === document.URL);"
    "</script>"
+   "<section id=\"comment-parse-proof\" style=\"display:flex; flex-direction:column; gap:8; margin-top:4\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "Real HTML5 abrupt-closing comment (&lt;!--&gt;) below -- previously "
+   "silently swallowed everything after it, all the way to the end of "
+   "the document."
+   "</p>"
+   "<div id=\"comment-parse-result\">comment-parse proof: pending...</div>"
+   "<!-->"
+   "<div id=\"comment-parse-marker\">marker survived</div>"
+   "</section>"
+   "<script>"
+   "var cpMarker = document.getElementById('comment-parse-marker');"
+   "document.getElementById('comment-parse-result').textContent = "
+   "'comment-parse proof: marker=' + (cpMarker ? cpMarker.textContent : 'MISSING (bug: rest of document swallowed)');"
+   "</script>"
    "<script>"
    "void 0;"
    "</script>"
@@ -1424,6 +1439,7 @@
                  currentcolor-proof (element-text doc "currentcolor-result")
                  serialize-attr-leak-proof (element-text doc "serialize-attr-leak-result")
                  location-proof (element-text doc "location-result")
+                 comment-parse-proof (element-text doc "comment-parse-result")
                  status-badge-proof (pseudo-content doc "status-badge")
                  step-proofs (mapv #(pseudo-content doc %)
                                    ["step-1" "step-2" "step-3" "step-4"])]
@@ -1469,6 +1485,7 @@
              (js/console.log "browser.demo: #currentcolor-result ->" (pr-str currentcolor-proof))
              (js/console.log "browser.demo: #serialize-attr-leak-result ->" (pr-str serialize-attr-leak-proof))
              (js/console.log "browser.demo: #location-result ->" (pr-str location-proof))
+             (js/console.log "browser.demo: #comment-parse-result ->" (pr-str comment-parse-proof))
              (js/console.log "browser.demo: real ::before generated content ->"
                               "#status-badge:" (pr-str status-badge-proof)
                               "#step-counter lis:" (pr-str step-proofs))
