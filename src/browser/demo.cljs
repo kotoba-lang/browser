@@ -178,7 +178,8 @@
        ".focus-within-box { background: #16202f } "
        ".focus-within-box:focus-within { background: #2d4a63 } "
        ".range-proof-input:out-of-range { color: #e05a4f; border-color: #e05a4f } "
-       ".range-proof-input:in-range { color: #7fce7f; border-color: #7fce7f }"))
+       ".range-proof-input:in-range { color: #7fce7f; border-color: #7fce7f } "
+       ".box-shadow-spread-box { box-shadow: 0 1px 2px 4px rgba(80,160,220,0.6) }"))
 
 (defn sample-html
   "The demo page's real HTML, parameterized on `worker-url`/`fetch-url` (the
@@ -724,6 +725,15 @@
    "<div id=\"stop-propagation-target\">click target</div>"
    "<div id=\"stop-propagation-result\">stop-propagation proof: pending...</div>"
    "</section>"
+   "<section id=\"box-shadow-spread-proof\" style=\"display:flex; flex-direction:column; gap:8; margin-top:4\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "Real CSS box-shadow with a real-world 5-token shape (offset+blur+"
+   "spread+color) below -- previously the spread-radius token silently "
+   "corrupted and DROPPED the real color, read back via getComputedStyle."
+   "</p>"
+   "<div id=\"box-shadow-spread-target\" class=\"box-shadow-spread-box\" style=\"padding:8\">shadow box</div>"
+   "<div id=\"box-shadow-spread-result\">box-shadow-spread proof: pending...</div>"
+   "</section>"
    "<script>"
    "document.title = 'Kotoba Browser: real QuickJS + real cssom layout + real WebGL paint';"
    "</script>"
@@ -978,6 +988,13 @@
    "spTarget.dispatchEvent(new Event('click', { bubbles: true }));"
    "document.getElementById('stop-propagation-result').textContent = "
    "'stop-propagation proof: same-target listeners after stopPropagation()=' + spEvents.join(',');"
+   "</script>"
+   "<script>"
+   "var bsTarget = document.getElementById('box-shadow-spread-target');"
+   "var bsComputed = getComputedStyle(bsTarget);"
+   "document.getElementById('box-shadow-spread-result').textContent = "
+   "'box-shadow-spread proof: color=' + bsComputed.getPropertyValue('box-shadow-color') + "
+   "', spread=' + bsComputed.getPropertyValue('box-shadow-spread');"
    "</script>"
    "<script>"
    "void 0;"
@@ -1258,6 +1275,7 @@
                  range-proof (element-text doc "range-proof-result")
                  click-activation-proof (element-text doc "click-activation-result")
                  stop-propagation-proof (element-text doc "stop-propagation-result")
+                 box-shadow-spread-proof (element-text doc "box-shadow-spread-result")
                  status-badge-proof (pseudo-content doc "status-badge")
                  step-proofs (mapv #(pseudo-content doc %)
                                    ["step-1" "step-2" "step-3" "step-4"])]
@@ -1295,6 +1313,7 @@
              (js/console.log "browser.demo: #range-proof-result ->" (pr-str range-proof))
              (js/console.log "browser.demo: #click-activation-result ->" (pr-str click-activation-proof))
              (js/console.log "browser.demo: #stop-propagation-result ->" (pr-str stop-propagation-proof))
+             (js/console.log "browser.demo: #box-shadow-spread-result ->" (pr-str box-shadow-spread-proof))
              (js/console.log "browser.demo: real ::before generated content ->"
                               "#status-badge:" (pr-str status-badge-proof)
                               "#step-counter lis:" (pr-str step-proofs))
