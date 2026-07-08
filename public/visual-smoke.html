@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>kotoba browser WebGPU model</title>
+  <title>kotoba browser visual smoke</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -38,10 +38,10 @@
 </head>
 <body>
   <div class="stage">
-    <canvas id="kotoba-gpu" width="760" height="460"></canvas>
+    <canvas id="kotoba-gl" width="760" height="460"></canvas>
     <canvas id="kotoba-text" width="760" height="460"></canvas>
   </div>
-  <div id="status" class="caption">kotoba browser -> session -> kotoba:dom model</div>
-  <script src="/js/webgpu-smoke.js"></script>
+  <div id="status" class="caption">kotoba browser -&gt; session -&gt; kotoba:dom model -&gt; WebGL paint</div>
+  <script src="/js/visual-smoke.js"></script>
 </body>
 </html>

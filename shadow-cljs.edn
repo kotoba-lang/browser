@@ -15,4 +15,24 @@
    :release    {:compiler-options {:optimizations :advanced}}
    :devtools   {:watch-dir "public"
                 :http-root "public"
+                :http-port 8702}}
+
+  :visual-smoke
+  {:target     :browser
+   :output-dir "public/js"
+   :asset-path "/js"
+   :modules    {:visual-smoke {:init-fn browser.smoke/init!}}
+   :release    {:compiler-options {:optimizations :advanced}}
+   :devtools   {:watch-dir "public"
+                :http-root "public"
+                :http-port 8702}}
+
+  :webgpu-smoke
+  {:target     :browser
+   :output-dir "public/js"
+   :asset-path "/js"
+   :modules    {:webgpu-smoke {:init-fn browser.smoke-webgpu/init!}}
+   :release    {:compiler-options {:optimizations :advanced}}
+   :devtools   {:watch-dir "public"
+                :http-root "public"
                 :http-port 8702}}}}
