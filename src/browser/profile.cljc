@@ -12,7 +12,19 @@
    :profile/account-id (:account/id account)
    :profile/name (or name "Default")
    :profile/storage-partition (or storage-partition (str "profile:" (or id "default")))
-   :profile/permissions (or permissions {})
+   ;; default-permissions is materialized into internal-origin's own
+   ;; EXPLICIT grant set here, rather than permission? OR-ing it in
+   ;; unconditionally at check time (the previous approach) -- the OR
+   ;; form made the six internal defaults permanently ungrantable AND
+   ;; unrevocable: revoke-permission only ever mutates the explicit set,
+   ;; so disj-ing a default capability that was never actually IN that
+   ;; set was a silent no-op, and permission?'s OR branch kept firing
+   ;; regardless. Confirmed via direct REPL reproduction before this
+   ;; fix. A fresh profile's internal-origin permissions are unchanged
+   ;; (still implicitly granted, matching every existing caller/test),
+   ;; but now genuinely revocable like any other origin's grants.
+   :profile/permissions (update (or permissions {}) internal-origin
+                                (fnil into #{}) default-permissions)
    :profile/history []
    :profile/meta (dissoc opts :id :account :name :storage-partition :permissions)})
 
@@ -26,9 +38,7 @@
 
 (defn permission?
   [profile origin capability]
-  (or (contains? (get-in profile [:profile/permissions origin] #{}) capability)
-      (and (= internal-origin origin)
-           (contains? default-permissions capability))))
+  (contains? (get-in profile [:profile/permissions origin] #{}) capability))
 
 (defn permission-decision
   [profile origin capability]

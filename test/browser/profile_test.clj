@@ -35,6 +35,42 @@
             :reason :permission/not-granted}
            (profile/permission-decision p "https://example.com" :input/event)))))
 
+;; ---- revoke-permission on the internal origin's default capabilities --
+;; previously permission? OR-ed an unconditional carve-out for internal-
+;; origin + default-permissions directly at check time, so the six
+;; defaults were never materialized into :profile/permissions' explicit
+;; grant set at all. revoke-permission only ever mutates that explicit
+;; set, so disj-ing a default capability that was never actually IN it
+;; was a silent no-op -- there was no way to lock down any of the six
+;; defaults for the shell origin. Confirmed via direct REPL reproduction
+;; before touching source. ----
+
+(deftest internal-origin-default-permission-is-genuinely-revocable
+  (let [p (profile/new-profile {:id "default"})]
+    (is (profile/permission? p profile/internal-origin :dom/render)
+        "sanity check: a fresh profile still implicitly grants the default")
+    (let [revoked (profile/revoke-permission p profile/internal-origin :dom/render)]
+      (is (not (profile/permission? revoked profile/internal-origin :dom/render))
+          "revoke-permission must actually take effect now, not silently no-op"))))
+
+(deftest revoking-one-internal-default-does-not-affect-the-others
+  (let [p (profile/new-profile {:id "default"})
+        revoked (profile/revoke-permission p profile/internal-origin :dom/render)]
+    (is (profile/permission? revoked profile/internal-origin :net/fetch)
+        "the other five defaults must remain granted, unaffected by revoking just one")))
+
+(deftest a-non-default-capability-on-the-internal-origin-is-still-denied-by-default
+  (let [p (profile/new-profile {:id "default"})]
+    (is (not (profile/permission? p profile/internal-origin :worker/create)))))
+
+(deftest new-profile-permissions-option-still-merges-with-internal-defaults
+  ;; Regression guard: an explicit :permissions map passed to new-profile
+  ;; must compose with the internal-origin defaults, not clobber them.
+  (let [p (profile/new-profile {:id "custom"
+                                :permissions {"https://pre.example" #{:net/fetch}}})]
+    (is (profile/permission? p "https://pre.example" :net/fetch))
+    (is (profile/permission? p profile/internal-origin :dom/render))))
+
 (deftest browser-state-selects-active-profile
   (let [acct (account/new-account {:id "local"})
         personal (profile/new-profile {:id "personal" :account acct})
