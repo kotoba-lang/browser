@@ -184,7 +184,9 @@
        ".currentcolor-box { color: #e07a3f; border: 3px solid currentColor } "
        ".var-fallback-box { background: var(--missing-bg, rgba(224,122,63,0.6)); border-width: 3px; border-style: solid; border-color: var(--missing-border, rgba(79,179,166,0.8)) } "
        ".flex-shrink-row { display: flex; gap: 8; background: #1a2333; padding: 8 } "
-       ".flex-shrink-row button { background: #e0a458 }"))
+       ".flex-shrink-row button { background: #e0a458 } "
+       "#nested-not-list li { background: #1a2333; padding: 8; margin-bottom: 4 } "
+       "#nested-not-list li:not(:nth-child(1)) { background: #4fb3a6 }"))
 
 (defn sample-html
   "The demo page's real HTML, parameterized on `worker-url`/`fetch-url` (the
@@ -233,6 +235,21 @@
    "<div id=\"stretch-auto-box\" style=\"width:80; background:#5b8dd6\"></div>"
    "<div id=\"stretch-explicit-box\" style=\"width:80; height:40; background:#e0a458\"></div>"
    "</div>"
+   "</section>"
+   "<section id=\"nested-not-selector-proof\" style=\"display:flex; flex-direction:column; gap:8\">"
+   "<p style=\"color:#9fb0c9; font-size:13\">"
+   "The three list items below are styled by a real stylesheet rule, "
+   "li:not(:nth-child(1)) -- previously any :not()/:is()/:where() whose "
+   "own argument contained a parenthesized pseudo-class like "
+   "nth-child() silently matched NOTHING at all, for any element "
+   "whatsoever, so all three items would stay their default dark color "
+   "instead of the second and third items correctly turning teal below."
+   "</p>"
+   "<ul id=\"nested-not-list\" style=\"padding:0; margin:0; list-style:none\">"
+   "<li>First item (should stay dark)</li>"
+   "<li>Second item (should turn teal)</li>"
+   "<li>Third item (should turn teal)</li>"
+   "</ul>"
    "</section>"
    "<section id=\"flex-wrap-align-items-proof\" style=\"display:flex; flex-direction:column; gap:8\">"
    "<p style=\"color:#9fb0c9; font-size:13\">"
