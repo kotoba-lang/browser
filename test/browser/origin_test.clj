@@ -40,3 +40,45 @@
   ;; WHATWG URL's authority-parsing state.
   (is (= "https://host.example"
          (origin/origin "https://user@sub@host.example/path"))))
+
+(deftest parse-url-normalizes-away-a-schemes-own-default-port
+  ;; RFC 6454 origin comparison (and the WHATWG URL spec's own port-
+  ;; normalization step) treats an explicit default port as equivalent
+  ;; to no port at all -- "https://x" and "https://x:443" are the SAME
+  ;; origin. Real bug this guards: same-origin?/origin previously
+  ;; compared the raw authority string verbatim, so a page navigating
+  ;; between the implicit- and explicit-default-port form of the SAME
+  ;; real URL would see its storage/cache/cookies silently split across
+  ;; two "different" origins.
+  (is (= "https://example.com"
+         (origin/origin "https://example.com:443/page")))
+  (is (= "http://example.com"
+         (origin/origin "http://example.com:80/page")))
+  (is (= "ws://example.com"
+         (origin/origin "ws://example.com:80/socket")))
+  (is (= "wss://example.com"
+         (origin/origin "wss://example.com:443/socket")))
+  (is (= "example.com"
+         (:authority (origin/parse-url "https://example.com:443/page"))))
+  (is (origin/same-origin? "https://example.com/page"
+                           "https://example.com:443/page"))
+  (is (origin/same-origin? "http://example.com/page"
+                           "http://example.com:80/page")))
+
+(deftest parse-url-leaves-a-non-default-port-untouched
+  ;; Regression guard: this fix must not accidentally strip EVERY port,
+  ;; only a scheme's own genuine default -- a real, non-default port
+  ;; (e.g. a local dev server on :8443) must still compare as a
+  ;; DIFFERENT origin from the bare host.
+  (is (= "https://example.com:8443"
+         (origin/origin "https://example.com:8443/page")))
+  (is (= "example.com:8443"
+         (:authority (origin/parse-url "https://example.com:8443/page"))))
+  (is (not (origin/same-origin? "https://example.com/page"
+                                "https://example.com:8443/page")))
+  ;; the WRONG scheme's default port on a DIFFERENT scheme must not be
+  ;; stripped either -- :80 is http's default, not https's.
+  (is (= "https://example.com:80"
+         (origin/origin "https://example.com:80/page")))
+  (is (not (origin/same-origin? "https://example.com/page"
+                                "https://example.com:80/page"))))

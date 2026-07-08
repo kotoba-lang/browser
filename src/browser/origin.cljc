@@ -5,6 +5,37 @@
    scheme://authority/path style URLs plus kotoba internal URLs."
   (:require [clojure.string :as str]))
 
+(def default-ports
+  "Per-scheme default port -- RFC 6454 origin comparison (and the
+   WHATWG URL spec's own port-normalization step) treats an explicit
+   default port as equivalent to no port at all (`https://x` and
+   `https://x:443` are the SAME origin), but this file previously
+   compared the raw authority string verbatim, including any port,
+   confirmed via direct REPL reproduction:
+   `(same-origin? \"https://example.com\" \"https://example.com:443\")`
+   returned false. This is more than cosmetic -- `origin`/`same-origin?`
+   are the load-bearing primitives behind browser.net's fetch-cache
+   credential partitioning, CORS Origin-header decisions, and
+   :net/fetch permission checks, plus browser.storage's per-origin key
+   partitioning, so a page that navigates between an implicit- and
+   explicit-default-port form of the SAME real URL (explicit default
+   ports show up in redirects, hand-authored links, and some server
+   configs) would see its storage/cache/cookies silently split across
+   two \"different\" origins."
+  {"http" "80" "https" "443" "ws" "80" "wss" "443"})
+
+(defn- strip-default-port
+  "Removes a trailing `:<port>` from `authority` when `port` is exactly
+   `scheme`'s own default (see `default-ports`) -- any OTHER explicit
+   port (including a non-default one on a scheme with no listed
+   default) is left untouched, so `https://example.com:8443` still
+   correctly compares as a DIFFERENT origin from `https://example.com`."
+  [scheme authority]
+  (let [default-port (get default-ports scheme)]
+    (if (and default-port (str/ends-with? authority (str ":" default-port)))
+      (subs authority 0 (- (count authority) (inc (count default-port))))
+      authority)))
+
 (defn parse-url
   [url]
   (let [s (str url)
@@ -29,12 +60,13 @@
                 authority (if (neg? at)
                             authority-with-userinfo
                             (subs authority-with-userinfo (inc at)))
+                authority (strip-default-port scheme (str/lower-case authority))
                 path (if (neg? slash) "/" (subs without-slashes slash))]
             {:url s
              :scheme scheme
-             :authority (str/lower-case authority)
+             :authority authority
              :path path
-             :origin (str scheme "://" (str/lower-case authority))})
+             :origin (str scheme "://" authority)})
           {:url s
            :scheme scheme
            :path rest
