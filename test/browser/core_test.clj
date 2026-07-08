@@ -56,7 +56,11 @@
         input (first (filter #(= (:tag %) :input) nodes))
         p (first (filter #(= (:tag %) :p) nodes))]
     (is (= "After" (-> page :browser/document kotoba.wasm.dom/text-content)))
-    (is (= true (get-in input [:attrs :disabled])))
+    ;; A bare boolean attribute's real, spec-mandated value is the empty
+    ;; string "" (Element.getAttribute() must return "" for `<input
+    ;; disabled>`, not the string "true") -- see htmldom.core/attrs'
+    ;; own docstring.
+    (is (= "" (get-in input [:attrs :disabled])))
     (is (= "red" (get-in p [:attrs :style/color])))
     (is (= "12" (str (get-in p [:attrs :style/padding]))))))
 

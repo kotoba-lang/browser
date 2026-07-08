@@ -846,7 +846,13 @@
     (is (= true (:handled? selected)))
     (is (= false (get-in selected [:document :nodes one :attrs :checked])))
     (is (= true (get-in selected [:document :nodes two :attrs :checked])))
-    (is (= true (get-in selected [:document :nodes other :attrs :checked])))
+    ;; "other" is never touched by this click (a different radio group) --
+    ;; its :checked still holds the ORIGINAL bare-attribute value the
+    ;; parser produces, "" (the spec-mandated value for a bare boolean
+    ;; attribute written with no `=value`), not the Clojure boolean
+    ;; `true` "two" gets from document-input's own RUNTIME check-on-click
+    ;; logic above.
+    (is (= "" (get-in selected [:document :nodes other :attrs :checked])))
     (is (= [[:dom/dispatch-event
              "input-handler"
              {:event/type "input" :target/id two :checked true}]
@@ -870,7 +876,9 @@
     (is (= true (:handled? selected)))
     (is (= false (get-in selected [:document :nodes a-one :attrs :checked])))
     (is (= true (get-in selected [:document :nodes a-two :attrs :checked])))
-    (is (= true (get-in selected [:document :nodes b-one :attrs :checked]))
+    ;; b-one is untouched by this click (a different form's own radio
+    ;; group) -- still holds the parser's own bare-attribute value "".
+    (is (= "" (get-in selected [:document :nodes b-one :attrs :checked]))
         "same-named radio owned by a different form is an independent group")
     (is (not (true? (get-in selected [:document :nodes b-two :attrs :checked]))))))
 
@@ -883,7 +891,9 @@
         selected (document-input/reduce-event document {:event/type :pointer/click
                                                         :node/id two})]
     (is (= true (:handled? selected)))
-    (is (= true (get-in selected [:document :nodes one :attrs :checked]))
+    ;; "one" is untouched by this click (nameless, so not in any group)
+    ;; -- still holds the parser's own bare-attribute value "".
+    (is (= "" (get-in selected [:document :nodes one :attrs :checked]))
         "a radio without a name attribute is not part of any group")
     (is (= true (get-in selected [:document :nodes two :attrs :checked])))))
 
