@@ -1401,7 +1401,32 @@
       (if-let [node-id (node-at (:browser.session/page session)
                                 (:x event)
                                 (:y event)
-                                #(contains? #{"auto" "scroll"} (:overflow %)))]
+                                ;; The draw-op's own :overflow field (cssom's
+                                ;; cascade-resolved computed style, correctly
+                                ;; covering both stylesheet rules and inline
+                                ;; style="...") is the common/standard case
+                                ;; and must stay authoritative. But
+                                ;; browser.document-input/scrollable-node?
+                                ;; ALSO recognizes a raw `overflow="auto"`
+                                ;; ATTRIBUTE as a deliberate, pragmatic
+                                ;; fallback -- used elsewhere in this
+                                ;; codebase for the identical "is this node
+                                ;; scrollable" question -- that this
+                                ;; wheel-event hit-test never consulted,
+                                ;; silently diverging: a wheel event over an
+                                ;; attr-only-overflow element found no
+                                ;; scrollable ancestor at all and had zero
+                                ;; effect, confirmed via direct REPL
+                                ;; reproduction before this fix (scroll_at
+                                ;; had no effect on such an element, while
+                                ;; scroll_selector, which resolves its
+                                ;; target node-id directly by selector
+                                ;; rather than through this coordinate-based
+                                ;; lookup, worked fine).
+                                #(or (contains? #{"auto" "scroll"} (:overflow %))
+                                     (document-input/scrollable-node?
+                                      (get-in session [:browser.session/page :browser/document])
+                                      (:id %))))]
         (assoc event :node/id node-id)
         event)
 

@@ -242,6 +242,43 @@
     (is (= inner (-> s :browser.session/history last :node/id)))
     (is (= true (-> s :browser.session/history last :handled?)))))
 
+;; ---- wheel events targeting a raw `overflow="auto"` ATTRIBUTE element
+;; via page coordinates (no explicit selector/node-id) -- distinct from
+;; the CSS style="overflow:auto" case above ----
+;;
+;; Real bug this guards: the coordinate-based scrollable-ancestor lookup
+;; only ever checked the draw-op's own cascade-resolved :overflow field
+;; (cssom's computed style, covering stylesheet rules + inline style="..."),
+;; never browser.document-input/scrollable-node?'s own additional raw
+;; `overflow` ATTRIBUTE fallback, already used elsewhere in this codebase
+;; for the identical "is this node scrollable" question -- a real,
+;; silently-diverged pair of checks. A wheel event dispatched by page
+;; COORDINATE (not an explicit selector/node-id) over an attr-only-overflow
+;; element found no scrollable ancestor at all and had zero effect.
+;; Confirmed via direct REPL reproduction before touching source.
+
+(deftest document-wheel-events-resolve-scroll-container-with-attribute-overflow-from-page-coordinates
+  (let [h (host/recording-host)
+        loaded (-> (session/new-session {:host h})
+                   (session/load-html! {:url "kotoba://scroll"
+                                        :html "<main><section id=\"pane\" overflow=\"auto\" scroll-top=\"1\" style=\"height: 30px; width: 120px\"><p>Scrollable content</p></section></main>"}))
+        page (:browser.session/page loaded)
+        document (:browser/document page)
+        pane (bridge/query-selector document "#pane")
+        pane-op (some #(when (and (= :node (:draw/op %))
+                                  (= pane (:id %)))
+                         %)
+                      (:browser/draw-ops page))
+        s (session/apply-document-input-event! loaded {:event/type :pointer/wheel
+                                                       :x (+ (:x pane-op) 2)
+                                                       :y (+ (:y pane-op) 2)
+                                                       :delta-y 5})
+        document (get-in s [:browser.session/page :browser/document])]
+    (is (= 6 (get-in document [:nodes pane :attrs :scroll-top]))
+        "a coordinate-based wheel event must still find the attr-only-overflow pane as its scrollable ancestor")
+    (is (= pane (-> s :browser.session/history last :node/id)))
+    (is (= true (-> s :browser.session/history last :handled?)))))
+
 (deftest document-pointer-move-resolves-hover-target-from-page-coordinates
   (let [h (host/recording-host)
         loaded (-> (session/new-session {:host h})
