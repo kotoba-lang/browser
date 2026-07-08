@@ -15,6 +15,37 @@
     (is (= ["kotoba://scripts" "kotoba://scripts" "./external.js"]
            (mapv :script/url scripts)))))
 
+;; ---- non-JS <script type="..."> must never execute -- previously every
+;; non-"module" value fell through to :classic unconditionally, so a real,
+;; common type="application/json" data block (JSON-LD, framework-embedded
+;; state) had its literal text handed straight to the JS engine as
+;; executable source. Many JSON payloads are also syntactically valid JS,
+;; so this executed silently with no error at all. Confirmed via direct
+;; REPL reproduction before touching source. ----
+
+(deftest page-script-skips-non-javascript-type-attributes-entirely
+  (let [page (browser/load-html
+              {:url "kotoba://scripts"
+               :html "<main><script type=\"application/json\">{\"a\":1}</script><script type=\"application/ld+json\">{\"b\":2}</script><script type=\"importmap\">{}</script><script>globalThis.ran = true;</script></main>"})
+        scripts (page-script/executable-scripts page)]
+    (is (= [:classic] (mapv :script/type scripts))
+        "only the real classic script (no type attribute) must appear at all")
+    (is (= ["globalThis.ran = true;"] (mapv :script/source scripts)))))
+
+(deftest page-script-recognizes-real-javascript-mime-type-essence-matches
+  (let [page (browser/load-html
+              {:url "kotoba://scripts"
+               :html "<main><script type=\"text/javascript\">globalThis.a = 1;</script><script type=\"application/javascript\">globalThis.b = 1;</script><script type=\"application/ecmascript\">globalThis.c = 1;</script></main>"})
+        scripts (page-script/executable-scripts page)]
+    (is (= [:classic :classic :classic] (mapv :script/type scripts)))))
+
+(deftest page-script-type-attribute-is-trimmed-and-case-insensitive
+  (let [page (browser/load-html
+              {:url "kotoba://scripts"
+               :html "<main><script type=\"  TEXT/JAVASCRIPT  \">globalThis.a = 1;</script><script type=\"MODULE\">import './m.js';</script></main>"})
+        scripts (page-script/executable-scripts page)]
+    (is (= [:classic :module] (mapv :script/type scripts)))))
+
 (deftest page-script-resolves-src-against-page-url
   (is (= "https://example.com/app.js"
          (page-script/resolve-src "https://example.com/docs/index.html" "/app.js")))

@@ -26,10 +26,41 @@
        (sort-by :node/id)
        vec))
 
+(def ^:private javascript-mime-types
+  ;; WHATWG's "JavaScript MIME type essence match"
+  ;; (https://mimesniff.spec.whatwg.org/#javascript-mime-type) -- the
+  ;; complete set of `type` attribute values (trimmed, lower-cased) real
+  ;; browsers treat as an ordinary classic script.
+  #{"application/ecmascript" "application/javascript" "application/x-ecmascript"
+    "application/x-javascript" "text/ecmascript" "text/javascript"
+    "text/javascript1.0" "text/javascript1.1" "text/javascript1.2"
+    "text/javascript1.3" "text/javascript1.4" "text/javascript1.5"
+    "text/jscript" "text/livescript" "text/x-ecmascript" "text/x-javascript"})
+
 (defn script-type
+  "Classifies a <script> per the HTML spec's own \"prepare the script
+   element\" algorithm: absent/empty type, or a real JavaScript MIME-type
+   essence match (trimmed, case-insensitive) -> :classic; the exact value
+   \"module\" -> :module; anything else (a real, common idiom: JSON-LD
+   structured data, framework-embedded state via
+   type=\"application/json\", an \"importmap\" -- import maps themselves
+   are correctly never executed as script either way, matching real
+   browsers, even without this engine implementing import-map
+   resolution) -> nil, meaning the script must NOT execute at all.
+   Previously every non-\"module\" value fell through to :classic
+   unconditionally, so a real, common type=\"application/json\" data
+   block had its literal text handed straight to the JS engine as
+   executable source -- many JSON payloads (bare objects, arrays,
+   numbers, strings) are ALSO syntactically valid JS, so this executed
+   silently with no error at all. Confirmed via direct REPL reproduction
+   before this fix."
   [script-node]
-  (let [type (some-> script-node :attrs :type str str/lower-case)]
-    (if (= "module" type) :module :classic)))
+  (let [type (some-> script-node :attrs :type str str/trim str/lower-case)]
+    (cond
+      (str/blank? type) :classic
+      (= "module" type) :module
+      (contains? javascript-mime-types type) :classic
+      :else nil)))
 
 (defn executable-script
   [document page-url script-node]
@@ -38,7 +69,11 @@
         type (script-type script-node)
         source (when-not src
                  (str/trim (text-content document (:node/id script-node))))]
-    (when (or src (seq source))
+    ;; script-type returns nil for a type attribute that isn't classic/
+    ;; module (a real, common shape -- JSON-LD, embedded framework
+    ;; state, importmap) -- such a node must never become an executable
+    ;; script at all, matching real browsers.
+    (when (and type (or src (seq source)))
       {:script/type type
        :script/source source
        :script/src src
