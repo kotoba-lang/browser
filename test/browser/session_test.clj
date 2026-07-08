@@ -3526,6 +3526,76 @@
     (is (= "hi" (-> pushed :browser.session/page :browser/document dom/text-content))
         "pushState never touches the document -- the same DOM survives, only the URL changes")))
 
+(deftest back-from-a-pushstate-entry-does-not-re-commit-the-shared-document
+  ;; Real bug this guards: back!/forward! previously unconditionally
+  ;; re-commit-page!'d the target entry's own :browser/ops, regardless
+  ;; of whether that entry was a genuinely distinct document (safe/
+  ;; correct to re-commit) or a pushState-created URL-only COPY sharing
+  ;; the SAME :browser/ops as the document already live in the host --
+  ;; kotoba.wasm.host/commit!'s own op-application loop has no dedupe
+  ;; awareness of its own, so re-committing the same ops a second time
+  ;; visibly duplicated the whole rendered subtree, confirmed via direct
+  ;; REPL reproduction (a recording host's own :present-count/node-
+  ;; creation-count both doubled) before this fix.
+  (let [h (host/recording-host)
+        s (-> (session/new-session {:host h})
+              (session/load-html! {:url "kotoba://start" :html "<main>hi</main>"}))
+        pushed (session/commit-script-state!
+                s {:history/entries [{:url "/one" :title "One" :state nil}]
+                   :history/index 0})
+        present-count-before (:present-count (host/recorded h))
+        backed (session/back! pushed)]
+    (is (= "kotoba://start" (get-in backed [:browser.session/page :browser/url])))
+    (is (= "hi" (-> backed :browser.session/page :browser/document dom/text-content))
+        "the same document survives back! -- pushState never touched it")
+    (is (= present-count-before (:present-count (host/recorded h)))
+        "back! from a pushState-derived entry must NOT re-commit -- the document was never
+         replaced by pushState in the first place, so the host's own present count must not
+         increase")))
+
+(deftest forward-into-a-pushstate-entry-does-not-re-commit-the-shared-document
+  (let [h (host/recording-host)
+        s (-> (session/new-session {:host h})
+              (session/load-html! {:url "kotoba://start" :html "<main>hi</main>"}))
+        pushed (session/commit-script-state!
+                s {:history/entries [{:url "/one" :title "One" :state nil}]
+                   :history/index 0})
+        backed (session/back! pushed)
+        present-count-before (:present-count (host/recorded h))
+        forwarded (session/forward! backed)]
+    (is (= "/one" (get-in forwarded [:browser.session/page :browser/url])))
+    (is (= present-count-before (:present-count (host/recorded h)))
+        "forward! into a pushState-derived entry must NOT re-commit either")))
+
+(deftest back-across-a-real-navigation-boundary-still-correctly-re-commits
+  ;; Regression guard: the fix above must NOT make back!/forward! stop
+  ;; re-committing when it genuinely needs to -- a REAL, distinct
+  ;; navigation (a different document, not a same-document pushState
+  ;; copy) crossed by back!/forward! must still restore that different
+  ;; document's own real content.
+  (let [h (host/recording-host)
+        s (-> (session/new-session {:host h :fetch-fn (fn [_] {:status 200 :body "<main>page-c</main>"})})
+              (session/load-html! {:url "kotoba://a" :html "<main>page-a</main>"}))
+        pushed (session/commit-script-state!
+                s {:history/entries [{:url "kotoba://b" :title "B" :state nil}]
+                   :history/index 0})
+        navigated (session/navigate! pushed "kotoba://c")
+        present-count-before (:present-count (host/recorded h))
+        backed-to-b (session/back! navigated)]
+    (is (= "kotoba://b" (get-in backed-to-b [:browser.session/page :browser/url])))
+    (is (= "page-a" (-> backed-to-b :browser.session/page :browser/document dom/text-content))
+        "b shares a's own document (pushState never changed it) -- back! from the REAL
+         page c must correctly restore that document's real content")
+    (is (< present-count-before (:present-count (host/recorded h)))
+        "back! across a real navigation boundary (c, a genuinely distinct document, back to
+         b/a's shared document) MUST still re-commit -- this is the case the fix above must
+         not accidentally suppress")
+    (let [present-count-before-2 (:present-count (host/recorded h))
+          backed-to-a (session/back! backed-to-b)]
+      (is (= "kotoba://a" (get-in backed-to-a [:browser.session/page :browser/url])))
+      (is (= present-count-before-2 (:present-count (host/recorded h)))
+          "back! b->a must NOT re-commit -- b and a share the same document too"))))
+
 (deftest script-pushstate-across-two-script-tags-continues-without-duplicating
   ;; A second <script> tag's own pushState call (its sandboxed
   ;; :history/entries now includes BOTH this tag's and the previous tag's

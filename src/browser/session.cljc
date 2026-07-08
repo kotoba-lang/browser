@@ -351,15 +351,29 @@
                             :script/error :script/fetch-failed)}))))))
 
 (defn- remember-navigation-entry
-  [session page]
-  (let [nav (:browser.session/navigation session)
-        idx (inc (:index nav -1))
-        entries (-> (:entries nav)
-                    (subvec 0 (max 0 idx))
-                    (conj {:url (:browser/url page)
-                           :page page}))]
-    (assoc session :browser.session/navigation
-           (assoc nav :entries entries :index idx))))
+  "`same-document?` (default false, i.e. a genuine, distinct navigation --
+   the far more common real caller, commit-page!'s own remember? branch)
+   tags whether `page` is a REAL, independently-fetched/committed
+   document (safe for back!/forward! to later re-commit its own
+   :browser/ops against the host) or merely a URL-only COPY of whatever
+   document already existed at the moment a script called pushState (see
+   bridge-pushed-history-entries below, the only caller that passes
+   `true`) -- re-committing THAT kind of entry's own :browser/ops would
+   replay real DOM-construction ops (:dom/create-element et al.) a SECOND
+   time against a host that already has those exact nodes, visibly
+   duplicating the rendered page. See back!/forward!'s own
+   navigate-to-history-entry! for the fix this tag exists to enable."
+  ([session page] (remember-navigation-entry session page false))
+  ([session page same-document?]
+   (let [nav (:browser.session/navigation session)
+         idx (inc (:index nav -1))
+         entries (-> (:entries nav)
+                     (subvec 0 (max 0 idx))
+                     (conj {:url (:browser/url page)
+                            :page page
+                            :same-document? same-document?}))]
+     (assoc session :browser.session/navigation
+            (assoc nav :entries entries :index idx)))))
 
 (defn- update-current-navigation-page
   [session page]
@@ -429,7 +443,7 @@
                     (profile/remember-navigation p {:url url
                                                     :title (:browser/title page)})
                     p)))
-        (remember-navigation-entry page)
+        (remember-navigation-entry page true)
         (audit! (audit/navigation-event {:event :navigation/fragment
                                          :url url
                                          :profile-id (profile-id session)}))
@@ -521,7 +535,7 @@
                 (let [page (assoc (:browser.session/page session) :browser/url (:url entry))]
                   (-> session
                       (assoc :browser.session/page page)
-                      (remember-navigation-entry page))))
+                      (remember-navigation-entry page true))))
               (assoc session :browser.session/script-history-bridged-count (count entries))
               (subvec entries already-bridged))
       session)))
@@ -600,24 +614,33 @@
    navigation entry the SAME document did NOT produce -- is deliberately
    NOT bridged here, and this is a real, structural limitation, not an
    oversight: `back!`/`forward!` (the existing, real mechanism for
-   REAL page-to-page navigation) re-`commit-page!` the target entry's
-   OWN `:browser/ops` to genuinely restore that different document --
-   but a `pushState`-created entry's `:page` is just a COPY of whatever
-   document existed at push time, carrying the SAME `:browser/ops` the
-   original page already committed once. Blindly re-committing those
-   same ops on a traversal (naively unifying this with `back!`/
-   `forward!`'s own approach) would re-run real DOM-construction ops
-   (e.g. `:dom/create-element`) a SECOND time against a host that
-   already has those exact nodes -- confirmed via reading `kotoba.wasm.
-   host/commit!`'s own op-application loop that it has no dedupe/no-op
-   awareness of its own, so this is a REAL correctness risk, not a
-   theoretical one. Bridging traversal across that boundary correctly
-   needs a way to tell which navigation-stack entries are real,
-   distinct documents (safe to re-commit) versus which are same-
-   document `pushState`/`replaceState` copies (unsafe to re-commit) --
-   a genuine schema addition (tagging each entry with its own origin),
-   left for a separate, dedicated future cycle rather than folded in
-   here as a side effect."
+   REAL page-to-page navigation) `navigate-to-history-entry!` re-
+   `commit-page!` the target entry's OWN `:browser/ops` to genuinely
+   restore that different document -- but a `pushState`-created entry's
+   `:page` is just a COPY of whatever document existed at push time,
+   carrying the SAME `:browser/ops` the original page already committed
+   once. Blindly re-committing those same ops on a traversal (naively
+   unifying this with `back!`/`forward!`'s own approach) would re-run
+   real DOM-construction ops (e.g. `:dom/create-element`) a SECOND time
+   against a host that already has those exact nodes -- confirmed via
+   reading `kotoba.wasm.host/commit!`'s own op-application loop that it
+   has no dedupe/no-op awareness of its own, so this is a REAL
+   correctness risk, not a theoretical one (in fact this exact class of
+   bug was independently confirmed live in `back!`/`forward!`
+   THEMSELVES via direct REPL reproduction and then fixed -- see
+   `navigate-to-history-entry!`/`remember-navigation-entry`'s own
+   `:same-document?` tag). Bridging traversal across THIS function's own
+   region-boundary would need to walk arbitrary nav-entries outside the
+   narrow, already-bridged region this fn's own `already-bridged` window
+   tracks -- the `:same-document?` marker `remember-navigation-entry`
+   now stamps on every entry already answers 'is this entry safe to
+   bridge without a re-commit', so the one remaining piece for a future
+   cycle to widen THIS function's own scope is walking/searching
+   `:browser.session/navigation`'s entries by that marker directly,
+   rather than deriving safety from `already-bridged`'s own generation-
+   relative counting the way this function still does -- left for a
+   separate, dedicated future cycle rather than folded in here as a
+   side effect."
   [session script-state]
   (let [entries (vec (:history/entries script-state))
         already-bridged (:browser.session/script-history-bridged-count session 0)
@@ -797,14 +820,66 @@
           (commit-page! page)
           (run-page-scripts!)))))))
 
+(defn- navigate-to-history-entry!
+  "back!/forward!'s own shared landing step: a `:same-document?` entry
+   (see remember-navigation-entry's own docstring -- a pushState/
+   commit-fragment-navigation!-created URL-only copy sharing the SAME
+   :browser/ops as whatever document already existed at the moment it
+   was recorded) gets the same session-bookkeeping-only update bridge-
+   traversed-history-index already uses for its own, narrower same-
+   document traversal case (just move the current page's own
+   :browser/url, no document re-commit) -- re-committing that entry's
+   own :browser/ops would replay real DOM-construction ops a SECOND time
+   against a host that already has those exact nodes.
+
+   A real, distinct navigation entry (the default, and the far more
+   common case) still gets the original, correct commit-page! re-commit
+   -- confirmed via direct REPL reproduction of the bug this fixes
+   BEFORE this tag existed: landing back! on a pushState-derived entry
+   unconditionally re-committed its (shared) :browser/ops, and kotoba.
+   wasm.host/commit!'s own op-application loop has no dedupe awareness
+   of its own, so every :dom/create-element/:dom/append-child op ran a
+   second time -- confirmed via a recording host that every node id was
+   created twice and every parent/child pair appended twice, visibly
+   duplicating the whole rendered subtree.
+
+   `same-document?` is passed in EXPLICITLY by the caller rather than
+   read straight off `entry` itself -- `:same-document?` describes each
+   entry's relationship to its OWN immediate stack PREDECESSOR (the
+   entry it was pushState/fragment-navigated FROM), which is the right
+   question for `forward!` (moving to `entry`, whose predecessor IS the
+   page currently live) but the WRONG one for `back!`: moving back FROM
+   the current entry TO its predecessor needs to ask whether the
+   CURRENT entry (not the target) continues the same document as its
+   own predecessor -- confirmed via a second, more precise REPL
+   reproduction after the first (naive, target-entry-only) version of
+   this fix: navigating real A -> pushState to B, then back! from B
+   correctly avoided re-committing B's own document (never changed by
+   pushState in the first place) -- but back! from B to A ALSO
+   incorrectly checked B's own predecessor entry (A, itself a genuinely
+   real, distinct commit) using entry A's flag (false, since A is the
+   original real navigation), triggering an UNNECESSARY second real
+   commit of A's already-live document -- confirmed via the recording
+   host's own present-count incrementing a second time for a plain
+   back! that should have been bookkeeping-only, since A's OWN document
+   was never replaced by B's pushState call and was still live in the
+   host the whole time."
+  [session entry same-document?]
+  (if same-document?
+    (assoc session :browser.session/page
+           (assoc (:browser.session/page session) :browser/url (:url entry)))
+    (commit-page! session (:page entry) {:remember? false})))
+
 (defn back!
   [session]
-  (let [idx (dec (get-in session [:browser.session/navigation :index] -1))
+  (let [current-idx (get-in session [:browser.session/navigation :index] -1)
+        current-entry (get-in session [:browser.session/navigation :entries current-idx])
+        idx (dec current-idx)
         entry (get-in session [:browser.session/navigation :entries idx])]
     (if entry
       (-> session
           (assoc-in [:browser.session/navigation :index] idx)
-          (commit-page! (:page entry) {:remember? false})
+          (navigate-to-history-entry! entry (:same-document? current-entry))
           (audit! (audit/navigation-event {:event :navigation/back
                                            :url (:url entry)
                                            :profile-id (profile-id session)}))
@@ -820,7 +895,7 @@
     (if entry
       (-> session
           (assoc-in [:browser.session/navigation :index] idx)
-          (commit-page! (:page entry) {:remember? false})
+          (navigate-to-history-entry! entry (:same-document? entry))
           (audit! (audit/navigation-event {:event :navigation/forward
                                            :url (:url entry)
                                            :profile-id (profile-id session)}))
