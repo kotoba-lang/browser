@@ -11,7 +11,11 @@
     "demo:browser-demo": "npm run compile:browser-demo && npm run serve:browser-demo",
     "test:cljs": "npm run compile:node-test && node target/node-tests.js",
     "test:clj": "clojure -M:test",
-    "check": "npm run test:clj && npm run test:cljs"
+    "compile:smoke": "shadow-cljs compile visual-smoke",
+    "compile:webgpu-smoke": "shadow-cljs compile webgpu-smoke",
+    "smoke:visual": "npm run compile:smoke && clojure -M:smoke visual",
+    "smoke:webgpu": "npm run compile:webgpu-smoke && clojure -M:smoke webgpu",
+    "check": "npm run test:clj && npm run test:cljs && npm run smoke:visual && npm run smoke:webgpu"
   },
   "dependencies": {
     "quickjs-emscripten-core": "^0.32.0",
