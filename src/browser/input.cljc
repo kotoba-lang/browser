@@ -183,6 +183,22 @@
       {:input (assoc input :pointer/position point :pointer/capture nil)
        :actions []}
 
+      ;; A real pointercancel (an interrupted gesture -- capture stolen by
+      ;; the OS/another surface, a multi-touch conflict, etc.) ends the
+      ;; current pointer interaction exactly like pointerup does, per the
+      ;; Pointer Events spec. This case was previously entirely absent, so
+      ;; it silently fell through to the default no-op clause below and
+      ;; left :pointer/capture untouched -- a canceled titlebar-drag or
+      ;; resize-handle-drag stayed "captured," so the very next unrelated
+      ;; :pointer/move (from a totally different gesture) was misinterpreted
+      ;; as a continuation of the old drag/resize. Confirmed via direct REPL
+      ;; reproduction before this fix: down -> cancel -> an unrelated move
+      ;; to a far-away point still relocated the window as if the drag were
+      ;; still live.
+      :pointer/cancel
+      {:input (assoc input :pointer/position point :pointer/capture nil)
+       :actions []}
+
       :pointer/click
       (if-let [window (window-at surface point)]
         {:input (assoc input :pointer/position point)

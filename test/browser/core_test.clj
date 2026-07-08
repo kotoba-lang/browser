@@ -359,7 +359,7 @@
   (let [page (browser/load-html
               {:url "kotoba://scroll"
                :viewport [320 240]
-               :html "<main><section id=\"pane\" overflow=\"auto\" scroll-top=\"12\" scroll-left=\"3\" style=\"height: 40px; width: 160px; padding: 4px\"><p>Scrolled</p></section></main>"})
+               :html "<main><section id=\"pane\" scroll-top=\"12\" scroll-left=\"3\" style=\"height: 40px; width: 160px; padding: 4px; overflow: auto\"><p>Scrolled</p></section></main>"})
         document (:browser/document page)
         pane (bridge/query-selector document "#pane")
         ops (:browser/draw-ops page)

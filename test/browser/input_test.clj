@@ -77,6 +77,45 @@
     (is (= [:window/focus :window/resize]
            (mapv :action (:actions result))))))
 
+;; ---- pointer/cancel must release :pointer/capture exactly like pointer/up
+;; -- previously entirely absent from the reducer's case, so it silently
+;; fell through to the default no-op clause and left capture untouched.
+;; Confirmed via direct REPL reproduction before touching source: down ->
+;; cancel -> an unrelated move to a far-away point still relocated the
+;; window as if the drag were still live. ----
+
+(deftest pointer-cancel-releases-drag-capture-so-a-later-unrelated-move-is-ignored
+  (let [s (-> (surface/empty-surface)
+              (surface/open-window {:app-id "notes"
+                                    :title "Notes"
+                                    :rect [40 50 420 300]}))
+        window-id (:surface/focus s)
+        result (input/reduce-events
+                s
+                [{:event/type :pointer/down :x 60 :y 60}
+                 {:event/type :pointer/cancel :x 60 :y 60}
+                 {:event/type :pointer/move :x 400 :y 400}])]
+    (is (= [40 50 420 300]
+           (:window/rect (window (:surface result) window-id)))
+        "a canceled drag must not relocate the window on a later, unrelated move")
+    (is (nil? (get-in result [:input :pointer/capture]))
+        "pointer/cancel must clear :pointer/capture, mirroring pointer/up")))
+
+(deftest pointer-cancel-releases-resize-capture-too
+  (let [s (-> (surface/empty-surface)
+              (surface/open-window {:app-id "term"
+                                    :title "Terminal"
+                                    :rect [10 10 200 120]}))
+        window-id (:surface/focus s)
+        result (input/reduce-events
+                s
+                [{:event/type :pointer/down :x 205 :y 125}
+                 {:event/type :pointer/cancel :x 205 :y 125}
+                 {:event/type :pointer/move :x 500 :y 500}])]
+    (is (= [10 10 200 120]
+           (:window/rect (window (:surface result) window-id)))
+        "a canceled resize must not resize the window on a later, unrelated move")))
+
 (deftest keyboard-and-text-input-target-focused-window
   (let [s (-> (surface/empty-surface)
               (surface/open-window {:app-id "editor" :title "Editor"}))

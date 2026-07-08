@@ -223,7 +223,7 @@
   (let [h (host/recording-host)
         loaded (-> (session/new-session {:host h})
                    (session/load-html! {:url "kotoba://scroll"
-                                        :html "<main><section id=\"outer\" overflow=\"auto\" style=\"height: 80px; width: 220px\"><p>outer</p><section id=\"inner\" overflow=\"auto\" scroll-top=\"4\" style=\"height: 30px; width: 160px\"><p>inner</p></section></section></main>"}))
+                                        :html "<main><section id=\"outer\" style=\"height: 80px; width: 220px; overflow: auto\"><p>outer</p><section id=\"inner\" scroll-top=\"4\" style=\"height: 30px; width: 160px; overflow: auto\"><p>inner</p></section></section></main>"}))
         page (:browser.session/page loaded)
         document (:browser/document page)
         outer (bridge/query-selector document "#outer")
