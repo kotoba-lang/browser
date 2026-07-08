@@ -258,6 +258,59 @@
     (is (:ok action-result))
     (is (= "https://app.example/dashboard" (:url action-result)))))
 
+;; ---- :hidden/:visible must consult ACTUAL visibility, not just DOM
+;; existence ----
+;;
+;; Real bug this guards: :hidden and :absent were byte-for-byte identical
+;; branches, and :visible and :present were byte-for-byte identical --
+;; both only ever checked whether the selector matched a node at all,
+;; never real CSS/attribute visibility (hidden-node?, already defined and
+;; used elsewhere in this same file). A real, common UI pattern -- a
+;; spinner/modal hidden via style="display:none" without being removed
+;; from the DOM -- left :hidden permanently false and :visible a false
+;; positive. Confirmed via direct REPL reproduction before touching
+;; source.
+
+(deftest kotoba-browser-use-wait-for-hidden-consults-actual-visibility-not-just-dom-presence
+  (let [browser (kotoba-browser/kotoba-browser
+                 {:start-url "https://app.example/dashboard"
+                  :html (str "<main><h1>Dashboard</h1>"
+                             "<div id=\"spinner\" style=\"display:none\">Loading...</div>"
+                             "<button id=\"save\">Save</button></main>")})]
+    (is (:ok (kotoba-browser/wait-for! browser {:selector "#spinner" :kind "hidden"}))
+        "a CSS-hidden but still-present element must be treated as hidden")
+    (is (:ok (kotoba-browser/wait-for! browser {:selector "#missing" :kind "hidden"}))
+        "a fully-absent selector must ALSO count as hidden, matching real Playwright/browser-use semantics")
+    (is (false? (:ok (kotoba-browser/wait-for! browser {:selector "#save" :kind "hidden"})))
+        "a genuinely visible element must not be reported hidden")))
+
+(deftest kotoba-browser-use-wait-for-visible-consults-actual-visibility-not-just-dom-presence
+  (let [browser (kotoba-browser/kotoba-browser
+                 {:start-url "https://app.example/dashboard"
+                  :html (str "<main><h1>Dashboard</h1>"
+                             "<div id=\"spinner\" style=\"display:none\">Loading...</div>"
+                             "<button id=\"save\">Save</button></main>")})]
+    (is (false? (:ok (kotoba-browser/wait-for! browser {:selector "#spinner" :kind "visible"})))
+        "a CSS-hidden element must NOT be reported visible, even though it's present in the DOM")
+    (is (:ok (kotoba-browser/wait-for! browser {:selector "#save" :kind "visible"}))
+        "a genuinely visible element must still be reported visible")
+    (is (:ok (kotoba-browser/wait-for! browser {:selector "#save" :text "dash" :kind "visible"}))
+        ":visible must still compose with other conditions (text/url), not just check the selector alone")))
+
+(deftest kotoba-browser-use-wait-for-hidden-and-absent-remain-distinct
+  ;; Regression guard: :hidden's fix must not collapse it back into an
+  ;; alias of :present, and :absent (strictly "not in the DOM at all")
+  ;; must stay unaffected by this fix -- a CSS-hidden-but-present element
+  ;; is :hidden but NOT :absent.
+  (let [browser (kotoba-browser/kotoba-browser
+                 {:start-url "https://app.example/dashboard"
+                  :html "<main><div id=\"spinner\" style=\"display:none\">Loading...</div></main>"})]
+    (is (:ok (kotoba-browser/wait-for! browser {:selector "#spinner" :kind "hidden"})))
+    (is (false? (:ok (kotoba-browser/wait-for! browser {:selector "#spinner" :kind "absent"})))
+        "present-but-CSS-hidden is NOT the same as absent from the DOM")
+    (is (:ok (kotoba-browser/wait-for! browser {:selector "#spinner" :kind "present"}))
+        "present-but-CSS-hidden IS still present in the DOM")))
+
 (deftest kotoba-browser-use-diagnose-reports-targeting-state-without-throwing
   (let [browser (kotoba-browser/kotoba-browser
                  {:start-url "https://app.example/dashboard"

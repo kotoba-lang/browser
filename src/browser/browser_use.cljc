@@ -620,6 +620,20 @@
         kind (keyword (str/replace (name (or kind :present)) #"_" "-"))
         selector-node (when selector
                         (dom-bridge/query-selector document selector))
+        ;; :hidden/:visible previously never consulted hidden-node? at
+        ;; all -- both were byte-for-byte dead aliases of :absent/
+        ;; :present, checking pure DOM-existence only. A real, common UI
+        ;; pattern -- closing a modal, hiding a spinner via
+        ;; style="display:none" WITHOUT removing it from the DOM -- left
+        ;; :hidden permanently false (the node is still selector-
+        ;; matched) and :visible permanently true (a false positive for
+        ;; an element that's present but actually hidden). Confirmed via
+        ;; direct REPL reproduction before touching source. hidden-node?
+        ;; already exists in this same file and is already used for the
+        ;; identical purpose in semantic-node above -- wait-for! simply
+        ;; never called it.
+        selector-hidden? (when selector-node
+                            (hidden-node? (get-in document [:nodes selector-node])))
         visible-text (semantic-text (:semantic-tree state))
         url-value (:url state)
         matches (cond-> {}
@@ -634,10 +648,10 @@
                                         (str/lower-case (str url)))
                                    :value url-value}))
         ok? (case kind
-              :hidden (and selector (not (boolean selector-node)))
+              :hidden (and selector (or (not (boolean selector-node)) selector-hidden?))
               :absent (and selector (not (boolean selector-node)))
               :present (and (seq matches) (every? :ok (vals matches)))
-              :visible (and (seq matches) (every? :ok (vals matches)))
+              :visible (and (seq matches) (every? :ok (vals matches)) (not selector-hidden?))
               (and (seq matches) (every? :ok (vals matches))))]
     {:ok ok?
      :kind kind
