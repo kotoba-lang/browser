@@ -3323,6 +3323,46 @@
            (filterv #(= :dom/dispatch-event (first %))
                     (get-in up-result [:document :ops]))))))
 
+;; ---- a real, capability-tagged host keyboard event (not a pre-shaped
+;; :event/type one) must forward alt/repeat through the FULL pipeline ----
+;;
+;; Real bug this guards: browser.input/normalize-event's "keyboard/key"
+;; branch -- the one a real host/aiueos capability event actually goes
+;; through -- silently dropped :alt?/:repeat?, even though document-
+;; input's own key-event builder already fully supports both. The prior
+;; test above bypasses this entirely by constructing an already-shaped
+;; {:event/type :key/down ...} event, which skips normalize-event's real
+;; transformation work. Confirmed via direct REPL reproduction before
+;; touching source.
+
+(deftest document-capability-tagged-keydown-forwards-alt-and-repeat-through-session
+  (let [h (host/recording-host)
+        loaded (-> (session/new-session {:host h})
+                   (session/load-html! {:url "kotoba://keyboard"
+                                        :html "<main><input id=\"field\" value=\"abc\"></main>"}))
+        document (get-in loaded [:browser.session/page :browser/document])
+        field (bridge/query-selector document "#field")
+        document (dom/add-event-listener document field "keydown" 91)
+        loaded (session/commit-document! loaded document)
+        page (:browser.session/page loaded)
+        field-op (some #(when (and (= :node (:draw/op %)) (= field (:id %))) %)
+                       (:browser/draw-ops page))
+        focused (session/apply-document-input-event! loaded {:event/type :pointer/click
+                                                            :x (+ (:x field-op) 2)
+                                                            :y (+ (:y field-op) 2)})
+        pressed (session/apply-document-input-event!
+                 focused {:capability "keyboard/key" :key "a" :alt? true :repeat? true})
+        result (:browser.session/document-input-result pressed)]
+    (is (= [[:dom/dispatch-event
+             91
+             {:event/type "keydown"
+              :target/id field
+              :key "a"
+              :repeat true
+              :altKey true}]]
+           (filterv #(= :dom/dispatch-event (first %))
+                    (get-in result [:document :ops]))))))
+
 (deftest document-ime-events-commit-composition-through-session
   (let [h (host/recording-host)
         s (-> (session/new-session {:host h})

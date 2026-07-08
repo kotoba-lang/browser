@@ -90,10 +90,20 @@
                                  :pressure :width :height]))
 
       (= cap "keyboard/key")
+      ;; document-input's own key-event builder already fully supports
+      ;; :alt?/:repeat? (checks (contains? event :alt?)/:repeat? to set
+      ;; a dispatched KeyboardEvent's real altKey/repeat fields) -- this
+      ;; branch silently dropped both, so a real Alt-modified keypress or
+      ;; a real OS-level key-repeat (a held-down key) reached a page's
+      ;; own addEventListener('keydown', ...) listener with altKey/repeat
+      ;; always false, regardless of what the host actually reported.
+      ;; Confirmed via direct REPL reproduction before touching source.
       (cond-> {:event/type :key/down :key (:key event)}
         (:shift? event) (assoc :shift? true)
         (:ctrl? event) (assoc :ctrl? true)
-        (:meta? event) (assoc :meta? true))
+        (:meta? event) (assoc :meta? true)
+        (:alt? event) (assoc :alt? true)
+        (:repeat? event) (assoc :repeat? true))
 
       (= cap "keyboard/type")
       {:event/type :text/input :text (:text event)}

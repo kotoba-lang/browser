@@ -245,3 +245,30 @@
                                  :key "ArrowRight"
                                  :shift? true
                                  :ctrl? true}))))
+
+;; ---- normalize-event's "keyboard/key" branch must forward :alt?/:repeat?
+;; too, not just :shift?/:ctrl?/:meta? ----
+;;
+;; Real bug this guards: document-input's own key-event builder already
+;; fully supports :alt?/:repeat? (checks (contains? event :alt?)/:repeat?
+;; to set a dispatched KeyboardEvent's real altKey/repeat fields), but
+;; this branch silently dropped both -- a real Alt-modified keypress or a
+;; real OS-level key-repeat (a held-down key) reached a page's own
+;; addEventListener('keydown', ...) listener with altKey/repeat always
+;; false, regardless of what the host actually reported. Confirmed via
+;; direct REPL reproduction before touching source.
+
+(deftest normalize-event-keyboard-key-forwards-alt-and-repeat
+  (is (= {:event/type :key/down :key "a" :alt? true}
+         (input/normalize-event {:capability "keyboard/key" :key "a" :alt? true})))
+  (is (= {:event/type :key/down :key "a" :repeat? true}
+         (input/normalize-event {:capability "keyboard/key" :key "a" :repeat? true})))
+  (is (= {:event/type :key/down :key "a" :shift? true :ctrl? true :meta? true
+          :alt? true :repeat? true}
+         (input/normalize-event {:capability "keyboard/key" :key "a"
+                                 :shift? true :ctrl? true :meta? true
+                                 :alt? true :repeat? true}))
+      "all five modifiers/repeat must compose together")
+  (is (= {:event/type :key/down :key "a"}
+         (input/normalize-event {:capability "keyboard/key" :key "a" :alt? false :repeat? false}))
+      "regression guard: an explicit false must NOT be forwarded, mirroring shift?/ctrl?/meta?'s existing convention"))
