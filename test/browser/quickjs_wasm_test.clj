@@ -158,6 +158,28 @@
     (is (str/includes? source "select: function()"))
     (is (str/includes? source "this.setSelectionRange(0, this.value.length);"))))
 
+(deftest quickjs-wasm-webapi-shim-selection-range-reaches-the-real-document
+  ;; setSelectionRange/selectionStart/selectionEnd previously wrote
+  ;; straight to a bare node['selection-start']/node['selection-end']
+  ;; property on the LOCAL snapshot object -- never through setAttribute/
+  ;; __kotobaRequests, so the real host document never updated at all,
+  ;; even though every sibling internal-bookkeeping property (scrollTop/
+  ;; scrollLeft/defaultValue/...) already correctly routes through
+  ;; setAttribute. The bug was invisible to the calling script itself,
+  ;; since the getter read the very field the setter just wrote. Confirmed
+  ;; via direct Node execution of the actual (pre-fix) function body,
+  ;; copy-pasted verbatim, before touching source: __kotobaRequests stayed
+  ;; completely empty after a real setSelectionRange(2, 7) call.
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "this.setAttribute('selection-start', Math.min(s, e));"))
+    (is (str/includes? source "this.setAttribute('selection-end', Math.max(s, e));"))
+    (is (str/includes? source "__kotobaParseNumber(__kotobaAttr(__kotobaNodeById(__kotobaRefNodeId(ref)), 'selection-start'))"))
+    (is (str/includes? source "__kotobaParseNumber(__kotobaAttr(__kotobaNodeById(__kotobaRefNodeId(ref)), 'selection-end'))"))
+    (is (not (str/includes? source "node['selection-start'] ="))
+        "the old bug's direct, non-attribute snapshot write must be gone")
+    (is (not (str/includes? source "node['selection-end'] ="))
+        "the old bug's direct, non-attribute snapshot write must be gone")))
+
 (deftest quickjs-wasm-webapi-shim-exposes-step-up-down-methods
   ;; HTMLInputElement.stepUp()/.stepDown() -- previously entirely missing (a
   ;; repo-wide grep for `stepUp`/`stepDown` returned zero matches anywhere),

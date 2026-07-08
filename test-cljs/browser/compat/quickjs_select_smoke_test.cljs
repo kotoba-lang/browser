@@ -79,6 +79,38 @@
                                  (or (.-message err) err)))
                   (done))))))
 
+(deftest quickjs-real-set-selection-range-reaches-the-real-document-attrs-test
+  ;; The other tests in this file only check the JS-FACING .selectionStart/
+  ;; .selectionEnd getters after select()/setSelectionRange() -- which the
+  ;; bug this test guards did NOT break, since the getter read the very
+  ;; (private, non-attribute) field the setter wrote, self-consistently.
+  ;; The real bug was that the REAL document's own :selection-start/
+  ;; :selection-end attrs never updated at all -- getAttribute('selection-
+  ;; start') genuinely reads through __kotobaAttr (the real attrs map,
+  ;; already proven correct for every OTHER attribute in this shim), so
+  ;; this is a real, executable proof that setSelectionRange now reaches
+  ;; the real document, not just the JS-facing property round-trip.
+  (async done
+    (-> (run-page-and-read-title!
+         {:html (str "<input id=\"note\" value=\"hello world\">"
+                     "<script>"
+                     "var note = document.getElementById('note');"
+                     "note.setSelectionRange(2, 7);"
+                     "document.title = note.getAttribute('selection-start') + ':' + "
+                     "note.getAttribute('selection-end');"
+                     "</script>")})
+        (.then (fn [title]
+                 (println "quickjs real setSelectionRange -> real document attrs:" (pr-str title))
+                 (is (= "2:7" title)
+                     (str "expected setSelectionRange(2, 7) to actually write the real "
+                          "document's own selection-start/selection-end attrs, got "
+                          (pr-str title) " (nil:nil would mean the bug is back)"))
+                 (done)))
+        (.catch (fn [err]
+                  (is false (str "QuickJS WASM engine initialization / page load failed: "
+                                 (or (.-message err) err)))
+                  (done))))))
+
 (deftest quickjs-real-select-on-an-empty-input-selects-nothing-not-a-crash-test
   (async done
     (-> (run-page-and-read-title!

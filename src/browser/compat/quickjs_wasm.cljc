@@ -1950,16 +1950,31 @@
             var selected = index >= 0 && index < options.length ? __kotobaNodeById(options[index]) : null;
             this.setAttribute('value', selected ? __kotobaOptionValue(selected) : '');
           },
+          // selectionStart/selectionEnd/setSelectionRange previously wrote
+          // straight to a bare node['selection-start']/node['selection-end']
+          // property on the LOCAL snapshot object -- never through
+          // setAttribute/__kotobaRequests, so the real host document's own
+          // :selection-start/:selection-end attrs (what cssom.layout's
+          // sel-ops paints the caret/selection highlight from, and what
+          // org-w3-aria projects into the real accessibility tree) never
+          // updated at all. The bug was invisible to the calling script
+          // itself, since the getter read the very field the setter just
+          // wrote, masking the divergence. Confirmed via direct Node
+          // execution of the actual (pre-fix) function body before
+          // touching source. Now routed through the exact same
+          // setAttribute/__kotobaAttr path every sibling internal-
+          // bookkeeping property (scrollTop/scrollLeft/defaultValue/...)
+          // already correctly uses.
           get selectionStart() {
-            var node = __kotobaNodeById(__kotobaRefNodeId(ref));
-            return node && node['selection-start'] != null ? node['selection-start'] : this.value.length;
+            var value = __kotobaParseNumber(__kotobaAttr(__kotobaNodeById(__kotobaRefNodeId(ref)), 'selection-start'));
+            return Number.isNaN(value) ? this.value.length : value;
           },
           set selectionStart(value) {
             this.setSelectionRange(Number(value), this.selectionEnd);
           },
           get selectionEnd() {
-            var node = __kotobaNodeById(__kotobaRefNodeId(ref));
-            return node && node['selection-end'] != null ? node['selection-end'] : this.value.length;
+            var value = __kotobaParseNumber(__kotobaAttr(__kotobaNodeById(__kotobaRefNodeId(ref)), 'selection-end'));
+            return Number.isNaN(value) ? this.value.length : value;
           },
           set selectionEnd(value) {
             this.setSelectionRange(this.selectionStart, Number(value));
@@ -2543,14 +2558,11 @@
             __kotobaRemoveAttribute(ref, name);
           },
           setSelectionRange: function(start, end) {
-            var node = __kotobaNodeById(__kotobaRefNodeId(ref));
             var valueLength = this.value.length;
             var s = Math.max(0, Math.min(valueLength, Number(start) || 0));
             var e = Math.max(0, Math.min(valueLength, Number(end) || 0));
-            if (node) {
-              node['selection-start'] = Math.min(s, e);
-              node['selection-end'] = Math.max(s, e);
-            }
+            this.setAttribute('selection-start', Math.min(s, e));
+            this.setAttribute('selection-end', Math.max(s, e));
           },
           select: function() {
             // Real HTMLInputElement/HTMLTextAreaElement.select() -- selects
