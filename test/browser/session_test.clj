@@ -685,6 +685,56 @@
             :node/id (:node/id (get-in result [:browser.session/document-input-result]))}
            link-event))))
 
+;; ---- request-referrer: "same-origin", "origin-when-cross-origin",
+;; "strict-origin", and "no-referrer-when-downgrade" each have their own
+;; distinct algorithm per the Referrer Policy spec -- previously all four
+;; silently fell through to the strict-origin-when-cross-origin default
+;; branch regardless of which policy was actually requested (a real
+;; over-leak/under-leak divergence from spec, not just a missing feature).
+;; Direct unit calls against the private fn, since these are pure
+;; per-policy algorithm checks independent of the full session/fetch
+;; pipeline the other referrer tests below exercise end to end. ----
+
+(deftest request-referrer-strict-origin-never-leaks-path-even-same-origin
+  (let [rr #'session/request-referrer]
+    (is (= "https://example.com"
+           (rr "https://example.com/secret-path?token=x" "https://example.com/other-page" "strict-origin")))
+    (is (= "https://example.com"
+           (rr "https://example.com/secret-path?token=x" "https://other.com/x" "strict-origin")))
+    (is (nil? (rr "https://example.com/secret-path?token=x" "http://other.com/x" "strict-origin")))))
+
+(deftest request-referrer-same-origin-never-leaks-anything-cross-origin
+  (let [rr #'session/request-referrer]
+    (is (= "https://example.com/secret-path?token=x"
+           (rr "https://example.com/secret-path?token=x" "https://example.com/other" "same-origin")))
+    (is (nil? (rr "https://example.com/secret-path?token=x" "https://other.com/x" "same-origin")))))
+
+(deftest request-referrer-no-referrer-when-downgrade-sends-full-url-unless-downgrading
+  (let [rr #'session/request-referrer]
+    (is (= "https://example.com/secret-path?token=x"
+           (rr "https://example.com/secret-path?token=x" "https://other.com/x" "no-referrer-when-downgrade")))
+    (is (nil? (rr "https://example.com/secret-path?token=x" "http://other.com/x" "no-referrer-when-downgrade")))))
+
+(deftest request-referrer-origin-when-cross-origin-splits-on-origin
+  (let [rr #'session/request-referrer]
+    (is (= "https://example.com/secret-path?token=x"
+           (rr "https://example.com/secret-path?token=x" "https://example.com/other" "origin-when-cross-origin")))
+    (is (= "https://example.com"
+           (rr "https://example.com/secret-path?token=x" "https://other.com/x" "origin-when-cross-origin")))))
+
+(deftest request-referrer-default-policy-unchanged-by-the-new-branches
+  ;; Regression guard: no explicit policy, plus the always-unconditional
+  ;; policies, must still resolve exactly as before this fix.
+  (let [rr #'session/request-referrer]
+    (is (= "https://example.com/secret-path?token=x"
+           (rr "https://example.com/secret-path?token=x" "https://example.com/other" nil)))
+    (is (= "https://example.com"
+           (rr "https://example.com/secret-path?token=x" "https://other.com/x" nil)))
+    (is (nil? (rr "https://example.com/secret-path?token=x" "http://other.com/x" nil)))
+    (is (nil? (rr "https://example.com/secret-path?token=x" "https://other.com/x" "no-referrer")))
+    (is (= "https://example.com" (rr "https://example.com/secret-path?token=x" "https://other.com/x" "origin")))
+    (is (= "https://example.com/secret-path?token=x" (rr "https://example.com/secret-path?token=x" "https://other.com/x" "unsafe-url")))))
+
 (deftest document-link-cross-origin-no-policy-sends-origin-only-referer
   ;; Proves the request-referrer / link-request-referrer fix: with no explicit
   ;; referrerpolicy, a cross-origin destination gets the real

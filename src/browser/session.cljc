@@ -987,7 +987,17 @@
 
    \"no-referrer\" and \"origin\" are unconditional per spec (they do not
    depend on cross-origin-ness or downgrade). \"unsafe-url\" is also
-   unconditional (always the full page-url). Anything else -- including no
+   unconditional (always the full page-url). \"same-origin\",
+   \"origin-when-cross-origin\", \"strict-origin\", and
+   \"no-referrer-when-downgrade\" each have their own distinct algorithm
+   per https://w3c.github.io/webappsec-referrer-policy/#determine-requests-referrer
+   -- previously all four fell through to the same default branch below,
+   silently applying strict-origin-when-cross-origin semantics regardless of
+   which policy was actually requested (a real spec violation: e.g.
+   \"strict-origin\" must never send more than the origin even same-origin,
+   \"same-origin\" must never send anything at all cross-origin, and
+   \"no-referrer-when-downgrade\" must send the FULL url on any non-downgrading
+   cross-origin request, not just the origin). Anything else -- including no
    explicit policy at all, which is the overwhelmingly common case -- falls
    back to the real modern default, strict-origin-when-cross-origin: full
    page-url for a same-origin destination, origin-only for a cross-origin
@@ -1004,6 +1014,19 @@
     "no-referrer" nil
     "origin" (origin/origin page-url)
     "unsafe-url" page-url
+    "same-origin" (when (and page-url destination-url
+                             (origin/same-origin? page-url destination-url))
+                    page-url)
+    "origin-when-cross-origin" (when (and page-url destination-url)
+                                  (if (origin/same-origin? page-url destination-url)
+                                    page-url
+                                    (origin/origin page-url)))
+    "strict-origin" (when (and page-url destination-url
+                               (not (referrer-downgrade? page-url destination-url)))
+                       (origin/origin page-url))
+    "no-referrer-when-downgrade" (when (and page-url destination-url
+                                            (not (referrer-downgrade? page-url destination-url)))
+                                    page-url)
     (when (and page-url destination-url
                (not (referrer-downgrade? page-url destination-url)))
       (if (origin/same-origin? page-url destination-url)
