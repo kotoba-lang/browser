@@ -587,6 +587,71 @@
     (is (not (contains? (get-in mutated [:document :nodes note :attrs :style-inline-important]) :color))
         "a plain style.<prop> assignment always carries no priority, exactly like setProperty(prop, value) with no third argument")))
 
+(deftest mutation-bridge-set-individual-style-property-coerces-a-numeric-value-not-left-raw
+  ;; Regression test for a real, separate bug from the one above: set-
+  ;; style-property previously merged whatever raw JS string it received
+  ;; straight into :style-inline with ZERO numeric coercion, unlike set-
+  ;; style-attribute's own cssText-replace path (which already runs every
+  ;; value through cssom.core/parse-declarations-with-importance).
+  ;; Confirmed via direct REPL reproduction before this fix: a script
+  ;; doing el.style.lineHeight = "24px" (an ABSOLUTE line-height) left the
+  ;; raw string "24px" in :style-inline, which cssom.layout's own resolve-
+  ;; line-height then mis-parsed as a 24x MULTIPLIER instead of an
+  ;; absolute px value -- its own (string? raw) branch assumes a raw
+  ;; string can only mean a unitless multiplier, an assumption that held
+  ;; for every OTHER producer of this value except this one uncoerced path.
+  (let [page (browser/load-html {:url "kotoba://dom"
+                                 :css "body { margin: 0 }"
+                                 :html "<main><p id=\"note\">Hello</p></main>"})
+        note (bridge/query-selector (:browser/document page) "#note")
+        mutated (bridge/apply-mutation (:browser/document page)
+                                       {:dom/op :set-attribute
+                                        :node/id note
+                                        :attr "style/line-height"
+                                        :value "24px"})]
+    (is (= {:line-height 24} (get-in mutated [:document :nodes note :attrs :style-inline]))
+        "the string \"24px\" must resolve to the real number 24, exactly like the cssText/inline-style-attribute path already coerces it, not survive as a raw string that resolve-line-height would later mis-parse as a 24x multiplier")))
+
+(deftest mutation-bridge-set-individual-style-property-expands-a-shorthand-not-drop-it
+  ;; A more severe variant of the same bug: a script setting a SHORTHAND
+  ;; property individually (e.g. el.style.boxShadow = "...") previously
+  ;; wrote a single, unrecognized :box-shadow key that cssom.layout/
+  ;; node-style never reads at all -- the shorthand was silently DROPPED
+  ;; entirely, not just mis-typed, since only parse-declarations-with-
+  ;; importance's own expand-box-shadow-shorthand ever populates the
+  ;; actual longhand keys (:box-shadow-x/:box-shadow-y/...) layout reads,
+  ;; and that only ever ran via set-style-attribute before this fix.
+  (let [page (browser/load-html {:url "kotoba://dom"
+                                 :css "body { margin: 0 }"
+                                 :html "<main><p id=\"note\">Hello</p></main>"})
+        note (bridge/query-selector (:browser/document page) "#note")
+        mutated (bridge/apply-mutation (:browser/document page)
+                                       {:dom/op :set-attribute
+                                        :node/id note
+                                        :attr "style/box-shadow"
+                                        :value "2px 3px 5px red"})]
+    (is (= {:box-shadow-x 2 :box-shadow-y 3 :box-shadow-blur 5 :box-shadow-color "red"}
+           (get-in mutated [:document :nodes note :attrs :style-inline]))
+        "the shorthand must expand into the real longhand keys layout actually reads, not survive as a single unrecognized :box-shadow key")))
+
+(deftest mutation-bridge-set-individual-style-property-to-an-empty-string-still-unsets-it
+  ;; The "unset a property" idiom (el.style.color = "") must keep working
+  ;; exactly as before this fix -- parse-declarations-with-importance's
+  ;; own established behavior for a blank value is to return NOTHING at
+  ;; all for that declaration, so this fix falls back to the original
+  ;; raw-assoc behavior specifically for this case rather than silently
+  ;; leaving :style-inline completely unchanged.
+  (let [page (browser/load-html {:url "kotoba://dom"
+                                 :css "body { margin: 0 }"
+                                 :html "<main><p id=\"note\" style=\"color: red\">Hello</p></main>"})
+        note (bridge/query-selector (:browser/document page) "#note")
+        mutated (bridge/apply-mutation (:browser/document page)
+                                       {:dom/op :set-attribute
+                                        :node/id note
+                                        :attr "style/color"
+                                        :value ""})]
+    (is (= {:color ""} (get-in mutated [:document :nodes note :attrs :style-inline])))))
+
 (deftest mutation-bridge-focus-and-blur-updates-document-focus
   (let [page (browser/load-html {:url "kotoba://dom"
                                  :html "<main><input id=\"field\"></main>"})

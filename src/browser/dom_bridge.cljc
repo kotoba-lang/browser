@@ -205,12 +205,45 @@
    `:style/<prop>` attr directly -- `cssom.core/apply-cascade`'s
    `style-element` clears and rebuilds every `:style/*` attr from
    `:style-inline` + stylesheet rules on every page commit, silently
-   reverting the mutation on the very next commit."
+   reverting the mutation on the very next commit.
+
+   Runs `value` through the SAME `css/parse-declarations-with-importance`
+   pipeline `set-style-attribute` above already uses, by synthesizing a
+   one-property `\"<prop>: <value>\"` declaration string -- previously this
+   merged whatever raw JS string it received straight into :style-inline
+   with ZERO coercion, unlike set-style-attribute's own cssText-replace
+   path. Confirmed via direct REPL reproduction before this fix: a script
+   doing `el.style.lineHeight = \"24px\"` (setting an ABSOLUTE line-height)
+   left the raw string \"24px\" in :style-inline, which cssom.layout's own
+   resolve-line-height then mis-parsed as a 24x MULTIPLIER instead (its
+   own `(string? raw)` branch assumes a raw string can only ever mean a
+   unitless multiplier, an assumption that already held for every OTHER
+   producer of this value -- the cssText/inline-style-attribute path
+   always pre-coerces a bare px value to a real number first -- except
+   this one). This also closes a related, more severe gap for the same
+   reason: a script setting a SHORTHAND property individually (e.g.
+   `el.style.boxShadow = \"2px 3px 5px red\"`) previously wrote a single,
+   unrecognized `:box-shadow` key that cssom.layout/node-style never
+   reads at all -- the shorthand was silently DROPPED entirely, not just
+   mis-typed, since only parse-declarations-with-importance's own
+   expand-box-shadow-shorthand (etc.) ever populates the actual longhand
+   keys (:box-shadow-x/:box-shadow-y/...) layout reads, and that only
+   ever ran via set-style-attribute before this fix.
+
+   Falls back to the exact pre-existing raw-assoc behavior when the
+   synthesized declaration parses to nothing at all (parse-declarations-
+   with-importance's own established behavior for a blank/empty value,
+   e.g. `el.style.color = \"\"`, a common real-world 'unset this property'
+   idiom) -- preserving that edge case byte-for-byte rather than
+   incidentally changing it as a side effect of this fix."
   [document node-id attr value]
   (let [prop (keyword (name (keyword attr)))
         node (get-in document [:nodes node-id])
-        style-inline (assoc (get-in node [:attrs :style-inline] {}) prop value)
-        style-important (disj (get-in node [:attrs :style-inline-important] #{}) prop)]
+        parsed (css/parse-declarations-with-importance (str (name prop) ": " value))
+        additions (into {} (map (fn [[k v]] [k (:value v)])) parsed)
+        additions (if (seq additions) additions {prop value})
+        style-inline (merge (get-in node [:attrs :style-inline] {}) additions)
+        style-important (reduce disj (get-in node [:attrs :style-inline-important] #{}) (keys additions))]
     (-> document
         (dom/set-attribute node-id :style-inline style-inline)
         (dom/set-attribute node-id :style-inline-important style-important)
