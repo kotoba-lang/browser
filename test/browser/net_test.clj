@@ -225,6 +225,75 @@
                                          "https://api.example/data"
                                          net/cache-variant-key)))))))
 
+(deftest same-origin-cache-is-partitioned-by-credentials-mode
+  ;; Real bug this guards: cache-variant-id's :same-origin branch used to
+  ;; collapse every same-origin request into ONE cache slot regardless of
+  ;; credentials mode -- an anonymous pre-login fetch to a URL, followed
+  ;; by a later default-credentials fetch to the SAME url after login,
+  ;; would wrongly be served the earlier anonymous, unpersonalized cached
+  ;; body without ever hitting the network again, and conversely an
+  ;; anonymous fetch after a credentialed one risked leaking the
+  ;; credentialed body to an anonymous requester. The cross-origin branch
+  ;; already partitioned by credentials mode (see the sibling test
+  ;; above) -- this mirrors that fix for the same-origin case.
+  (let [p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "https://app.example" :net/fetch))
+        calls (atom [])
+        fetcher (fn [request]
+                  (swap! calls conj request)
+                  (if (get-in request [:headers "cookie"])
+                    {:status 200 :headers {} :body "private-personalized"}
+                    {:status 200 :headers {} :body "public-generic"}))
+        anonymous (net/fetch-resource
+                   {:store (storage/empty-store)
+                    :profile p
+                    :page-url "https://app.example/page"
+                    :credentials :omit
+                    :fetch-fn fetcher}
+                   {:url "https://app.example/data" :method :get})
+        store-after-login (storage/put-value (:store anonymous)
+                                             p
+                                             "https://app.example/data"
+                                             net/cookie-key
+                                             {"sid" "abc"})
+        credentialed (net/fetch-resource
+                      {:store store-after-login
+                       :profile p
+                       :page-url "https://app.example/page"
+                       :fetch-fn fetcher}
+                      {:url "https://app.example/data" :method :get})
+        credentialed-again (net/fetch-resource
+                            {:store (:store credentialed)
+                             :profile p
+                             :page-url "https://app.example/page"
+                             :fetch-fn fetcher}
+                            {:url "https://app.example/data" :method :get})
+        anonymous-again (net/fetch-resource
+                         {:store (:store credentialed-again)
+                          :profile p
+                          :page-url "https://app.example/page"
+                          :credentials :omit
+                          :fetch-fn fetcher}
+                         {:url "https://app.example/data" :method :get})]
+    (is (= false (:cache/hit? anonymous)))
+    (is (= "public-generic" (get-in anonymous [:response :body])))
+    (is (= false (:cache/hit? credentialed))
+        "a credentialed fetch after login must NOT be served the earlier anonymous cache entry")
+    (is (= "private-personalized" (get-in credentialed [:response :body])))
+    (is (= true (:cache/hit? credentialed-again)))
+    (is (= "private-personalized" (get-in credentialed-again [:response :body])))
+    (is (= true (:cache/hit? anonymous-again))
+        "an anonymous fetch must still hit its OWN partition, not the credentialed one")
+    (is (= "public-generic" (get-in anonymous-again [:response :body]))
+        "the anonymous partition must never be able to observe the private, credentialed body")
+    (is (= 2 (count @calls))
+        "exactly one real network call per credentials partition, not per request")
+    (is (= #{[:same-origin :credentialed] [:same-origin :anonymous]}
+           (set (keys (storage/get-value (:store anonymous-again)
+                                         p
+                                         "https://app.example/data"
+                                         net/cache-variant-key)))))))
+
 (deftest set-cookie-enforces-secure-and-samesite-none-constraints
   (let [secure-profile (-> (profile/new-profile {:id "default"})
                            (profile/grant-permission "https://app.example" :net/fetch))

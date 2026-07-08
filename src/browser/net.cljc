@@ -584,7 +584,7 @@
   [page-url url response send-credentials?]
   (cond
     (origin/same-origin? page-url url)
-    :same-origin
+    [:same-origin (cache-credentials-id send-credentials?)]
 
     (= "*" (header (:headers response) "access-control-allow-origin"))
     :cross-origin/*
@@ -601,6 +601,7 @@
         (get variants [:cross-origin origin-id])
         (when-not send-credentials?
           (get variants :cross-origin/*))
+        (get variants [:same-origin credentials-id])
         (get variants :same-origin)
         (when-not (seq variants)
           (cached-response store profile url)))))
