@@ -1377,6 +1377,13 @@
        (some (fn [op]
                (when (and (point-in-node? x y op)
                           (not= "none" (:pointer-events op))
+                          ;; visibility:hidden/collapse paints nothing and
+                          ;; is fully transparent to pointer events, same
+                          ;; as pointer-events:none -- previously never
+                          ;; consulted here, so a hidden overlay still
+                          ;; swallowed clicks meant for whatever's visibly
+                          ;; underneath it.
+                          (not (contains? #{"hidden" "collapse"} (:visibility op)))
                           (if-let [clip (:hit/clip op)]
                             (point-in-node? x y clip)
                             true)

@@ -554,6 +554,68 @@
            (filterv #(= :dom/dispatch-event (first %))
                     (get-in input-result [:document :ops]))))))
 
+;; ---- visibility:hidden/collapse (previously never consulted by node-at
+;; either, same class of gap as pointer-events:none above) -- real CSS
+;; treats a visibility:hidden/collapse element as fully transparent to
+;; pointer events, same as pointer-events:none. Confirmed via direct REPL
+;; reproduction before touching source: a visibility:hidden overlay with
+;; a click listener stole a click meant for the visible button underneath
+;; it. ----
+
+(deftest document-click-hit-test-skips-visibility-hidden-overlay
+  (let [h (host/recording-host)
+        loaded (-> (session/new-session {:host h})
+                   (session/load-html! {:url "kotoba://visibility-hit"
+                                        :html "<main><section id=\"stack\" style=\"position: relative; width: 120px; height: 80px; padding: 0\"><button id=\"under\" style=\"position: absolute; left: 10px; top: 10px; width: 80px; height: 40px; z-index: 1\">Under</button><section id=\"overlay\" style=\"position: absolute; left: 0; top: 0; width: 120px; height: 80px; z-index: 5; visibility: hidden; background: #eeeeee\">Overlay</section></section></main>"}))
+        document (get-in loaded [:browser.session/page :browser/document])
+        under (bridge/query-selector document "#under")
+        overlay (bridge/query-selector document "#overlay")
+        document (-> document
+                     (dom/add-event-listener under "click" 83)
+                     (dom/add-event-listener overlay "click" 84))
+        loaded (session/commit-document! loaded document)
+        overlay-op (some #(when (and (= :node (:draw/op %))
+                                     (= overlay (:id %)))
+                            %)
+                         (get-in loaded [:browser.session/page :browser/draw-ops]))
+        under-op (some #(when (and (= :node (:draw/op %))
+                                   (= under (:id %)))
+                          %)
+                       (get-in loaded [:browser.session/page :browser/draw-ops]))
+        x (+ (:x under-op) 5)
+        y (+ (:y under-op) 5)
+        clicked (session/apply-document-input-event! loaded {:event/type :pointer/click
+                                                            :x x
+                                                            :y y})]
+    (is (= "hidden" (:visibility overlay-op)))
+    (is (= under (-> clicked :browser.session/history last :node/id)))))
+
+(deftest document-click-hit-test-still-blocks-ordinary-overlay-without-visibility-hidden
+  ;; Regression guard mirroring the pointer-events:none analog above: an
+  ;; ORDINARY, fully-visible overlay must still block, so this fix must
+  ;; not accidentally make node-at transparent to every overlay.
+  (let [h (host/recording-host)
+        loaded (-> (session/new-session {:host h})
+                   (session/load-html! {:url "kotoba://visibility-hit-regress"
+                                        :html "<main><section id=\"stack\" style=\"position: relative; width: 120px; height: 80px; padding: 0\"><button id=\"under\" style=\"position: absolute; left: 10px; top: 10px; width: 80px; height: 40px; z-index: 1\">Under</button><section id=\"overlay\" style=\"position: absolute; left: 0; top: 0; width: 120px; height: 80px; z-index: 5; background: #eeeeee\">Overlay</section></section></main>"}))
+        document (get-in loaded [:browser.session/page :browser/document])
+        under (bridge/query-selector document "#under")
+        overlay (bridge/query-selector document "#overlay")
+        document (-> document
+                     (dom/add-event-listener under "click" 85)
+                     (dom/add-event-listener overlay "click" 86))
+        loaded (session/commit-document! loaded document)
+        under-op (some #(when (and (= :node (:draw/op %))
+                                   (= under (:id %)))
+                          %)
+                       (get-in loaded [:browser.session/page :browser/draw-ops]))
+        x (+ (:x under-op) 5)
+        y (+ (:y under-op) 5)
+        clicked (session/apply-document-input-event! loaded {:event/type :pointer/click
+                                                            :x x
+                                                            :y y})]
+    (is (= overlay (-> clicked :browser.session/history last :node/id)))))
+
 (deftest document-click-hit-test-keeps-transparent-overlay-targetable
   (let [h (host/recording-host)
         loaded (-> (session/new-session {:host h})
