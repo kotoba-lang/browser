@@ -41,6 +41,7 @@
 
 (declare disabled-control?)
 (declare ancestor-form-id)
+(declare parse-int)
 
 (defn- parent-node-id
   [document child-id]
@@ -134,6 +135,29 @@
   (or (hidden-input-control? node)
       (file-input-control? node)))
 
+(defn- tabindex-focusable?
+  "Real HTML5: ANY element carrying a valid `tabindex` attribute (a
+   parseable integer, positive, zero, OR negative -- `tabindex=\"-1\"`
+   still makes an element PROGRAMMATICALLY/click focusable, it only
+   excludes it from sequential Tab-key navigation, which this document-
+   input reducer doesn't model at all) is a focusable area. This engine
+   never checked `:tabindex` anywhere -- confirmed via direct REPL
+   reproduction before touching source: clicking a `<div tabindex=\"0\"
+   role=\"tab\">` (a real, common ARIA-widget authoring pattern this
+   engine's own org-w3-aria already computes a role for) not only failed
+   to focus it, it actively BLURRED whatever was previously focused,
+   since `reduce-click-event` unconditionally blurs when
+   `focusable-control?` is false. `disabled-control?`/`hidden-input-
+   control?` still gate this exactly like the plain-tag branch below --
+   real HTML5 ignores `tabindex` entirely on a disabled form control or
+   a `type=\"hidden\"` input, confirmed via direct REPL reproduction: an
+   UNGUARDED version of this fn wrongly focused a disabled
+   `<input tabindex=\"0\">`."
+  [document node-id node]
+  (and (some? (parse-int (get-in node [:attrs :tabindex]) nil))
+       (not (hidden-input-control? node))
+       (not (disabled-control? document node-id))))
+
 (defn focusable-control?
   "A real, direct `:summary` child of a `:details` element is ALSO
    focusable (real HTML5: `<summary>` is one of the handful of elements
@@ -149,7 +173,8 @@
              (not (hidden-input-control? node))
              (not (file-input-control? node))
              (not (disabled-control? document node-id)))
-        (boolean (details-parent-id document node-id)))))
+        (boolean (details-parent-id document node-id))
+        (tabindex-focusable? document node-id node))))
 
 (defn readonly-control?
   [document node-id]

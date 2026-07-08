@@ -521,6 +521,69 @@
     (is (= "/secret/path.txt" (get-in file-clicked [:browser.session/page :browser/document :nodes upload :attrs :value])))
     (is (= 5 (:present-count recorded)))))
 
+;; ---- clicking a tabindex-bearing generic element must focus it, not
+;; blur whatever was previously focused ----
+;;
+;; Real bug this guards: focusable-control? never checked the tabindex
+;; attribute at all -- ANY element with a valid tabindex (e.g. a
+;; <div tabindex="0" role="tab">, the standard way to author a custom
+;; ARIA widget) is a real, common focusable area in HTML5, but this
+;; engine's click reducer unconditionally BLURRED the previously-focused
+;; element instead, since focusable-control? returned false. Confirmed
+;; via direct REPL reproduction before touching source.
+
+(defn- focus-after-click
+  [html click-selector]
+  (let [h (host/recording-host)
+        loaded (-> (session/new-session {:host h})
+                   (session/load-html! {:url "kotoba://tabindex" :html html}))
+        document (get-in loaded [:browser.session/page :browser/document])
+        target (bridge/query-selector document click-selector)
+        page (:browser.session/page loaded)
+        op (some #(when (and (= :node (:draw/op %)) (= target (:id %))) %)
+                 (:browser/draw-ops page))
+        clicked (session/apply-document-input-event!
+                 loaded {:event/type :pointer/click
+                        :x (+ (:x op) 2) :y (+ (:y op) 2)})]
+    [target (get-in clicked [:browser.session/page :browser/document :focus])]))
+
+(deftest document-click-focuses-a-tabindex-zero-div
+  (let [[target focus] (focus-after-click
+                        "<main><div id=\"w\" tabindex=\"0\" role=\"tab\">Tab 1</div></main>"
+                        "#w")]
+    (is (= target focus) "clicking a tabindex=0 div must focus it")))
+
+(deftest document-click-focuses-a-tabindex-negative-one-div
+  ;; tabindex="-1" only excludes an element from sequential Tab-key
+  ;; navigation -- it must still be PROGRAMMATICALLY/click focusable.
+  (let [[target focus] (focus-after-click
+                        "<main><div id=\"w\" tabindex=\"-1\">Panel</div></main>"
+                        "#w")]
+    (is (= target focus))))
+
+(deftest document-click-does-not-focus-a-plain-div-with-no-tabindex
+  (let [[_ focus] (focus-after-click "<main><div id=\"w\">Panel</div></main>" "#w")]
+    (is (nil? focus) "regression guard: an ordinary div must stay unfocusable")))
+
+(deftest document-click-ignores-an-invalid-tabindex-value
+  (let [[_ focus] (focus-after-click
+                   "<main><div id=\"w\" tabindex=\"not-a-number\">Panel</div></main>"
+                   "#w")]
+    (is (nil? focus))))
+
+(deftest document-click-tabindex-does-not-override-a-disabled-input
+  ;; Real HTML5: tabindex has no effect on a disabled form control --
+  ;; disabled-control? must still gate this new tabindex branch exactly
+  ;; like it already gates the plain disabled-control-tags branch.
+  (let [[_ focus] (focus-after-click
+                   "<main><input id=\"w\" tabindex=\"0\" disabled></main>"
+                   "#w")]
+    (is (nil? focus))))
+
+(deftest document-click-focuses-an-ordinary-button-unaffected-by-this-fix
+  (let [[target focus] (focus-after-click "<main><button id=\"w\">Go</button></main>" "#w")]
+    (is (= target focus))))
+
 (deftest document-click-hit-test-prefers-higher-z-index-absolute-node
   (let [h (host/recording-host)
         loaded (-> (session/new-session {:host h})
