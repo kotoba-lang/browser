@@ -154,20 +154,54 @@
       (truthy? (get-in node [:attrs :disabled]))
       (assoc :disabled "true"))))
 
+(defn- ancestor-or-self-hidden?
+  "hidden-node? alone only checks the node ITSELF -- a real, common
+   pattern (an interactive element nested inside a hidden container,
+   e.g. <div hidden><button>Nested</button></div>) still slipped through
+   indexed-elements' own self-only check, since a flat element-nodes
+   walk has no ancestry awareness at all (unlike semantic-node's own
+   recursive tree-walk, which naturally short-circuits at a hidden
+   parent and never visits its children in the first place). Confirmed
+   via direct REPL reproduction before touching source. `parents` is
+   the whole document's parent-index, computed ONCE by the caller and
+   threaded through -- recomputing it per-node here would make this
+   function's own caller (a filter over every element in the document)
+   quadratic."
+  [document parents node-id]
+  (loop [id node-id]
+    (cond
+      (nil? id) false
+      (hidden-node? (get-in document [:nodes id])) true
+      :else (recur (get parents id)))))
+
 (defn indexed-elements
-  "Project the current kotoba document into browser-use indexed elements."
+  "Project the current kotoba document into browser-use indexed elements.
+
+   This file's own semantic-node/text-content already gate on hidden-
+   node? -- indexed-elements did NOT, unlike those two. A real, common
+   pattern (a submit button hidden via style=\"display:none\", a hidden
+   token input) was still listed as an actionable indexed element, and
+   is actually clickable/typeable: click_node!/type_node! build a
+   synthetic event carrying an explicit :node/id, which document-input's
+   own target resolution uses directly, completely bypassing real
+   hit-testing (which is where visibility would normally be enforced).
+   A real user could never see or reach such an element, but the AI
+   agent driving this browser via indexed clicks/types could. Confirmed
+   via direct REPL reproduction before touching source."
   [document]
-  (->> (dom-bridge/element-nodes document)
-       (filter #(contains? interactive-tags (:tag %)))
-       (map-indexed
-        (fn [index node]
-          (let [node-id (:node/id node)]
-            {:index index
-             :node/id node-id
-             :tag (name (:tag node))
-             :text (text-content document node-id)
-             :attrs (browser-use-attrs document node-id node)})))
-       vec))
+  (let [parents (dom-bridge/parent-index document)]
+    (->> (dom-bridge/element-nodes document)
+         (filter #(and (contains? interactive-tags (:tag %))
+                      (not (ancestor-or-self-hidden? document parents (:node/id %)))))
+         (map-indexed
+          (fn [index node]
+            (let [node-id (:node/id node)]
+              {:index index
+               :node/id node-id
+               :tag (name (:tag node))
+               :text (text-content document node-id)
+               :attrs (browser-use-attrs document node-id node)})))
+         vec)))
 
 (def semantic-tags
   #{:main :nav :header :footer :section :article :aside :form :h1 :h2 :h3 :h4

@@ -47,7 +47,7 @@
   [document]
   (query-selector document "title"))
 
-(defn- parent-index
+(defn parent-index
   [document]
   (reduce-kv
    (fn [parents parent-id node]

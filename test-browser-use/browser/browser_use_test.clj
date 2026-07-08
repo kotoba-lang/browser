@@ -41,6 +41,51 @@
     (is (= "Save now!" (get-in (kotoba-browser/get-state browser) [:elements 0 :text]))
         "regression guard: ordinary visible descendants must still contribute their text")))
 
+;; ---- indexed-elements itself must exclude hidden elements ----
+;;
+;; Real bug this guards: indexed-elements (produces the numbered list of
+;; elements click_node!/type_node! act on by explicit :node/id, bypassing
+;; real hit-testing entirely) never called hidden-node? at all, unlike
+;; this file's own semantic-node/text-content. A submit button hidden via
+;; style="display:none", a hidden token input, etc. were still listed as
+;; actionable indexed elements -- and were actually clickable/typeable,
+;; something no real user could ever do. Confirmed via direct REPL
+;; reproduction before touching source.
+
+(deftest kotoba-browser-use-indexed-elements-excludes-a-css-hidden-element
+  (let [browser (kotoba-browser/kotoba-browser
+                 {:start-url "https://app.example/dashboard"
+                  :html "<main><button id=\"hidden-btn\" style=\"display:none\">Secret Submit</button><button id=\"real\">Save</button></main>"})
+        elements (:elements (kotoba-browser/get-state browser))]
+    (is (= [{:id "real"}] (mapv (fn [el] {:id (get-in el [:attrs :id])}) elements))
+        "the display:none button must not be listed as an actionable indexed element")))
+
+(deftest kotoba-browser-use-indexed-elements-excludes-a-hidden-attribute-and-type-hidden-input
+  (let [browser (kotoba-browser/kotoba-browser
+                 {:start-url "https://app.example/dashboard"
+                  :html "<main><input id=\"tok\" type=\"hidden\" value=\"token\"><button id=\"a\" hidden>A</button><button id=\"real\">Save</button></main>"})
+        elements (:elements (kotoba-browser/get-state browser))]
+    (is (= ["real"] (mapv #(get-in % [:attrs :id]) elements)))))
+
+(deftest kotoba-browser-use-indexed-elements-excludes-an-element-with-a-hidden-ancestor
+  ;; hidden-node? alone only checks the node ITSELF -- a real, common
+  ;; pattern (an interactive element nested inside a hidden container)
+  ;; needs the ancestor chain walked too, since a flat element-nodes walk
+  ;; has no ancestry awareness on its own.
+  (let [browser (kotoba-browser/kotoba-browser
+                 {:start-url "https://app.example/dashboard"
+                  :html "<main><div hidden><button id=\"nested\">Nested</button></div><button id=\"real\">Save</button></main>"})
+        elements (:elements (kotoba-browser/get-state browser))]
+    (is (= ["real"] (mapv #(get-in % [:attrs :id]) elements)))))
+
+(deftest kotoba-browser-use-indexed-elements-still-includes-visible-elements
+  (let [browser (kotoba-browser/kotoba-browser
+                 {:start-url "https://app.example/dashboard"
+                  :html "<main><button id=\"a\">A</button><input id=\"b\" value=\"x\"></main>"})
+        elements (:elements (kotoba-browser/get-state browser))]
+    (is (= ["a" "b"] (mapv #(get-in % [:attrs :id]) elements))
+        "regression guard: ordinary visible elements must stay indexed")))
+
 (deftest kotoba-browser-implements-browser-use-protocol-with-existing-actions
   (let [calls (atom [])
         browser (kotoba-browser/kotoba-browser
