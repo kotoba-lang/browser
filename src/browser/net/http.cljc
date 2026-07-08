@@ -114,6 +114,13 @@
         :headers (response-headers response)
         :body (.body response)})
 
+     (defn- ex-message*
+       "Some exceptions (e.g. ConnectException on a refused connection) have a
+        nil .getMessage; fall back to the class name so :error/message is
+        always a string."
+       [^Throwable e]
+       (or (.getMessage e) (.getName (class e))))
+
      (defn fetch!
        "Perform one real HTTP request and return a browser.net-shaped
         response map: {:status :headers :body}, or on failure
@@ -131,20 +138,20 @@
                                  (java.net.http.HttpResponse$BodyHandlers/ofString))]
             (->response response))
           (catch java.net.http.HttpTimeoutException e
-            {:status 0 :error :net/timeout :error/message (.getMessage e)})
+            {:status 0 :error :net/timeout :error/message (ex-message* e)})
           (catch java.net.UnknownHostException e
-            {:status 0 :error :net/unknown-host :error/message (.getMessage e)})
+            {:status 0 :error :net/unknown-host :error/message (ex-message* e)})
           (catch java.net.ConnectException e
-            {:status 0 :error :net/connection-refused :error/message (.getMessage e)})
+            {:status 0 :error :net/connection-refused :error/message (ex-message* e)})
           (catch java.io.IOException e
-            {:status 0 :error :net/io-error :error/message (.getMessage e)})
+            {:status 0 :error :net/io-error :error/message (ex-message* e)})
           (catch InterruptedException e
             (.interrupt (Thread/currentThread))
-            {:status 0 :error :net/interrupted :error/message (.getMessage e)})
+            {:status 0 :error :net/interrupted :error/message (ex-message* e)})
           (catch IllegalArgumentException e
-            {:status 0 :error :net/invalid-request :error/message (.getMessage e)})
+            {:status 0 :error :net/invalid-request :error/message (ex-message* e)})
           (catch Exception e
-            {:status 0 :error :net/fetch-failed :error/message (.getMessage e)}))))
+            {:status 0 :error :net/fetch-failed :error/message (ex-message* e)}))))
 
      (defn fetch-fn
        "Return a fetch-fn (the function shape browser.session/new-session and
