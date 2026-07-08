@@ -7,6 +7,40 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]))
 
+;; ---- indexed-elements' :text must skip hidden descendants ----
+;;
+;; Real bug this guards: text-content (private, backs indexed-elements'
+;; :text field -- what the browser-use AI agent reads to decide what an
+;; interactive element actually says before clicking it) recursed into
+;; every child unconditionally, unlike its sibling of the same name/job
+;; in org-w3-aria's aria.core, which correctly stops recursing into a
+;; hidden element. A hidden descendant (e.g. a <span hidden> aside inside
+;; a <button>) silently leaked into the agent-visible :text, misrepresenting
+;; the element to the very agent this text exists to inform. Confirmed via
+;; direct REPL reproduction before touching source.
+
+(deftest kotoba-browser-use-indexed-elements-text-skips-a-hidden-descendant
+  (let [browser (kotoba-browser/kotoba-browser
+                 {:start-url "https://app.example/dashboard"
+                  :html "<main><button id=\"save\">Save<span hidden> - admin only, do not click</span></button></main>"})]
+    (is (= "Save" (get-in (kotoba-browser/get-state browser) [:elements 0 :text]))
+        "the hidden span's text must not leak into the button's own :text")))
+
+(deftest kotoba-browser-use-indexed-elements-text-skips-css-hidden-and-aria-hidden-descendants
+  (let [browser (kotoba-browser/kotoba-browser
+                 {:start-url "https://app.example/dashboard"
+                  :html "<main><button id=\"a\">Save<span style=\"display:none\"> secret</span></button><button id=\"b\">Go<span aria-hidden=\"true\"> secret</span></button></main>"})
+        state (kotoba-browser/get-state browser)]
+    (is (= "Save" (get-in state [:elements 0 :text])))
+    (is (= "Go" (get-in state [:elements 1 :text])))))
+
+(deftest kotoba-browser-use-indexed-elements-text-still-includes-visible-descendants
+  (let [browser (kotoba-browser/kotoba-browser
+                 {:start-url "https://app.example/dashboard"
+                  :html "<main><button id=\"save\">Save now<span>!</span></button></main>"})]
+    (is (= "Save now!" (get-in (kotoba-browser/get-state browser) [:elements 0 :text]))
+        "regression guard: ordinary visible descendants must still contribute their text")))
+
 (deftest kotoba-browser-implements-browser-use-protocol-with-existing-actions
   (let [calls (atom [])
         browser (kotoba-browser/kotoba-browser

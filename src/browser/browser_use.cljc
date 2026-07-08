@@ -39,15 +39,6 @@
            (not (str/blank? value))
            (not= "false" (str/lower-case value)))))
 
-(defn- text-content
-  [document node-id]
-  (let [node (get-in document [:nodes node-id])]
-    (case (:node/type node)
-      :text (str (:text node))
-      :element (apply str (map #(text-content document %)
-                               (:children node)))
-      "")))
-
 (defn- blankish?
   [s]
   (str/blank? (str s)))
@@ -65,6 +56,27 @@
       (contains? #{"presentation" "none"} (str/lower-case (str (get-in node [:attrs :role]))))
       (and (= :input (:tag node))
            (= "hidden" (str/lower-case (str (get-in node [:attrs :type])))))))
+
+(defn- text-content
+  "This file's own semantic-node (below) already gates on hidden-node? --
+   text-content previously did NOT, unlike its sibling of the same name/
+   job in org-w3-aria's aria.core (which correctly stops recursing into a
+   hidden element). This is the function indexed-elements (further below)
+   uses to compute the :text field the browser-use AI agent reads to
+   decide what an interactive element actually says before clicking it --
+   a hidden descendant (e.g. a <span hidden> aside inside a <button>)
+   silently leaked into that text, misrepresenting the element to the
+   very agent this text exists to inform. Confirmed via direct REPL
+   reproduction before touching source."
+  [document node-id]
+  (let [node (get-in document [:nodes node-id])]
+    (case (:node/type node)
+      :text (str (:text node))
+      :element (if (hidden-node? node)
+                 ""
+                 (apply str (map #(text-content document %)
+                                 (:children node))))
+      "")))
 
 (defn- input-value
   [document node-id node]
