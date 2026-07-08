@@ -44,17 +44,37 @@
            :text/caret (clamp (:text/caret state) 0 n)
            :text/selection [(min a b) (max a b)])))
 
+(defn- snap-out-of-surrogate-pair
+  "Snaps `p` backward, to just before the pair, whenever it sits strictly
+   inside a real UTF-16 surrogate pair -- move-caret (arrow keys) already
+   snaps its own computed position before ever reaching collapse/select,
+   but collapse/select are ALSO called directly for a mouse click or
+   drag-select (browser.surface/edit-text's :caret/:select ops, driven by
+   browser.input's :text/caret/:text/selection events), which pass a raw,
+   unsnapped position straight through -- previously with no check at
+   all. Confirmed via direct REPL reproduction before this fix: clicking
+   to place the caret strictly between an emoji's high/low surrogate,
+   then pressing Backspace, corrupted the value into a lone, invalid
+   surrogate code unit -- the identical corruption class move-caret's own
+   surrogate-pair-boundary? check already guards against for arrow-key
+   movement, just reachable through this different entry point."
+  [value p]
+  (if (surrogate-pair-boundary? value p) (dec p) p))
+
 (defn collapse
   [state caret]
-  (let [caret (clamp caret 0 (count (:text/value state "")))]
+  (let [value (:text/value state "")
+        caret (-> caret (clamp 0 (count value)) (->> (snap-out-of-surrogate-pair value)))]
     (assoc state :text/caret caret :text/selection [caret caret])))
 
 (defn select
   [state start end]
-  (-> state
-      (assoc :text/selection [start end]
-             :text/caret end)
-      (normalize-selection)))
+  (let [value (:text/value state "")]
+    (-> state
+        (assoc :text/selection [(snap-out-of-surrogate-pair value start)
+                                 (snap-out-of-surrogate-pair value end)]
+               :text/caret (snap-out-of-surrogate-pair value end))
+        (normalize-selection))))
 
 (defn insert-text
   [state text]

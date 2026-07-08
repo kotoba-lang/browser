@@ -93,3 +93,42 @@
     (is (= "hell" (:text/value (text-edit/delete-backward state))))
     (is (= "ello" (:text/value (text-edit/delete-forward (text-edit/move-to state 0)))))
     (is (= 4 (:text/caret (text-edit/move-caret state -1))))))
+
+;; ---- the fix above (surrogate-pair-boundary?) only ever protected
+;; move-caret (arrow keys). move-to (and the collapse/select fns it's
+;; built on) is the OTHER real entry point -- a mouse click or drag-select
+;; (browser.surface/edit-text's :caret/:select ops, driven by browser.
+;; input's :text/caret/:text/selection events) -- and it passed a raw,
+;; unsnapped position straight through with no check at all. Confirmed
+;; via direct REPL reproduction before this fix: clicking to place the
+;; caret strictly between an emoji's high/low surrogate, then pressing
+;; Backspace, corrupted the value into a lone, invalid surrogate code
+;; unit -- the identical corruption class, reached through a different
+;; door. ----
+
+(deftest click-landing-mid-surrogate-pair-snaps-before-it-not-into-its-middle
+  (let [state (-> (text-edit/empty-state)
+                  (text-edit/insert-text (str "a" emoji "b"))
+                  (text-edit/move-to 2))]
+    (is (= 1 (:text/caret state))
+        "a raw click at position 2 (strictly inside the pair) must snap to 1, not split it")))
+
+(deftest backspace-after-a-mid-pair-click-does-not-corrupt-the-value
+  (let [state (-> (text-edit/empty-state)
+                  (text-edit/insert-text (str "a" emoji "b"))
+                  (text-edit/move-to 2)
+                  (text-edit/delete-backward))]
+    (is (= (str emoji "b") (:text/value state))
+        "the emoji must survive intact as a real pair, not a lone surrogate")))
+
+(deftest drag-select-landing-mid-surrogate-pair-on-either-end-snaps-both
+  (let [state (-> (text-edit/empty-state)
+                  (text-edit/insert-text (str "a" emoji "b"))
+                  (text-edit/select 2 2))]
+    (is (= [1 1] (:text/selection state)))
+    (is (= 1 (:text/caret state)))))
+
+(deftest click-at-a-real-boundary-around-an-emoji-is-unaffected-by-the-snap
+  (let [inserted (-> (text-edit/empty-state) (text-edit/insert-text (str "a" emoji "b")))]
+    (is (= 1 (:text/caret (text-edit/move-to inserted 1))) "right before the emoji")
+    (is (= 3 (:text/caret (text-edit/move-to inserted 3))) "right after the emoji")))
