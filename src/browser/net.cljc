@@ -451,21 +451,46 @@
   (if-let [{:keys [name value secure? domain path same-site] :as cookie} (parse-set-cookie set-cookie)]
     (let [https? (= "https" (:scheme (origin/parse-url url)))
           cookie-domain (cookie-domain url domain)
+          store-url (cookie-store-url url domain)
+          resolved-path (cookie-path url path)
+          variant-id (cookie-variant-id name cookie-domain resolved-path)
+          variants (cookie-variants store profile store-url)
+          ;; RFC 6265bis: a cookie write from a non-HTTP API (document.cookie,
+          ;; allow-http-only? false here) must be REJECTED OUTRIGHT whenever a
+          ;; same-name/domain/path cookie already stored has :http-only? true --
+          ;; not merely blocked from CREATING a new HttpOnly cookie (the
+          ;; :http-only? (and allow-http-only? ...) line below already handled
+          ;; that half correctly). Previously this check didn't exist at all, so
+          ;; a script write unconditionally clobbered any pre-existing cookie at
+          ;; the same variant-id regardless of its own HttpOnly flag, silently
+          ;; stripping the flag AND replacing the value in one step -- defeating
+          ;; HttpOnly's entire purpose (the one line of defense against an XSS
+          ;; payload hijacking a session cookie it isn't even allowed to READ).
+          ;; Confirmed via direct REPL reproduction before touching source: a
+          ;; server-set HttpOnly session cookie, followed by a plain
+          ;; script-set-cookie call with no HttpOnly flag of its own, silently
+          ;; replaced the value and cleared the flag -- and the attacker-
+          ;; controlled value was then sent on the very next real HTTP request
+          ;; too, a complete session-hijack path, not merely a script-visibility
+          ;; leak. The SERVER's own overwrite of its own HttpOnly cookie (a
+          ;; real Set-Cookie response header, allow-http-only? true) is
+          ;; deliberately still always allowed -- only a NON-HTTP write is
+          ;; gated here.
+          overwrites-http-only? (and (not allow-http-only?)
+                                     (:http-only? (get variants variant-id)))
           acceptable? (and (or (not secure?) https?)
                            (or (not= "none" same-site) secure?)
                            (cookie-prefix-acceptable? cookie https?)
-                           (or (nil? domain) cookie-domain))
-          store-url (cookie-store-url url domain)]
+                           (or (nil? domain) cookie-domain)
+                           (not overwrites-http-only?))]
       (if acceptable?
         (let [expired? (expired-cookie? cookie)
-              path (cookie-path url path)
-              variant-id (cookie-variant-id name cookie-domain path)
-              variants (cond-> (cookie-variants store profile store-url)
+              variants (cond-> variants
                          expired? (dissoc variant-id)
                         (not expired?) (assoc variant-id
                                                {:name name
                                                 :value value
-                                                :path path
+                                                :path resolved-path
                                                 :domain cookie-domain
                                                 :same-site same-site
                                                 :http-only? (and allow-http-only? (:http-only? cookie))

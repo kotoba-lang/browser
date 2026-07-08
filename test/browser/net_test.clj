@@ -700,6 +700,15 @@
                                           :headers {"set-cookie" "sid=open; Path=/"}
                                           :body "ok"})}
                             {:url "https://app.example/api" :method :get})
+        ;; Real bug this guards (RFC 6265bis): a non-HTTP write
+        ;; (document.cookie, script-set-cookie here) must be REJECTED
+        ;; OUTRIGHT whenever a same-name/domain/path cookie already
+        ;; stored is HttpOnly -- previously this attempt silently
+        ;; succeeded, clobbering the server's own locked cookie and
+        ;; stripping its HttpOnly flag in one step, defeating HttpOnly's
+        ;; entire purpose. A real Set-Cookie response header from the
+        ;; SERVER (server-overwritten above) is a completely different,
+        ;; still-legitimate case and must remain unaffected.
         script-overwritten (net/script-set-cookie (:store server-stored)
                                                   p
                                                   "https://app.example/api"
@@ -713,13 +722,103 @@
            (storage/get-value (:store server-overwritten) p "https://app.example/api" net/cookie-http-only-key)))
     (is (= {}
            (storage/get-value (:store server-overwritten) p "https://app.example/api" net/cookie-same-site-key)))
-    (is (= "sid=script"
-           (net/script-cookie-header script-overwritten
-                                     p
-                                     "https://app.example/page"
-                                     "https://app.example/api")))
-    (is (= {}
-           (storage/get-value script-overwritten p "https://app.example/api" net/cookie-http-only-key)))))
+    (is (nil? (net/script-cookie-header script-overwritten
+                                        p
+                                        "https://app.example/page"
+                                        "https://app.example/api"))
+        "the script write must be REJECTED entirely -- the original HttpOnly
+         cookie stays invisible to script, not replaced by the attacker's value")
+    (is (= "sid=locked"
+           (net/cookie-header script-overwritten p "https://app.example/page" "https://app.example/api"))
+        "the real cookie sent on the next HTTP request must still be the
+         server's original value, not the rejected script write")
+    (is (= {"sid" true}
+           (storage/get-value script-overwritten p "https://app.example/api" net/cookie-http-only-key))
+        "HttpOnly must survive a rejected script overwrite attempt, unchanged")))
+
+(deftest script-cannot-overwrite-an-httponly-cookie-even-without-declaring-httponly-itself
+  ;; The real-world attack shape: an XSS payload's document.cookie write
+  ;; almost never declares HttpOnly itself (script can't read an
+  ;; HttpOnly cookie's VALUE to know it exists, let alone re-declare its
+  ;; flags) -- it's a plain, flag-less write attempting to clobber
+  ;; whatever cookie already lives under that name. Confirmed via direct
+  ;; REPL reproduction before touching source: this exact shape silently
+  ;; succeeded, replacing the server's session cookie value AND clearing
+  ;; its HttpOnly flag -- and the corrupted value was then sent on the
+  ;; very next real HTTP request too, a complete session-hijack path,
+  ;; not merely a script-visibility leak.
+  (let [p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "https://app.example" :net/fetch))
+        server-stored (net/fetch-resource
+                       {:store (storage/empty-store)
+                        :profile p
+                        :page-url "https://app.example/page"
+                        :fetch-fn (fn [_]
+                                    {:status 200
+                                     :headers {"set-cookie" "sessionid=SERVERSECRET; HttpOnly; Path=/"}
+                                     :body "ok"})}
+                       {:url "https://app.example/api" :method :get})
+        after-attack (net/script-set-cookie (:store server-stored)
+                                            p
+                                            "https://app.example/api"
+                                            "sessionid=HACKED; Path=/")]
+    (is (nil? (net/script-cookie-header after-attack p "https://app.example/page" "https://app.example/api")))
+    (is (= "sessionid=SERVERSECRET"
+           (net/cookie-header after-attack p "https://app.example/page" "https://app.example/api"))
+        "the real, network-sent cookie must still be the server's own value")
+    (is (= {"sessionid" true}
+           (storage/get-value after-attack p "https://app.example/api" net/cookie-http-only-key)))))
+
+(deftest script-can-still-set-an-unrelated-new-cookie-name-when-another-is-httponly
+  ;; Regression guard: the fix must be scoped to the SAME name/domain/path
+  ;; variant-id, not become "script can't write ANY cookie once an
+  ;; HttpOnly one exists anywhere for this origin."
+  (let [p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "https://app.example" :net/fetch))
+        server-stored (net/fetch-resource
+                       {:store (storage/empty-store)
+                        :profile p
+                        :page-url "https://app.example/page"
+                        :fetch-fn (fn [_]
+                                    {:status 200
+                                     :headers {"set-cookie" "sessionid=SERVERSECRET; HttpOnly; Path=/"}
+                                     :body "ok"})}
+                       {:url "https://app.example/api" :method :get})
+        with-new-cookie (net/script-set-cookie (:store server-stored)
+                                               p
+                                               "https://app.example/api"
+                                               "theme=dark; Path=/")]
+    (is (= "theme=dark"
+           (net/script-cookie-header with-new-cookie p "https://app.example/page" "https://app.example/api")))))
+
+(deftest server-can-still-overwrite-its-own-httponly-cookie
+  ;; Regression guard: only a NON-HTTP (script) write is gated -- a real
+  ;; Set-Cookie response header from the server itself must still be able
+  ;; to replace its own HttpOnly cookie's value, or remove the flag,
+  ;; exactly as before this fix.
+  (let [p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "https://app.example" :net/fetch))
+        server-stored (net/fetch-resource
+                       {:store (storage/empty-store)
+                        :profile p
+                        :page-url "https://app.example/page"
+                        :fetch-fn (fn [_]
+                                    {:status 200
+                                     :headers {"set-cookie" "sessionid=SERVERSECRET; HttpOnly; Path=/"}
+                                     :body "ok"})}
+                       {:url "https://app.example/api" :method :get})
+        server-rotated (net/fetch-resource
+                        {:store (:store server-stored)
+                         :profile p
+                         :page-url "https://app.example/page"
+                         :cache? false
+                         :fetch-fn (fn [_]
+                                     {:status 200
+                                      :headers {"set-cookie" "sessionid=ROTATED; HttpOnly; Path=/"}
+                                      :body "ok"})}
+                        {:url "https://app.example/api" :method :get})]
+    (is (= "sessionid=ROTATED"
+           (net/cookie-header (:store server-rotated) p "https://app.example/page" "https://app.example/api")))))
 
 (deftest cookie-header-respects-set-cookie-path
   (let [p (-> (profile/new-profile {:id "default"})
