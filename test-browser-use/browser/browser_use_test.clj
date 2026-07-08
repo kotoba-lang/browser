@@ -462,6 +462,43 @@
     (is (= semantic (:semantic-tree snapshot)))
     (is (seq a11y))))
 
+;; ---- semantic-tree must exclude a decorative <img alt=""> ----
+;;
+;; Real bug this guards: hidden-node? (gates semantic-node) was missing
+;; the decorative-image? check aria.core/hidden? already has -- a
+;; decorative image (alt="", the standard idiom for a spacer/divider
+;; graphic) was still included in browser-use's own semantic tree,
+;; inconsistent with the real accessibility tree, which correctly
+;; excludes it. Confirmed via direct REPL reproduction before touching
+;; source.
+
+(deftest kotoba-browser-use-semantic-tree-excludes-a-decorative-image
+  (let [browser (kotoba-browser/kotoba-browser
+                 {:start-url "https://app.example/dashboard"
+                  :html "<main><img id=\"deco\" alt=\"\" src=\"spacer.png\"><img id=\"real\" alt=\"A real photo\" src=\"photo.png\"></main>"})
+        semantic (kotoba-browser/extract browser :semantic)]
+    (is (not (str/includes? (pr-str semantic) "spacer.png"))
+        "alt=\"\" must compute implicit role presentation and be dropped from the semantic tree")
+    (is (str/includes? (pr-str semantic) "photo.png")
+        "a real, non-decorative image must still appear")))
+
+(deftest kotoba-browser-use-semantic-tree-still-includes-an-image-with-no-alt-attribute-at-all
+  ;; A MISSING alt attribute is a separate, unrelated accessibility gap
+  ;; (an authoring mistake to flag, not a decorative image) -- it must
+  ;; NOT be treated the same as alt="".
+  (let [browser (kotoba-browser/kotoba-browser
+                 {:start-url "https://app.example/dashboard"
+                  :html "<main><img id=\"no-alt\" src=\"mystery.png\"></main>"})
+        semantic (kotoba-browser/extract browser :semantic)]
+    (is (str/includes? (pr-str semantic) "mystery.png"))))
+
+(deftest kotoba-browser-use-semantic-tree-explicit-role-overrides-the-decorative-image-default
+  (let [browser (kotoba-browser/kotoba-browser
+                 {:start-url "https://app.example/dashboard"
+                  :html "<main><img id=\"override\" alt=\"\" role=\"img\" src=\"overridden.png\"></main>"})
+        semantic (kotoba-browser/extract browser :semantic)]
+    (is (str/includes? (pr-str semantic) "overridden.png"))))
+
 (deftest kotoba-browser-use-recognizes-xhtml-style-explicit-boolean-attribute-values
   ;; Real HTML permits writing a boolean attribute two ways: the bare form
   ;; (`hidden`, `checked`) and the explicit XHTML-compatible form

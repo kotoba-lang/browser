@@ -48,6 +48,27 @@
   (or (get-in node [:attrs (keyword "style" (name k))])
       (get-in node [:attrs :style k])))
 
+(defn- decorative-image?
+  "Ported from org-w3-aria's aria.core/decorative-image? -- per HTML-AAM's
+   <img> role-mapping table, an <img alt=\"\"> (alt PRESENT and blank --
+   the standard \"decorative image\" idiom, e.g. a spacer/divider graphic)
+   computes an implicit role of presentation and must be excluded from
+   the tree entirely, same as an explicit role=\"presentation\"/\"none\"
+   node already is. An img with NO alt attribute at all is a separate,
+   unrelated gap (missing alt text) and must NOT match here -- it still
+   gets the ordinary implicit \"img\" role. An explicit `role` attribute
+   always wins over this implicit default, matching ARIA precedence.
+   hidden-node? was missing this check, unlike aria.core/hidden? --
+   confirmed via direct REPL reproduction before touching source: a
+   decorative <img alt=\"\"> still appeared in browser-use's own semantic
+   tree, inconsistent with the real accessibility tree, which correctly
+   excludes it."
+  [node]
+  (and (= :img (:tag node))
+       (not (contains? (attrs node) :role))
+       (contains? (attrs node) :alt)
+       (blankish? (get (attrs node) :alt))))
+
 (defn- hidden-node?
   [node]
   (or (truthy? (get-in node [:attrs :hidden]))
@@ -55,7 +76,8 @@
       (= "none" (str/lower-case (str (style-value node :display))))
       (contains? #{"presentation" "none"} (str/lower-case (str (get-in node [:attrs :role]))))
       (and (= :input (:tag node))
-           (= "hidden" (str/lower-case (str (get-in node [:attrs :type])))))))
+           (= "hidden" (str/lower-case (str (get-in node [:attrs :type])))))
+      (decorative-image? node)))
 
 (defn- text-content
   "This file's own semantic-node (below) already gates on hidden-node? --
