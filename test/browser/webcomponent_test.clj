@@ -6,6 +6,24 @@
   (is (webcomponent/valid-name? "my-widget"))
   (is (not (webcomponent/valid-name? "widget"))))
 
+(deftest valid-name-rejects-names-that-do-not-start-with-a-lowercase-ascii-letter
+  ;; Real Custom Elements spec (PotentialCustomElementName): the name must
+  ;; start with a lowercase ASCII letter. Previously only the hyphen
+  ;; requirement was checked, so a digit-led or uppercase-led name
+  ;; incorrectly passed.
+  (is (not (webcomponent/valid-name? "1-foo")))
+  (is (not (webcomponent/valid-name? "-foo")))
+  (is (not (webcomponent/valid-name? "Foo-bar"))))
+
+(deftest valid-name-rejects-uppercase-ascii-letters-anywhere-in-the-name
+  ;; Real Custom Elements spec: PCENChar (the character class allowed
+  ;; after the first letter) explicitly excludes A-Z, so an uppercase
+  ;; letter anywhere in the name is invalid, not just at the start.
+  ;; Previously unchecked entirely -- "foo-Bar" incorrectly passed.
+  (is (not (webcomponent/valid-name? "foo-Bar")))
+  (is (not (webcomponent/valid-name? "foo-bAr")))
+  (is (webcomponent/valid-name? "foo-bar")))
+
 (deftest valid-name-rejects-xml-prefix-case-insensitively
   ;; Real Custom Elements spec: a name must not start with an ASCII
   ;; case-insensitive match for "xml" (reserved by the XML

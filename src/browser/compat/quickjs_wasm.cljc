@@ -3060,6 +3060,11 @@
         // reserved-names (Clojure-side registry model, unused by this
         // shim) -- keep both in sync if either's rules change.
         if (typeof name !== 'string' || name.indexOf('-') < 0) return false;
+        // Real spec (PotentialCustomElementName): must start with a
+        // lowercase ASCII letter and contain no uppercase ASCII letters
+        // anywhere (PCENChar excludes A-Z) -- deliberately ASCII-only,
+        // mirroring the same simplification in valid-name? above.
+        if (!/^[a-z][^A-Z]*$/.test(name)) return false;
         if (name.slice(0, 3).toLowerCase() === 'xml') return false;
         var reserved = {
           'annotation-xml': true, 'color-profile': true, 'font-face': true,

@@ -520,6 +520,16 @@
     (is (str/includes? source "'font-face-name': true, 'missing-glyph': true"))
     (is (str/includes? source "if (name.slice(0, 3).toLowerCase() === 'xml') return false;"))))
 
+(deftest quickjs-wasm-webapi-shim-custom-elements-name-validation-rejects-non-lowercase-start-or-uppercase
+  ;; Real spec (PotentialCustomElementName): the name must start with a
+  ;; lowercase ASCII letter and contain no uppercase ASCII letters
+  ;; anywhere. Previously unchecked in both this shim and the mirrored
+  ;; browser.compat.webcomponent/valid-name? -- customElements.define(
+  ;; 'Foo-Bar', ...) silently succeeded instead of throwing, confirmed via
+  ;; a real Node.js harness before touching source.
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "if (!/^[a-z][^A-Z]*$/.test(name)) return false;"))))
+
 (deftest quickjs-wasm-webapi-shim-exposes-dom-traversal-properties
   (let [source quickjs-wasm/webapi-shim-source]
     (is (str/includes? source "function __kotobaChildNodeId(nodeId, elementsOnly, last)"))

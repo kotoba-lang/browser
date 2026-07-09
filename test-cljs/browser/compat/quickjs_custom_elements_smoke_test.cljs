@@ -80,6 +80,30 @@
                                  (or (.-message err) err)))
                   (done))))))
 
+(deftest quickjs-real-custom-elements-define-rejects-a-name-with-uppercase-letters-test
+  ;; Real spec (PotentialCustomElementName): the name must start with a
+  ;; lowercase ASCII letter and contain no uppercase ASCII letters
+  ;; anywhere. Previously unchecked -- customElements.define('Foo-Bar', ...)
+  ;; silently succeeded instead of throwing.
+  (async done
+    (-> (run-page-and-read-title!
+         {:html (str "<script>"
+                     "var threw = false;"
+                     "try { customElements.define('Foo-Bar', function(){}); }"
+                     "catch (e) { threw = (e instanceof TypeError); }"
+                     "document.title = String(threw);"
+                     "</script>")})
+        (.then (fn [title]
+                 (println "quickjs real customElements.define() with an uppercase-containing name ->" (pr-str title))
+                 (is (= "true" title)
+                     (str "expected define() with a name containing uppercase letters to throw a "
+                          "real TypeError, got " (pr-str title)))
+                 (done)))
+        (.catch (fn [err]
+                  (is false (str "QuickJS WASM engine initialization / page load failed: "
+                                 (or (.-message err) err)))
+                  (done))))))
+
 (deftest quickjs-real-custom-elements-define-rejects-a-duplicate-name-test
   (async done
     (-> (run-page-and-read-title!

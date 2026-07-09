@@ -21,6 +21,15 @@
   [name]
   (and (string? name)
        (str/includes? name "-")
+       ;; Real spec (PotentialCustomElementName): the name must START with
+       ;; a lowercase ASCII letter and contain NO uppercase ASCII letters
+       ;; anywhere -- the PCENChar production explicitly excludes A-Z.
+       ;; Deliberately ASCII-only: PCENChar's full grammar also permits a
+       ;; long tail of non-ASCII Unicode ranges (middle dot, CJK blocks,
+       ;; etc.) that real custom element names almost never use, left
+       ;; unimplemented rather than risk a subtly wrong Unicode range
+       ;; check for near-zero real-world value.
+       (re-matches #"[a-z][^A-Z]*" name)
        ;; Real spec: must not start with an ASCII case-insensitive match
        ;; for "xml" (reserved by the XML specification), not just a
        ;; lowercase-only "xml" prefix.
