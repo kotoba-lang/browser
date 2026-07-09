@@ -2622,16 +2622,42 @@
             if (!valid) this.focus();
             return valid;
           },
-          addEventListener: function(type, handler) {
+          addEventListener: function(type, handler, options) {
+            // Real spec: the 3rd arg's `once` option (object form only --
+            // the legacy boolean useCapture form has no once concept) means
+            // the listener self-unregisters after its first invocation.
+            // Previously accepted (webapi-surface declares addEventListener
+            // supported with no caveat) but completely ignored -- a
+            // {once:true} handler fired on every subsequent event forever.
+            // Implemented as a self-removing DISPATCH-time wrapper stored
+            // in __kotobaListeners (so __kotobaDispatch's existing call
+            // loop needs no changes), while __kotobaListenerIds keeps the
+            // ORIGINAL handler reference as the removal-matching key --
+            // required so element.removeEventListener(type, handler) with
+            // the user's original function reference can still remove a
+            // once-listener BEFORE it ever fires, per spec. Deliberately
+            // out of scope: `capture`/`passive` -- this engine's dispatch
+            // has no capture phase at all (bubble-only), so threading a
+            // capture flag through registration without real capture-phase
+            // dispatch would be a partial, likely-misleading fix; a
+            // separate, larger change.
+            var once = Boolean(options && typeof options === 'object' && options.once);
             var handlerId = __kotobaHandlerId();
             var eventType = String(type);
             var targetId = __kotobaRefNodeId(ref);
             var key = __kotobaNodeKey(targetId) + ':' + eventType;
             globalThis.__kotobaListeners[key] = globalThis.__kotobaListeners[key] || [];
+            globalThis.__kotobaListenerIds[key] = globalThis.__kotobaListenerIds[key] || [];
             if (typeof handler === 'function') {
-              globalThis.__kotobaListeners[key].push(handler);
-              globalThis.__kotobaListenerIds[key] = globalThis.__kotobaListenerIds[key] || [];
-              globalThis.__kotobaListenerIds[key].push({ handler: handler, id: handlerId });
+              var dispatchFn = handler;
+              if (once) {
+                dispatchFn = function(event) {
+                  element.removeEventListener(eventType, handler);
+                  return handler.call(this, event);
+                };
+              }
+              globalThis.__kotobaListeners[key].push(dispatchFn);
+              globalThis.__kotobaListenerIds[key].push({ handler: handler, dispatchFn: dispatchFn, id: handlerId });
             }
             var request = {
               capability: 'event/listen',
@@ -2646,19 +2672,23 @@
             var eventType = String(type);
             var targetId = __kotobaRefNodeId(ref);
             var key = __kotobaNodeKey(targetId) + ':' + eventType;
-            var listeners = globalThis.__kotobaListeners[key] || [];
             var listenerIds = globalThis.__kotobaListenerIds[key] || [];
             var removedId = null;
-            globalThis.__kotobaListeners[key] = listeners.filter(function(listener) {
-              return listener !== handler;
-            });
+            var removedDispatchFn = null;
             globalThis.__kotobaListenerIds[key] = listenerIds.filter(function(entry) {
               if (removedId == null && entry.handler === handler) {
                 removedId = entry.id;
+                removedDispatchFn = entry.dispatchFn;
                 return false;
               }
               return true;
             });
+            if (removedDispatchFn != null) {
+              var listeners = globalThis.__kotobaListeners[key] || [];
+              globalThis.__kotobaListeners[key] = listeners.filter(function(listener) {
+                return listener !== removedDispatchFn;
+              });
+            }
             var request = {
               capability: 'event/remove',
               'event/type': eventType,
@@ -3145,12 +3175,30 @@
       function __kotobaGlobalEventKey(target, type) {
         return String(target) + ':' + String(type);
       }
-      function __kotobaListenGlobalEvent(target, type, handler) {
+      function __kotobaListenGlobalEvent(target, type, handler, options) {
+        // Mirrors the element-level addEventListener once-option fix above
+        // (see its comment for the full rationale) -- reuses the SAME
+        // __kotobaListenerIds bookkeeping, keyed identically to
+        // __kotobaListeners via __kotobaGlobalEventKey ('document:click',
+        // 'window:click', ...), which never collides with an element-level
+        // key (those are always 'node-N:type').
+        var once = Boolean(options && typeof options === 'object' && options.once);
         var handlerId = __kotobaHandlerId();
         var eventType = String(type);
         var key = __kotobaGlobalEventKey(target, eventType);
         globalThis.__kotobaListeners[key] = globalThis.__kotobaListeners[key] || [];
-        if (typeof handler === 'function') globalThis.__kotobaListeners[key].push(handler);
+        globalThis.__kotobaListenerIds[key] = globalThis.__kotobaListenerIds[key] || [];
+        if (typeof handler === 'function') {
+          var dispatchFn = handler;
+          if (once) {
+            dispatchFn = function(event) {
+              __kotobaRemoveGlobalEvent(target, eventType, handler);
+              return handler.call(this, event);
+            };
+          }
+          globalThis.__kotobaListeners[key].push(dispatchFn);
+          globalThis.__kotobaListenerIds[key].push({ handler: handler, dispatchFn: dispatchFn, id: handlerId });
+        }
         globalThis.__kotobaRequests.push({
           capability: 'event/listen',
           'event/target': String(target),
@@ -3161,10 +3209,21 @@
       function __kotobaRemoveGlobalEvent(target, type, handler) {
         var eventType = String(type);
         var key = __kotobaGlobalEventKey(target, eventType);
-        var listeners = globalThis.__kotobaListeners[key] || [];
-        globalThis.__kotobaListeners[key] = listeners.filter(function(listener) {
-          return listener !== handler;
+        var listenerIds = globalThis.__kotobaListenerIds[key] || [];
+        var removedDispatchFn = null;
+        globalThis.__kotobaListenerIds[key] = listenerIds.filter(function(entry) {
+          if (removedDispatchFn == null && entry.handler === handler) {
+            removedDispatchFn = entry.dispatchFn;
+            return false;
+          }
+          return true;
         });
+        if (removedDispatchFn != null) {
+          var listeners = globalThis.__kotobaListeners[key] || [];
+          globalThis.__kotobaListeners[key] = listeners.filter(function(listener) {
+            return listener !== removedDispatchFn;
+          });
+        }
         globalThis.__kotobaRequests.push({
           capability: 'event/remove',
           'event/target': String(target),
@@ -3193,8 +3252,8 @@
         });
         return !event.defaultPrevented;
       }
-      globalThis.document.addEventListener = function(type, handler) {
-        return __kotobaListenGlobalEvent('document', type, handler);
+      globalThis.document.addEventListener = function(type, handler, options) {
+        return __kotobaListenGlobalEvent('document', type, handler, options);
       };
       globalThis.document.removeEventListener = function(type, handler) {
         return __kotobaRemoveGlobalEvent('document', type, handler);
@@ -3202,8 +3261,8 @@
       globalThis.document.dispatchEvent = function(event) {
         return __kotobaDispatchGlobalEvent('document', event);
       };
-      globalThis.addEventListener = function(type, handler) {
-        return __kotobaListenGlobalEvent('window', type, handler);
+      globalThis.addEventListener = function(type, handler, options) {
+        return __kotobaListenGlobalEvent('window', type, handler, options);
       };
       globalThis.removeEventListener = function(type, handler) {
         return __kotobaRemoveGlobalEvent('window', type, handler);

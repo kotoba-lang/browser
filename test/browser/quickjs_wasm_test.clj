@@ -802,7 +802,7 @@
 
 (deftest quickjs-wasm-webapi-shim-exposes-global-event-capability
   (let [source quickjs-wasm/webapi-shim-source]
-    (is (str/includes? source "function __kotobaListenGlobalEvent(target, type, handler)"))
+    (is (str/includes? source "function __kotobaListenGlobalEvent(target, type, handler, options)"))
     (is (str/includes? source "function __kotobaRemoveGlobalEvent(target, type, handler)"))
     (is (str/includes? source "function __kotobaDispatchGlobalEvent(target, event)"))
     (is (str/includes? source "globalThis.CustomEvent = function(type, init)"))
@@ -818,13 +818,46 @@
     (is (str/includes? source "capability: 'event/listen'"))
     (is (str/includes? source "capability: 'event/remove'"))
     (is (str/includes? source "capability: 'event/dispatch'"))
-    (is (str/includes? source "globalThis.__kotobaListenerIds[key].push({ handler: handler, id: handlerId })"))
+    (is (str/includes? source "globalThis.__kotobaListenerIds[key].push({ handler: handler, dispatchFn: dispatchFn, id: handlerId })"))
     (is (str/includes? source "Object.assign(request, __kotobaNodeRequest(ref, 'node'))"))
     (is (str/includes? source "'event/target': String(target)"))
-    (is (str/includes? source "globalThis.document.addEventListener = function(type, handler)"))
+    (is (str/includes? source "globalThis.document.addEventListener = function(type, handler, options)"))
     (is (str/includes? source "globalThis.document.removeEventListener = function(type, handler)"))
-    (is (str/includes? source "globalThis.addEventListener = function(type, handler)"))
+    (is (str/includes? source "globalThis.addEventListener = function(type, handler, options)"))
     (is (str/includes? source "globalThis.removeEventListener = function(type, handler)"))))
+
+(deftest quickjs-wasm-webapi-shim-add-event-listener-honors-the-once-option
+  ;; Real spec: addEventListener's 3rd arg's `once` option means the
+  ;; listener self-unregisters after its first invocation. Previously
+  ;; accepted (webapi-surface declares addEventListener supported with no
+  ;; caveat) but completely ignored across all three addEventListener
+  ;; implementations (element, document, window) -- a {once:true} handler
+  ;; fired on every subsequent event forever. Confirmed via a real Node.js
+  ;; harness (verbatim extraction of the exact shipped design) across 5
+  ;; scenarios before touching source. Implemented as a self-removing
+  ;; dispatch-time wrapper, with __kotobaListenerIds keeping the ORIGINAL
+  ;; handler reference as the removal-matching key so
+  ;; element.removeEventListener(type, handler) with the user's original
+  ;; function reference can still remove a once-listener before it fires.
+  ;; Deliberately out of scope: `capture`/`passive` -- this engine's
+  ;; dispatch has no capture phase at all (bubble-only), so a partial
+  ;; capture-flag fix without real capture-phase dispatch would be likely
+  ;; misleading -- a separate, larger change.
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "var once = Boolean(options && typeof options === 'object' && options.once);"))
+    (is (str/includes? source (str "if (once) {\n"
+                                    "                dispatchFn = function(event) {\n"
+                                    "                  element.removeEventListener(eventType, handler);\n"
+                                    "                  return handler.call(this, event);\n"
+                                    "                };\n"
+                                    "              }")))
+    (is (str/includes? source (str "if (once) {\n"
+                                    "            dispatchFn = function(event) {\n"
+                                    "              __kotobaRemoveGlobalEvent(target, eventType, handler);\n"
+                                    "              return handler.call(this, event);\n"
+                                    "            };\n"
+                                    "          }")))
+    (is (str/includes? source "if (removedDispatchFn != null) {"))))
 
 (deftest quickjs-wasm-webapi-shim-exposes-event-modifier-keys
   ;; KeyboardEvent/MouseEvent shiftKey/ctrlKey/altKey/metaKey -- previously
