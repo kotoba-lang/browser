@@ -328,7 +328,12 @@
    :worker/instances :worker/handles :worker/outbox
    :net/fetch-responses
    :broadcast/channels :history/entries :history/index
-   :global/listeners])
+   :global/listeners
+   ;; console.* output accumulates across scripts within a page generation so
+   ;; the L1 DevTools console panel (browser.devtools) can inspect it from the
+   ;; session without re-running scripts; a navigation bumps the generation and
+   ;; drops the log, matching real browser console lifetime.
+   :console/messages])
 
 (defn- script-generation
   [session script]
