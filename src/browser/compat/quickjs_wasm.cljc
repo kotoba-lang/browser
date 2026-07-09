@@ -1135,6 +1135,36 @@
         var max = __kotobaParseNumber(__kotobaAttr(node, 'max'));
         return (!Number.isNaN(min) && n < min) || (!Number.isNaN(max) && n > max);
       }
+      function __kotobaChildCountsAsContent(childId) {
+        // Mirrors cssom.core/child-counts-as-content? exactly: an
+        // 'element' child ALWAYS counts (any element child at all --
+        // however deeply empty THAT child may itself be -- disqualifies
+        // its parent from :empty); a 'text' child counts only when its
+        // own data is non-empty (real CSS tests a text node's LENGTH,
+        // not whether it's meaningful -- a WHITESPACE-ONLY text node
+        // still has non-zero length and so DOES count as content:
+        // <div> </div> does NOT match :empty, only a genuinely childless
+        // <div></div> does). Any other/unknown node type conservatively
+        // counts as content too, the same \"don't guess, degrade safely\"
+        // default this shim uses elsewhere.
+        var child = __kotobaNodeById(childId);
+        var type = child && child['node/type'];
+        if (type === 'element') return true;
+        if (type === 'text') return String(child.text || '').length > 0;
+        return true;
+      }
+      function __kotobaEmptyPseudoMatches(node) {
+        // Real CSS: an element with NO children AT ALL, of ANY node
+        // type -- deliberately different from the structural pseudo-
+        // classes above, which ignore text nodes entirely for SIBLING-
+        // POSITION purposes. node's own children array is checked
+        // directly, no parent/sibling traversal needed.
+        var children = node.children || [];
+        for (var i = 0; i < children.length; i++) {
+          if (__kotobaChildCountsAsContent(children[i])) return false;
+        }
+        return true;
+      }
       function __kotobaMatchesSimple(node, simple) {
         if (!node || node['node/type'] !== 'element') return false;
         if (simple.tag && String(node.tag || '').toLowerCase() !== simple.tag) return false;
@@ -1307,6 +1337,16 @@
                   __kotobaConstraintValidationBarredControl(node) ||
                   !__kotobaRangeLimitedControl(node) ||
                   !__kotobaRangeInvalid(node)) return false;
+              break;
+            case 'empty':
+              // Previously entirely absent (confirmed via grep -- zero
+              // matches), even though the sibling cssom.core already
+              // implements this correctly for real CSS styling. Any
+              // selector using it via a script-facing query always
+              // returned an empty/false result, regardless of whether
+              // the element actually had zero children of any node
+              // type.
+              if (!__kotobaEmptyPseudoMatches(node)) return false;
               break;
             default:
               return false;

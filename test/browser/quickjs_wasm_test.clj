@@ -1677,6 +1677,27 @@
     (is (str/includes? source "return !Number.isNaN(min) || !Number.isNaN(max);"))
     (is (str/includes? source "return (!Number.isNaN(min) && n < min) || (!Number.isNaN(max) && n > max);"))))
 
+;; ---- :empty pseudo-class -- previously entirely absent from the
+;; JS-facing selector engine (confirmed via grep -- zero matches), even
+;; though the sibling cssom.core already implements this correctly for
+;; real CSS styling via empty-pseudo-matches?/child-counts-as-content?.
+;; Any selector using it via a script-facing query always returned an
+;; empty/false result, regardless of whether the element actually had
+;; zero children of any node type. Real CSS: a whitespace-only text
+;; child (non-zero length) still counts as content -- only a genuinely
+;; childless element, or one whose only text child is truly zero-length,
+;; matches. Confirmed via a real Node.js harness (7 scenarios) before
+;; touching source. ----
+
+(deftest quickjs-wasm-webapi-shim-selector-engine-supports-empty-pseudo-class
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "function __kotobaChildCountsAsContent(childId)"))
+    (is (str/includes? source "function __kotobaEmptyPseudoMatches(node)"))
+    (is (str/includes? source "case 'empty':"))
+    (is (str/includes? source "if (type === 'element') return true;"))
+    (is (str/includes? source "if (type === 'text') return String(child.text || '').length > 0;"))
+    (is (str/includes? source "if (!__kotobaEmptyPseudoMatches(node)) return false;"))))
+
 (deftest quickjs-wasm-webapi-shim-blob-reads-real-arraybuffer-bytes
   ;; A raw ArrayBuffer has NO `.length` property in real JS (only
   ;; `.byteLength` -- verified: `typeof (new ArrayBuffer(4)).length` is
