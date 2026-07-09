@@ -3,7 +3,8 @@
         io.github.kotoba-lang/cssom {:local/root "../cssom"}
         io.github.kotoba-lang/htmldom {:local/root "../htmldom"}
         io.github.kotoba-lang/quickjs {:local/root "../quickjs"}
-        io.github.kotoba-lang/org-w3-aria {:local/root "../org-w3-aria"}}
+        io.github.kotoba-lang/org-w3-aria {:local/root "../org-w3-aria"}
+        io.github.kotoba-lang/devtools {:local/root "../devtools"}}
  :aliases
  {:test {:extra-paths ["test"]
          :extra-deps {io.github.cognitect-labs/test-runner
