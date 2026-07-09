@@ -17,6 +17,14 @@
       :element (str/join "" (map #(text-content document %) (:children n)))
       "")))
 
+(defn- truthy-attr? [v]
+  (or (= true v)
+      (= "true" v)
+      (= "" v)
+      (and (string? v)
+           (not (str/blank? v))
+           (not= "false" (str/lower-case v)))))
+
 (defn script-nodes
   [document]
   (->> (:nodes document)
@@ -87,6 +95,23 @@
     (vec
      (keep #(executable-script document (:browser/url page) %)
            (script-nodes document)))))
+
+(defn async-script?
+  "Per the HTML spec, `async` only affects an EXTERNAL script (one with
+   a `src`) -- an inline script carrying the `async` attribute is
+   spec-defined to still run as an ordinary blocking, document-order
+   script, so `:script/src` must be present too. `run-page-scripts!`
+   (browser.session) uses this to keep an async script's fetch/execute
+   OUT of the document-order blocking chain entirely and to never let
+   it delay DOMContentLoaded/load -- previously every script, `async`
+   or not, was executed strictly in document order and unconditionally
+   blocked both lifecycle events, so a slow- or never-fetching `async`
+   script (e.g. denied by policy, or simply large) silently delayed
+   DOMContentLoaded/load exactly as if it had no `async` attribute at
+   all, a real, observable page-ready-state timing bug."
+  [script]
+  (boolean (and (:script/src script)
+                (truthy-attr? (get (:script/attrs script) :async)))))
 
 (defn absolute-url?
   [url]

@@ -685,6 +685,22 @@
         session))))
 
 (defn run-page-scripts!
+  ;; `async` scripts (external `src`, `async` attribute present) are kept
+  ;; OUT of the document-order blocking reduce below and run AFTER
+  ;; DOMContentLoaded/load fire, never gating either -- previously every
+  ;; script, `async` or not, executed strictly in document order and
+  ;; unconditionally blocked both lifecycle events, so a slow- or never-
+  ;; fetching `async` script (e.g. denied by policy, or simply large)
+  ;; silently delayed DOMContentLoaded/load exactly as if it had no
+  ;; `async` attribute at all. This engine has no real concurrent fetch,
+  ;; so "run after load, still in document order among themselves" is
+  ;; the closest faithful approximation of "never blocks page-ready
+  ;; milestones" available in a synchronous host model -- genuine
+  ;; relative-ordering races between multiple async scripts (which real
+  ;; browsers resolve by fetch-completion order) are NOT modeled here.
+  ;; `defer` needs no separate handling: it already means "document
+  ;; order, before DOMContentLoaded," which is this engine's existing
+  ;; unconditional default for every non-async script.
   [session]
   (if-let [runner (:browser.session/script-runner session)]
     (letfn [(run-one [session script]
@@ -702,12 +718,14 @@
                                         :event/target target
                                         :event/type event-type
                                         :document/ready-state ready-state})))]
-      (-> (reduce run-one
-                  session
-                  (page-script/executable-scripts (:browser.session/page session)))
-          (run-lifecycle :document "DOMContentLoaded" "interactive")
-          (run-lifecycle :window "load" "complete")
-          (persist!)))
+      (let [scripts (page-script/executable-scripts (:browser.session/page session))
+            blocking-scripts (remove page-script/async-script? scripts)
+            async-scripts (filter page-script/async-script? scripts)]
+        (-> (reduce run-one session blocking-scripts)
+            (run-lifecycle :document "DOMContentLoaded" "interactive")
+            (run-lifecycle :window "load" "complete")
+            (as-> s (reduce run-one s async-scripts))
+            (persist!))))
     (-> session
         (set-page-ready-state "complete")
         (persist!))))

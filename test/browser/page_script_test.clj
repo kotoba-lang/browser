@@ -46,6 +46,26 @@
         scripts (page-script/executable-scripts page)]
     (is (= [:classic :module] (mapv :script/type scripts)))))
 
+;; ---- async-script? gates which scripts run-page-scripts! (browser.
+;; session) keeps out of the document-order blocking chain -- per the
+;; HTML spec, `async` only affects an EXTERNAL script (one with a
+;; `src`); an inline script carrying `async` is spec-defined to still
+;; behave as an ordinary blocking, document-order script. ----
+
+(deftest page-script-async-script-predicate-only-applies-to-external-scripts
+  (let [page (browser/load-html
+              {:url "kotoba://scripts"
+               :html (str "<main>"
+                          "<script src=\"a.js\" async></script>"
+                          "<script src=\"b.js\"></script>"
+                          "<script async>globalThis.inline = 1;</script>"
+                          "<script src=\"c.js\" async=\"false\"></script>"
+                          "</main>")})
+        scripts (page-script/executable-scripts page)]
+    (is (= [true false false false]
+           (mapv page-script/async-script? scripts))
+        "only the external script actually carrying a truthy async attribute is async -- src-less async, and async=\"false\", are not")))
+
 (deftest page-script-resolves-src-against-page-url
   (is (= "https://example.com/app.js"
          (page-script/resolve-src "https://example.com/docs/index.html" "/app.js")))

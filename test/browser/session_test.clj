@@ -3473,6 +3473,62 @@
            (filter #(= :page/lifecycle-dispatch (:event %))
                    (:browser.session/history s))))))
 
+;; ---- <script async src="..."> must not block DOMContentLoaded/load, and
+;; must run OUTSIDE the ordinary document-order blocking chain --
+;; previously every script, async or not, executed strictly in document
+;; order and unconditionally blocked both lifecycle events, so a slow-
+;; or never-resolving async script silently delayed DOMContentLoaded/
+;; load exactly as if it had no async attribute at all. Confirmed via
+;; direct REPL reproduction before touching source. ----
+
+(deftest async-external-script-does-not-block-lifecycle-and-runs-after-load
+  (let [h (host/recording-host)
+        p (-> (profile/new-profile {:id "default"})
+              (profile/grant-permission "https://app.example" :net/fetch))
+        observed (atom [])
+        s (session/new-session
+           {:host h
+            :profile p
+            :fetch-fn (fn [{:keys [url]}]
+                        (if (str/includes? url "slow.js")
+                          {:status 200 :headers {} :body "globalThis.slowRan = true;"}
+                          {:status 404 :headers {} :body ""}))
+            :script-runner (fn [session script]
+                             (swap! observed conj
+                                    (or (:script/lifecycle-event script)
+                                        (:script/source script)))
+                             session)})
+        s (session/load-html! s {:url "https://app.example/scripts"
+                                 :html (str "<main>"
+                                            "<script src=\"slow.js\" async></script>"
+                                            "<script>globalThis.x = 1;</script>"
+                                            "</main>")})]
+    (is (= ["globalThis.x = 1;"
+            "DOMContentLoaded"
+            "load"
+            "globalThis.slowRan = true;"]
+           @observed)
+        "the blocking inline script runs first, in document order, before both lifecycle events; the async script runs only after load")
+    (is (= "complete"
+           (get-in s [:browser.session/page :browser/document :ready-state])))))
+
+(deftest async-attribute-on-an-inline-script-is-ignored-and-still-blocks
+  (let [h (host/recording-host)
+        observed (atom [])
+        s (session/new-session
+           {:host h
+            :script-runner (fn [session script]
+                             (swap! observed conj
+                                    (or (:script/lifecycle-event script)
+                                        (:script/source script)))
+                             session)})
+        s (session/load-html! s {:url "kotoba://inline-async"
+                                 :html "<main><script async>globalThis.x = 1;</script></main>"})]
+    (is (= ["globalThis.x = 1;" "DOMContentLoaded" "load"] @observed)
+        "async only affects EXTERNAL scripts per spec -- an inline script with async present still runs as an ordinary blocking script, before DOMContentLoaded")
+    (is (= "complete"
+           (get-in s [:browser.session/page :browser/document :ready-state])))))
+
 (deftest load-html-without-script-runner-still-completes-document-ready-state
   (let [h (host/recording-host)
         s (-> (session/new-session {:host h})
