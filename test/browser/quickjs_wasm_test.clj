@@ -1501,3 +1501,42 @@
     ;; must still be present, unchanged in its own read logic.
     (is (str/includes? fn-source "typeof p.length === 'number'"))
     (is (str/includes? fn-source "for (var j = 0; j < p.length; j++) bytes.push(p[j] & 0xFF);"))))
+
+(deftest quickjs-wasm-webapi-shim-blob-text-and-arraybuffer-return-real-thenables
+  ;; `Blob.prototype.text()`/`arrayBuffer()` were the ONE place in this
+  ;; whole webapi shim that returned a real, NATIVE QuickJS
+  ;; `Promise.resolve(...)` (confirmed: `grep -n "Promise.resolve"` in
+  ;; this file returns exactly these two hits) -- every other async-shaped
+  ;; webapi (fetch()/Response.text, clipboard.readText/writeText,
+  ;; getUserMedia, Notification.requestPermission, requestFullscreen/
+  ;; exitFullscreen) already uses the hand-rolled `__kotobaMakeDeferred`
+  ;; thenable instead, specifically because this engine's `eval-result`/
+  ;; `dump-requests` never call `runtime.executePendingJobs()` (confirmed:
+  ;; `grep -rn executePendingJobs` across the whole repo has zero real
+  ;; call sites, only the explanatory docstring comment) -- a real native
+  ;; Promise's `.then()` reactions are queued as VM jobs that, without
+  ;; that pump, never run. So `blob.text().then(cb)` /
+  ;; `blob.arrayBuffer().then(cb)` silently NEVER invoked `cb` -- the
+  ;; prior cycle's own Blob smoke test had to deliberately route around
+  ;; this via synchronous `.size`/`.__bytes`/`.slice()` checks instead,
+  ;; which is exactly what surfaced this bug. Fixed by building a
+  ;; `__kotobaMakeDeferred` and resolving it synchronously with the
+  ;; already-known-in-memory decoded text / buffer, mirroring the
+  ;; established convention. Confirmed via a real Node.js harness before
+  ;; touching source, then a real CLJS/QuickJS smoke test proving both
+  ;; `.then()` callbacks genuinely fire within the same script tag.
+  (let [source quickjs-wasm/webapi-shim-source
+        text-idx (.indexOf source "globalThis.Blob.prototype.text = function()")
+        text-fn-source (subs source text-idx (+ text-idx 1400))
+        ab-idx (.indexOf source "globalThis.Blob.prototype.arrayBuffer = function()")
+        ab-fn-source (subs source ab-idx (+ ab-idx 500))]
+    (is (str/includes? text-fn-source "var deferred = __kotobaMakeDeferred();"))
+    (is (str/includes? text-fn-source "deferred.resolve(__kotobaUtf8Decode(this.__bytes));"))
+    (is (str/includes? text-fn-source "return deferred.promise;"))
+    (is (not (str/includes? text-fn-source "return Promise.resolve"))
+        "must no longer return a real, native Promise.resolve() directly")
+    (is (str/includes? ab-fn-source "var deferred = __kotobaMakeDeferred();"))
+    (is (str/includes? ab-fn-source "deferred.resolve(buf.buffer);"))
+    (is (str/includes? ab-fn-source "return deferred.promise;"))
+    (is (not (str/includes? ab-fn-source "return Promise.resolve"))
+        "must no longer return a real, native Promise.resolve() directly")))

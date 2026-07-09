@@ -3772,12 +3772,32 @@
         return blob;
       };
       globalThis.Blob.prototype.text = function() {
-        return Promise.resolve(__kotobaUtf8Decode(this.__bytes));
+        // Real spec: text()/arrayBuffer() return real Promises -- but a
+        // real, NATIVE QuickJS Promise.resolve() (what this used to
+        // return) never actually settles its .then() reactions in this
+        // engine, since those are queued as VM jobs that only run once
+        // the host calls runtime.executePendingJobs(), which eval-result/
+        // dump-requests never do (see __kotobaMakeDeferred's own
+        // docstring above for the full explanation -- the exact reason
+        // that thenable exists at all). So `blob.text().then(cb)` /
+        // `blob.arrayBuffer().then(cb)` silently NEVER invoked cb --
+        // every other async-shaped webapi in this file already avoids
+        // native Promise for exactly this reason (fetch()/Response.text,
+        // clipboard.readText/writeText, getUserMedia,
+        // Notification.requestPermission, requestFullscreen/
+        // exitFullscreen); Blob was the one remaining outlier. The real
+        // decoded text is already known synchronously (this.__bytes is
+        // already-in-memory, no real I/O), so it resolves immediately.
+        var deferred = __kotobaMakeDeferred();
+        deferred.resolve(__kotobaUtf8Decode(this.__bytes));
+        return deferred.promise;
       };
       globalThis.Blob.prototype.arrayBuffer = function() {
         var buf = new Uint8Array(this.__bytes.length);
         for (var i = 0; i < this.__bytes.length; i++) buf[i] = this.__bytes[i];
-        return Promise.resolve(buf.buffer);
+        var deferred = __kotobaMakeDeferred();
+        deferred.resolve(buf.buffer);
+        return deferred.promise;
       };
       globalThis.File = function(fileParts, filename, options) {
         if (!(this instanceof globalThis.File)) return new globalThis.File(fileParts, filename, options);
