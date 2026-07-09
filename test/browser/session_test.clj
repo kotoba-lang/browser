@@ -4818,6 +4818,117 @@
     (is (= 0 (count (get-in session [:browser.session/navigation :entries]))))
     (is (= 0 (run-history-length-probe! session)))))
 
+;; ---- location.assign/location.replace/location.href = bridging into
+;; real session navigation -- the confirmed gap: quickjs-execution's own
+;; :location/assign/:location/replace capability requests already
+;; computed a correct target URL and landed in :context/requests, but
+;; NOTHING ever read that back out to make THIS session's real page
+;; actually navigate -- a script's own location.href = 'url' was a real,
+;; correctly-computed, entirely inert no-op at the session level.
+;; Confirmed via direct REPL reproduction before touching source. ----
+
+(deftest script-location-assign-bridges-into-real-session-navigation
+  (let [h (host/recording-host)
+        s (-> (session/new-session {:host h :fetch-fn (fn [_] {:status 200 :body "<main>next</main>"})})
+              (session/load-html! {:url "https://app.example/start" :html "<main>start</main>"}))
+        navigated (session/commit-script-state!
+                   s {:context/requests [{:capability :location/assign
+                                          :url "https://app.example/next"}]})]
+    (is (= "https://app.example/next" (get-in navigated [:browser.session/page :browser/url])))
+    (is (= "next" (-> navigated :browser.session/page :browser/document dom/text-content))
+        "location.assign must fetch and commit the real target document, not just relabel the URL")
+    (is (= ["https://app.example/start" "https://app.example/next"]
+           (mapv :url (get-in navigated [:browser.session/navigation :entries])))
+        "assign pushes a new real navigation entry, like a real browser")))
+
+(deftest script-location-replace-navigates-without-growing-the-navigation-stack
+  (let [h (host/recording-host)
+        s (-> (session/new-session {:host h :fetch-fn (fn [_] {:status 200 :body "<main>next</main>"})})
+              (session/load-html! {:url "https://app.example/start" :html "<main>start</main>"}))
+        entries-before (count (get-in s [:browser.session/navigation :entries]))
+        navigated (session/commit-script-state!
+                   s {:context/requests [{:capability :location/replace
+                                          :url "https://app.example/next"}]})]
+    (is (= "https://app.example/next" (get-in navigated [:browser.session/page :browser/url])))
+    (is (= entries-before (count (get-in navigated [:browser.session/navigation :entries])))
+        "location.replace must NOT push a new navigation entry, unlike assign")))
+
+(deftest script-location-assign-called-twice-in-one-script-tag-uses-the-last-target
+  ;; Mirrors real-browser semantics: synchronously calling location.assign
+  ;; twice begins navigating to the first URL, then immediately supersedes
+  ;; it with the second -- only the final target actually loads.
+  (let [h (host/recording-host)
+        s (-> (session/new-session {:host h :fetch-fn (fn [_] {:status 200 :body "<main>next</main>"})})
+              (session/load-html! {:url "https://app.example/start" :html "<main>start</main>"}))
+        navigated (session/commit-script-state!
+                   s {:context/requests [{:capability :location/assign :url "https://app.example/wrong"}
+                                         {:capability :location/assign :url "https://app.example/next"}]})]
+    (is (= "https://app.example/next" (get-in navigated [:browser.session/page :browser/url])))))
+
+(deftest script-location-assign-to-a-same-document-fragment-does-not-refetch
+  ;; navigate!'s own already-correct same-document-fragment short circuit
+  ;; must still apply when reached via the new script-driven bridge.
+  (let [fetch-count (atom 0)
+        h (host/recording-host)
+        s (-> (session/new-session {:host h :fetch-fn (fn [_] (swap! fetch-count inc)
+                                                        {:status 200 :body "<main>start</main>"})})
+              (session/load-html! {:url "https://app.example/start" :html "<main>start</main>"}))
+        fetch-count-before @fetch-count
+        navigated (session/commit-script-state!
+                   s {:context/requests [{:capability :location/assign
+                                          :url "https://app.example/start#section2"}]})]
+    (is (= "https://app.example/start#section2" (get-in navigated [:browser.session/page :browser/url])))
+    (is (= fetch-count-before @fetch-count)
+        "a same-document fragment change must not issue a real fetch")))
+
+(deftest script-with-no-location-activity-does-not-affect-navigation
+  ;; The other half of the contract: a script that never calls
+  ;; location.assign/replace must fall through to the normal per-script
+  ;; document commit unaffected -- the exact regression guard shape
+  ;; already established for pushState above.
+  (let [h (host/recording-host)
+        s (-> (session/new-session {:host h})
+              (session/load-html! {:url "https://app.example/start" :html "<main id=\"root\">start</main>"}))
+        url-before (get-in s [:browser.session/page :browser/url])
+        root (bridge/query-selector (get-in s [:browser.session/page :browser/document]) "#root")
+        created (bridge/apply-mutation (get-in s [:browser.session/page :browser/document])
+                                       {:dom/op :create-text :text " Script state"})
+        appended (bridge/apply-mutation (:document created)
+                                        {:dom/op :append-child
+                                         :parent/id root
+                                         :child/id (:node/id created)})
+        unaffected (session/commit-script-state! s {:document (:document appended)
+                                                     :result :ok
+                                                     :results [{:result :ok}]})]
+    (is (= url-before (get-in unaffected [:browser.session/page :browser/url])))
+    (is (= "start Script state"
+           (-> unaffected :browser.session/page :browser/document dom/text-content)))))
+
+(deftest run-script-real-location-assign-capability-request-bridges-through-the-full-pipeline
+  ;; Same end-to-end proof as pushState/traverse's own full-pipeline tests
+  ;; above: a fake :script-engine/engine returning a REAL :location/assign
+  ;; CAPABILITY REQUEST (the exact shape a real QuickJS VM's own
+  ;; globalThis.location.href = url call produces) run through the REAL
+  ;; run-script! -> quickjs-execution/evaluate! -> location-change-result
+  ;; pipeline, proving the bridge added by this fix reaches all the way
+  ;; from a real capability request to this session's own real navigation.
+  (let [h (host/recording-host)
+        s (-> (session/new-session {:host h :fetch-fn (fn [_] {:status 200 :body "<main>next</main>"})})
+              (session/load-html! {:url "https://app.example/start" :html "<main>start</main>"}))
+        s (assoc s :browser.session/script-engine
+                 {:script-engine/engine
+                  (fn [_]
+                    {:result :ok
+                     :requests [{:request/id "assign-1"
+                                 :capability :location/assign
+                                 :url "https://app.example/next"}]})})
+        after (quickjs-runner/run-script!
+               s {:script/type :classic
+                  :script/source "location.href = 'https://app.example/next';"
+                  :script/url "https://app.example/start"})]
+    (is (= "https://app.example/next" (get-in after [:browser.session/page :browser/url])))
+    (is (= "next" (-> after :browser.session/page :browser/document dom/text-content)))))
+
 (deftest new-session-threads-a-real-host-color-scheme-into-media-query-evaluation
   ;; browser.core/cssom.core support prefers-color-scheme, but that's dead
   ;; without a real host-injection point at the session level too --

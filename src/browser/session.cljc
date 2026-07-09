@@ -661,28 +661,67 @@
           session))
       session)))
 
+(declare navigate!)
+
+(defn- bridge-script-location-change
+  "Real `location.assign(url)`/`location.replace(url)`/`location.href =
+   url` calls already run for real against `quickjs-execution`'s own
+   state -- a `:location/assign`/`:location/replace` capability request
+   lands in `script-state`'s `:context/requests` with the target `:url`
+   -- but NOTHING ever read that back out to make this session's REAL
+   page actually navigate: no fetch, no document swap, nothing. A
+   script's own `location.href = 'https://example.com'` was a real,
+   correctly-computed, entirely inert no-op as far as the rest of this
+   engine could tell -- the exact same bug shape `bridge-pushed-history-
+   entries` above closed for `pushState`, just for genuine cross-document
+   navigation instead of same-document history bookkeeping.
+
+   Takes the LAST such request THIS script tag made (mirrors a real
+   browser: synchronously calling `location.assign` twice in a row begins
+   navigating to the first URL, then immediately supersedes it with the
+   second -- only the final target actually loads). `:location/replace`
+   is threaded through as `{:remember? false}` so it correctly does NOT
+   push a new entry onto the real navigation stack (`:browser.session/
+   navigation`), matching `location.replace`'s real spec-defined
+   difference from `.assign`/`.href =` -- both otherwise share the exact
+   same real navigation path (`navigate!`, including its own already-
+   correct same-document-fragment short circuit).
+
+   Returns the NEW, post-navigation session (which subsumes any DOM
+   mutation `script-state` itself carries, exactly like a real browser
+   discards the old document once it navigates away), or nil when this
+   script tag made no location-changing call, so `commit-script-state!`
+   falls through to its normal per-script document commit."
+  [session script-state]
+  (when-let [request (last (filter #(#{:location/assign :location/replace} (:capability %))
+                                    (:context/requests script-state)))]
+    (navigate! session (:url request)
+               (when (= :location/replace (:capability request)) {:remember? false}))))
+
 (defn commit-script-state!
   [session script-state]
-  (let [net-store-updated? (contains? (:net/context script-state) :store)
-        session (-> session
-                    (apply-script-net-store script-state)
-                    (bridge-pushed-history-entries script-state)
-                    (bridge-replaced-history-entry script-state)
-                    (bridge-traversed-history-index script-state))]
-    (if-let [document (:document script-state)]
-      (-> (commit-document! session document)
-          (update :browser.session/history conj
-                  (cond-> {:event :script/document-state
-                           :result (:result script-state)
-                           :response-count (count (:results script-state))}
-                    net-store-updated? (assoc :net/store-updated? true)))
-          (persist!))
-      (if net-store-updated?
-        (-> session
-            (update :browser.session/history conj {:event :script/net-state
-                                                   :net/store-updated? true})
+  (if-let [navigated (bridge-script-location-change session script-state)]
+    navigated
+    (let [net-store-updated? (contains? (:net/context script-state) :store)
+          session (-> session
+                      (apply-script-net-store script-state)
+                      (bridge-pushed-history-entries script-state)
+                      (bridge-replaced-history-entry script-state)
+                      (bridge-traversed-history-index script-state))]
+      (if-let [document (:document script-state)]
+        (-> (commit-document! session document)
+            (update :browser.session/history conj
+                    (cond-> {:event :script/document-state
+                             :result (:result script-state)
+                             :response-count (count (:results script-state))}
+                      net-store-updated? (assoc :net/store-updated? true)))
             (persist!))
-        session))))
+        (if net-store-updated?
+          (-> session
+              (update :browser.session/history conj {:event :script/net-state
+                                                     :net/store-updated? true})
+              (persist!))
+          session)))))
 
 (defn run-page-scripts!
   ;; `async` scripts (external `src`, `async` attribute present) are kept
@@ -835,7 +874,7 @@
       (-> session
           (assoc :browser.session/navigation
                  (assoc (:browser.session/navigation session) :redirects redirects))
-          (commit-page! page)
+          (commit-page! page (select-keys request [:remember?]))
           (run-page-scripts!)))))))
 
 (defn- navigate-to-history-entry!
