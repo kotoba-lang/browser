@@ -569,6 +569,75 @@
              "(5) into the engine invocation as :history/snapshot -- got "
              (pr-str (:history/snapshot @received-payload))))))
 
+(deftest quickjs-crypto-snapshot-threads-seeded-queues-into-engine-invocation
+  ;; crypto-snapshot is the REAL, host-seeded :crypto/random-bytes|
+  ;; random-uuids queues invocation-with-snapshots threads into the engine
+  ;; invocation as :crypto/snapshot (mirrors :history/snapshot's own
+  ;; precedent above). Before this fix, quickjs-wasm's webapi shim never
+  ;; received any of this -- getRandomValues/randomUUID always returned
+  ;; zeros/a fixed placeholder UUID regardless of what was seeded, even
+  ;; though take-random-bytes/take-random-uuid already correctly consumed
+  ;; the SAME queues for the post-hoc audit trail.
+  (let [adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        received-payload (atom nil)
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :crypto-random-bytes [1 2 3]
+                :crypto-random-uuids ["11111111-1111-4111-8111-111111111111"]
+                :engine (fn [request]
+                          (reset! received-payload request)
+                          {:result :ok :requests []})})
+        _ (execution/evaluate! state {:source "/* probe */"})]
+    (is (= {:bytes [1 2 3] :uuids ["11111111-1111-4111-8111-111111111111"]}
+           (:crypto/snapshot @received-payload))
+        (str "expected crypto-snapshot to thread the REAL, host-seeded "
+             ":crypto-random-bytes/:crypto-random-uuids into the engine "
+             "invocation as :crypto/snapshot -- got "
+             (pr-str (:crypto/snapshot @received-payload))))))
+
+(deftest quickjs-crypto-snapshot-defaults-to-empty-queues-without-seed
+  ;; Regression guard: a state built without :crypto-random-bytes/
+  ;; :crypto-random-uuids options (e.g. a caller invoking new-state
+  ;; directly, or below evaluate!/load-module!) must keep today's default
+  ;; of empty queues, unaffected by this change -- mirrors
+  ;; quickjs-history-length-snapshot-defaults-to-zero-without-seed's
+  ;; precedent above.
+  (let [adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        received-payload (atom nil)
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :engine (fn [request]
+                          (reset! received-payload request)
+                          {:result :ok :requests []})})
+        _ (execution/evaluate! state {:source "/* probe */"})]
+    (is (= {:bytes [] :uuids []} (:crypto/snapshot @received-payload))
+        (str "expected crypto-snapshot to default to empty queues when no "
+             ":crypto-random-bytes/:crypto-random-uuids was ever seeded -- got "
+             (pr-str (:crypto/snapshot @received-payload))))))
+
+(deftest quickjs-crypto-snapshot-threads-through-load-module!-too
+  ;; evaluate! and load-module! both call invocation-with-snapshots and must
+  ;; both thread the crypto queues the same way (mirrors the history-length
+  ;; snapshot's own dual-arity threading through both fns above).
+  (let [adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        received-payload (atom nil)
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :crypto-random-bytes [9 8 7]
+                :crypto-random-uuids ["22222222-2222-4222-8222-222222222222"]
+                :engine (fn [request]
+                          (reset! received-payload request)
+                          {:result "export default 1" :requests []})})
+        _ (execution/load-module! state "./mod.js" nil)]
+    (is (= {:bytes [9 8 7] :uuids ["22222222-2222-4222-8222-222222222222"]}
+           (:crypto/snapshot @received-payload))
+        (str "expected load-module! to thread the same seeded crypto queues "
+             "into the engine invocation as :crypto/snapshot -- got "
+             (pr-str (:crypto/snapshot @received-payload))))))
+
 (deftest quickjs-fullscreen-request-records-context-request-with-profile-grant
   (let [page (browser/load-html {:url "https://app.example/app"
                                  :html "<main id=\"app\">Fullscreen</main>"})

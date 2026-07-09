@@ -3778,21 +3778,46 @@
       };
       globalThis.crypto = {
         getRandomValues: function(array) {
+          // Consumes globalThis.__kotobaCryptoSnapshot.bytes (the REAL,
+          // host-seeded queue -- see crypto-snapshot-source) starting at
+          // __kotobaCryptoBytesOffset, a cursor that advances by `length`
+          // on every call and only resets when a fresh snapshot is
+          // installed (each script tag). Previously this ignored the
+          // snapshot entirely and always wrote zeros -- the audit-log
+          // request below reached the REAL host-side random-bytes queue,
+          // but only for a post-hoc audit trail, never fed back to what
+          // the script itself already synchronously received.
           var length = array && array.length != null ? Number(array.length) : 0;
           globalThis.__kotobaRequests.push({
             capability: 'crypto/random-values',
             'crypto/op': 'random-values',
             length: length
           });
-          for (var i = 0; i < length; i++) array[i] = 0;
+          var snapshot = globalThis.__kotobaCryptoSnapshot || { bytes: [] };
+          var bytes = snapshot.bytes || [];
+          var offset = globalThis.__kotobaCryptoBytesOffset || 0;
+          for (var i = 0; i < length; i++) {
+            var value = bytes[offset + i];
+            array[i] = value == null ? 0 : Number(value);
+          }
+          globalThis.__kotobaCryptoBytesOffset = offset + length;
           return array;
         },
         randomUUID: function() {
+          // Mirrors getRandomValues' snapshot-cursor consumption above, one
+          // UUID at a time. Previously always returned the same fixed
+          // placeholder UUID regardless of any real randomness queued
+          // host-side.
           globalThis.__kotobaRequests.push({
             capability: 'crypto/random-uuid',
             'crypto/op': 'random-uuid'
           });
-          return '00000000-0000-4000-8000-000000000000';
+          var snapshot = globalThis.__kotobaCryptoSnapshot || { uuids: [] };
+          var uuids = snapshot.uuids || [];
+          var offset = globalThis.__kotobaCryptoUuidOffset || 0;
+          var uuid = offset < uuids.length ? String(uuids[offset]) : '00000000-0000-4000-8000-000000000000';
+          globalThis.__kotobaCryptoUuidOffset = offset + 1;
+          return uuid;
         }
       };
       function __kotobaBase64Chars() {
@@ -4480,6 +4505,43 @@
           ";")))
 
 #?(:cljs
+   (defn- crypto-snapshot-source
+     "JS source that installs the real, current cryptographically-random
+     byte/UUID queues (`quickjs-execution/crypto-snapshot`, computed
+     host-side from `state`'s persisted `:crypto/random-bytes`/`:crypto/
+     random-uuids` -- see that fn) as `globalThis.__kotobaCryptoSnapshot`, so
+     the webapi shim's `crypto.getRandomValues`/`crypto.randomUUID` can
+     synchronously return REAL pre-seeded randomness instead of always
+     returning zeros/the fixed placeholder UUID. Unlike `geolocation-
+     snapshot-source`/`notification-permission-snapshot-source`, crypto
+     access is not permission-gated in a real browser, so this is a bare
+     `{bytes uuids}` pair, no permission-decision wrapper. Also resets
+     `globalThis.__kotobaCryptoBytesOffset`/`__kotobaCryptoUuidOffset` to
+     `0` -- the webapi shim consumes this snapshot with a client-side cursor
+     that advances as the script calls `getRandomValues`/`randomUUID`
+     (unlike `document.cookie` etc., a single script tag may call these
+     multiple times, each consuming a different prefix/next item of the
+     SAME queue, so a plain read-only global isn't enough on its own); the
+     cursor must restart at `0` each time a FRESH snapshot is installed
+     (i.e. every script tag), since `quickjs-execution/evaluate!`'s
+     `take-random-bytes`/`take-random-uuid` independently re-consume the
+     REAL state queue by the same lengths/count when it processes that
+     script tag's own `:crypto/random-values`/`:crypto/random-uuid`
+     requests afterward -- the client-side cursor and the host-side queue
+     only stay in sync if both start counting from `0` at the same point.
+     Defaults to empty queues when no real snapshot was computed (e.g. a
+     caller invoking this engine below `quickjs-execution/evaluate!`/
+     `load-module!`, which always supplies a real one), mirroring
+     `take-random-bytes`/`take-random-uuid`'s own already-established
+     all-zeros/`zero-uuid` fallback for an exhausted or never-seeded queue."
+     [crypto-snapshot]
+     (str "globalThis.__kotobaCryptoSnapshot = "
+          (js/JSON.stringify (clj->js (jsonable (or crypto-snapshot {:bytes [] :uuids []}))))
+          ";\n"
+          "globalThis.__kotobaCryptoBytesOffset = 0;\n"
+          "globalThis.__kotobaCryptoUuidOffset = 0;")))
+
+#?(:cljs
    (defn- dump-result
      ([module source url modules]
       (dump-result module source url modules nil false nil nil nil nil nil nil nil nil nil nil))
@@ -4524,7 +4586,7 @@
            context))))
 
 #?(:cljs
-   (defn- install-document-shim! [vm document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot notification-snapshot history-length-snapshot cookie-snapshot]
+   (defn- install-document-shim! [vm document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot notification-snapshot history-length-snapshot cookie-snapshot crypto-snapshot]
      (eval-dispose! vm (snapshot-source document-snapshot) "kotoba://quickjs/document-snapshot.js")
      (eval-dispose! vm (storage-snapshot-source storage-snapshot) "kotoba://quickjs/storage-snapshot.js")
      (eval-dispose! vm (clipboard-snapshot-source clipboard-snapshot) "kotoba://quickjs/clipboard-snapshot.js")
@@ -4535,12 +4597,13 @@
      (eval-dispose! vm (fetch-snapshot-source fetch-snapshot) "kotoba://quickjs/fetch-snapshot.js")
      (eval-dispose! vm (history-length-snapshot-source history-length-snapshot) "kotoba://quickjs/history-length-snapshot.js")
      (eval-dispose! vm (cookie-snapshot-source cookie-snapshot) "kotoba://quickjs/cookie-snapshot.js")
+     (eval-dispose! vm (crypto-snapshot-source crypto-snapshot) "kotoba://quickjs/crypto-snapshot.js")
      (eval-dispose! vm webapi-shim-source "kotoba://quickjs/webapi-shim.js")))
 
 #?(:cljs
-   (defn- context-eval-result [context source url module? document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot notification-snapshot history-length-snapshot cookie-snapshot]
+   (defn- context-eval-result [context source url module? document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot notification-snapshot history-length-snapshot cookie-snapshot crypto-snapshot]
      (let [vm (:vm context)
-           _ (install-document-shim! vm document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot notification-snapshot history-length-snapshot cookie-snapshot)
+           _ (install-document-shim! vm document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot notification-snapshot history-length-snapshot cookie-snapshot crypto-snapshot)
            response (eval-result vm source url module?)
            requests (dump-requests vm)]
        (assoc response :requests requests))))
@@ -4798,7 +4861,8 @@
                                                           (:fetch/snapshot request)
                                                           (:notification/snapshot request)
                                                           (:history/snapshot request)
-                                                          (:cookie/snapshot request))
+                                                          (:cookie/snapshot request)
+                                                          (:crypto/snapshot request))
 
                                      :js/module-load
                                      (if-let [source (resolve-module-source modules module-provider (:specifier request))]
@@ -4815,7 +4879,8 @@
                                                             (:fetch/snapshot request)
                                                             (:notification/snapshot request)
                                                             (:history/snapshot request)
-                                                            (:cookie/snapshot request))
+                                                            (:cookie/snapshot request)
+                                                            (:crypto/snapshot request))
                                        {:error :quickjs/module-not-found
                                         :specifier (:specifier request)
                                         :requests []})

@@ -956,6 +956,27 @@
     (is (str/includes? source "capability: 'crypto/random-uuid'"))
     (is (str/includes? source "'crypto/op': 'random-uuid'"))))
 
+(deftest quickjs-wasm-webapi-shim-crypto-random-consumes-the-real-host-seeded-snapshot
+  ;; getRandomValues/randomUUID previously always returned zeros/a fixed
+  ;; placeholder UUID -- the crypto/random-values|random-uuid audit-log
+  ;; request DID reach the real host-side :crypto/random-bytes|random-uuids
+  ;; queue (take-random-bytes/take-random-uuid), but only for a post-hoc
+  ;; :capability/results audit trail entry, never fed back to what the
+  ;; script itself had already synchronously received. Fixed by installing
+  ;; a real crypto-snapshot (globalThis.__kotobaCryptoSnapshot) before each
+  ;; script tag runs, mirroring geolocation-snapshot-source/notification-
+  ;; permission-snapshot-source's already-established synchronous-value
+  ;; pattern, with a client-side cursor for progressive multi-call
+  ;; consumption within one script tag. Confirmed via a real CLJS/QuickJS
+  ;; smoke test (quickjs-crypto-random-smoke-test) before writing this.
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "globalThis.__kotobaCryptoBytesOffset = offset + length;"))
+    (is (str/includes? source "globalThis.__kotobaCryptoUuidOffset = offset + 1;"))
+    (is (str/includes? source "var snapshot = globalThis.__kotobaCryptoSnapshot || { bytes: [] };"))
+    (is (str/includes? source "var snapshot = globalThis.__kotobaCryptoSnapshot || { uuids: [] };"))
+    (is (str/includes? source "var offset = globalThis.__kotobaCryptoBytesOffset || 0;"))
+    (is (str/includes? source "var offset = globalThis.__kotobaCryptoUuidOffset || 0;"))))
+
 (deftest quickjs-wasm-webapi-shim-exposes-worker-capability
   (let [source quickjs-wasm/webapi-shim-source]
     (is (str/includes? source "globalThis.Worker = function(url, options)"))

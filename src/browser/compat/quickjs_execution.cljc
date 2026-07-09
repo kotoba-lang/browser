@@ -68,8 +68,16 @@
   cookies apply same-origin automatically), so `quickjs-wasm`'s webapi
   shim can install it as a VM global before running `payload`'s script
   (`:cookie/snapshot`) and answer `document.cookie` synchronously from
-  real host state instead of always returning `''`."
-  [call payload capability-results document storage clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot notification-snapshot history-length-snapshot cookie-snapshot]
+  real host state instead of always returning `''`, and the real, current
+  cryptographically-random byte/UUID queues (already computed host-side by
+  `crypto-snapshot`, a bare value like `storage`'s/`cookie-snapshot`'s own
+  deref -- crypto access is not permission-gated in a real browser), so
+  `quickjs-wasm`'s webapi shim can install them as a VM global before
+  running `payload`'s script (`:crypto/snapshot`) and answer
+  `crypto.getRandomValues`/`crypto.randomUUID` synchronously from real
+  pre-seeded randomness instead of always returning zeros/a fixed
+  placeholder UUID."
+  [call payload capability-results document storage clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot notification-snapshot history-length-snapshot cookie-snapshot crypto-snapshot]
   (let [snapshot (cond-> (dom-bridge/document-snapshot document)
                    (:script/node-id payload)
                    (assoc :current-script (:script/node-id payload)))]
@@ -84,7 +92,8 @@
                        :fetch/snapshot fetch-snapshot
                        :notification/snapshot notification-snapshot
                        :history/snapshot history-length-snapshot
-                       :cookie/snapshot cookie-snapshot)
+                       :cookie/snapshot cookie-snapshot
+                       :crypto/snapshot crypto-snapshot)
                 capability-results)))
 
 (defn- take-capability-results
@@ -930,6 +939,40 @@
        :permission/decision decision})))
 
 (def zero-uuid "00000000-0000-4000-8000-000000000000")
+
+(defn- crypto-snapshot
+  "Compute the REAL, current cryptographically-random byte/UUID queues from
+  `state`'s persisted `:crypto/random-bytes`/`:crypto/random-uuids` (seeded
+  by `new-state`'s `:crypto-random-bytes`/`:crypto-random-uuids` options),
+  host-side, BEFORE the script runs -- so `invocation-with-snapshots` can
+  hand it to `quickjs-wasm` as `:crypto/snapshot` and the webapi shim's real
+  `crypto.getRandomValues`/`crypto.randomUUID` can synchronously return the
+  REAL pre-seeded randomness instead of always returning zeros/the fixed
+  `zero-uuid` placeholder (this engine evaluates a whole script
+  synchronously in one pass, so there is no realistic way to defer the
+  result the way a real host RNG call would -- see
+  `quickjs-wasm/crypto-snapshot-source`). Mirrors `geolocation-snapshot`/
+  `notification-permission-snapshot`'s role in the threading, but simpler:
+  crypto access is not permission-gated in a real browser, so this is a
+  bare value snapshot like `storage`'s/`cookie-snapshot`'s own deref, not a
+  permission-decision-carrying map.
+
+  `take-random-bytes`/`take-random-uuid` below ALSO consume from these same
+  state keys, but only AFTER the script runs, to build the
+  `:capability/results` audit-trail entry -- this snapshot and that audit
+  consumption read the SAME underlying queues in the SAME order (the webapi
+  shim consumes its own client-side copy of this snapshot with a
+  per-script-tag cursor that resets each time a fresh snapshot is
+  installed, and the host then independently re-consumes its own state
+  queue by the same lengths/count when it processes that script tag's
+  `:crypto/random-values`/`:crypto/random-uuid` requests afterward), so the
+  two stay in sync across script tags without needing the actual consumed
+  values to be threaded back from the shim.
+
+  Returns a single, JSON-safe map: `{:bytes [...] :uuids [...]}`."
+  [state]
+  {:bytes (vec (:crypto/random-bytes state))
+   :uuids (vec (:crypto/random-uuids state))})
 
 (defn- take-random-bytes
   [state length]
@@ -2057,7 +2100,8 @@
                                                             fetch-snap
                                                             (notification-permission-snapshot state)
                                                             (history-length-snapshot state)
-                                                            (cookie-snapshot state))))
+                                                            (cookie-snapshot state)
+                                                            (crypto-snapshot state))))
         state (record-response-errors state response)
         state (apply-requests state (:requests response))]
     (-> state
@@ -2091,7 +2135,8 @@
                                                               fetch-snap
                                                               (notification-permission-snapshot state)
                                                               (history-length-snapshot state)
-                                                              (cookie-snapshot state))))
+                                                              (cookie-snapshot state)
+                                                              (crypto-snapshot state))))
           state (record-response-errors state response)
           state (apply-requests state (:requests response))]
       (-> state
