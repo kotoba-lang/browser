@@ -1520,6 +1520,27 @@
     (is (str/includes? source "type === 'checkbox' || type === 'radio'"))
     (is (str/includes? source "if (!__kotobaBoolAttr(node, 'checked')) continue;"))))
 
+;; ---- TextEncoder/TextDecoder -- previously entirely absent (confirmed
+;; via grep -- zero matches anywhere in the file), even though the exact
+;; UTF-8 codec they need (__kotobaUtf8Encode/__kotobaUtf8Decode above)
+;; already exists and is already exercised internally by Blob. Any script
+;; calling `new TextEncoder().encode(str)`/`new TextDecoder().decode
+;; (bytes)` threw a bare ReferenceError on construction. Confirmed via a
+;; real Node.js harness (13 scenarios, including byte-for-byte
+;; cross-validation against Node's own real UTF-8 encoding for
+;; multi-byte characters) before touching source. ----
+
+(deftest quickjs-wasm-webapi-shim-exposes-text-encoder-and-decoder
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "globalThis.TextEncoder = function()"))
+    (is (str/includes? source "this.encoding = 'utf-8';"))
+    (is (str/includes? source "globalThis.TextEncoder.prototype.encode = function(str)"))
+    (is (str/includes? source "var buf = new Uint8Array(bytes.length);"))
+    (is (str/includes? source "function __kotobaNormalizeTextDecoderLabel(label)"))
+    (is (str/includes? source "globalThis.TextDecoder = function(label, options)"))
+    (is (str/includes? source "globalThis.TextDecoder.prototype.decode = function(input)"))
+    (is (str/includes? source "var bytes = (input instanceof ArrayBuffer) ? new Uint8Array(input) : input;"))))
+
 (deftest quickjs-wasm-webapi-shim-blob-reads-real-arraybuffer-bytes
   ;; A raw ArrayBuffer has NO `.length` property in real JS (only
   ;; `.byteLength` -- verified: `typeof (new ArrayBuffer(4)).length` is

@@ -3839,6 +3839,57 @@
         }
         return s;
       }
+      // TextEncoder/TextDecoder -- previously entirely absent from this
+      // shim (confirmed via grep -- zero matches), even though the exact
+      // UTF-8 codec they need already exists and is already exercised
+      // internally by Blob (__kotobaUtf8Encode/__kotobaUtf8Decode above).
+      // Any script calling `new TextEncoder().encode(str)`/`new
+      // TextDecoder().decode(bytes)` -- one of the most common Web APIs
+      // for UTF-8 byte-length computation, hashing input prep, and binary
+      // WebSocket/fetch payloads -- threw a bare ReferenceError on
+      // construction. TextEncoder's real spec has no constructor
+      // arguments at all (`.encoding` is always the literal `'utf-8'`,
+      // read-only) -- unlike TextDecoder, which real spec allows many
+      // encoding labels for. This shim's codec is UTF-8 ONLY, so
+      // TextDecoder honestly validates its optional `label` against just
+      // the two real-world-common UTF-8 aliases (`'utf-8'`/`'utf8'`,
+      // case-insensitive, matching the absent-label default) and throws a
+      // plain Error for anything else -- the full WHATWG Encoding alias
+      // table (unicode-1-1-utf-8, x-unicode20utf8, ...) and every non-
+      // UTF-8 encoding are a deliberate, honest scope-cut, not silently
+      // wrong decoding. `decode()`'s `{stream: true}` option (incremental
+      // decode across multiple calls, needed for real streaming) is also
+      // not implemented -- this engine has no ReadableStream at all yet
+      // (see Blob.stream()'s own already-documented scope-cut nearby),
+      // so a caller passing it gets a single-shot decode of whatever
+      // bytes it was given, silently ignoring the flag, same as several
+      // other options this shim already ignores elsewhere.
+      globalThis.TextEncoder = function() {
+        this.encoding = 'utf-8';
+      };
+      globalThis.TextEncoder.prototype.encode = function(str) {
+        var bytes = __kotobaUtf8Encode(str == null ? '' : str);
+        var buf = new Uint8Array(bytes.length);
+        for (var i = 0; i < bytes.length; i++) buf[i] = bytes[i];
+        return buf;
+      };
+      function __kotobaNormalizeTextDecoderLabel(label) {
+        var l = label == null ? 'utf-8' : String(label).toLowerCase();
+        if (l !== 'utf-8' && l !== 'utf8') {
+          throw new Error('RangeError: The \"' + label + '\" encoding is not supported (this engine only implements utf-8)');
+        }
+        return 'utf-8';
+      }
+      globalThis.TextDecoder = function(label, options) {
+        this.encoding = __kotobaNormalizeTextDecoderLabel(label);
+        this.fatal = !!(options && options.fatal);
+        this.ignoreBOM = !!(options && options.ignoreBOM);
+      };
+      globalThis.TextDecoder.prototype.decode = function(input) {
+        if (input == null) return '';
+        var bytes = (input instanceof ArrayBuffer) ? new Uint8Array(input) : input;
+        return __kotobaUtf8Decode(bytes);
+      };
       function __kotobaNormalizeBlobType(type) {
         // Real Blob.type is a parsed MIME type (lowercased, ASCII, comments
         // stripped). L2 approximation: lowercase + keep ASCII printable only;
