@@ -2327,6 +2327,60 @@
             }
             __kotobaDispatch(ref, __kotobaEvent('reset', { bubbles: true, cancelable: true }));
           },
+          get elements() {
+            // HTMLFormElement.elements -- previously entirely absent
+            // (confirmed via grep -- zero matches anywhere in the shim),
+            // even though this file already walks a form's descendant
+            // form controls in exactly this shape for both reset()
+            // above and FormData's own constructor. A script reading
+            // form.elements got undefined; form.elements.length or any
+            // indexed/named access threw a bare TypeError.
+            //
+            // Real spec: includes every listed form control (this
+            // shim's own established, descendant-only __kotobaFormControl
+            // scope -- button/input/select/textarea, matching reset()'s
+            // and FormData's own simplification, not the fuller
+            // fieldset/object/output listed-elements set this engine
+            // doesn't otherwise model) REGARDLESS of disabled state
+            // (unlike FormData, which correctly skips disabled controls
+            // for submission purposes -- .elements is not about
+            // submission, a disabled control is still \"in the form\").
+            // Real spec also excludes input[type=image] specifically,
+            // \"for historical reasons\" -- honored here too.
+            //
+            // Deliberately, honestly NOT implemented: real spec groups
+            // multiple same-name controls (e.g. a radio group) into a
+            // nested RadioNodeList: elements['group'] here instead
+            // resolves to just the FIRST matching control by name-or-id,
+            // and namedItem() the same way -- a simpler, narrower model
+            // than full spec, left for a future cycle if ever needed.
+            var node = __kotobaNodeById(__kotobaRefNodeId(ref));
+            if (!node || String(node.tag || '').toLowerCase() !== 'form') return __kotobaElements([]);
+            var ids = __kotobaDescendantNodeIds(node).filter(function(id) {
+              var candidate = __kotobaNodeById(id);
+              if (!candidate || !__kotobaFormControl(candidate)) return false;
+              var isImageInput = String(candidate.tag || '').toLowerCase() === 'input' &&
+                String(__kotobaAttr(candidate, 'type') || 'text').toLowerCase() === 'image';
+              return !isImageInput;
+            });
+            var collection = __kotobaElements(ids);
+            for (var i = 0; i < ids.length; i++) {
+              var candidate = __kotobaNodeById(ids[i]);
+              var controlName = __kotobaAttr(candidate, 'name');
+              var controlId = __kotobaAttr(candidate, 'id');
+              if (controlName != null && String(controlName) !== '' && collection[String(controlName)] === undefined) {
+                collection[String(controlName)] = collection[i];
+              }
+              if (controlId != null && String(controlId) !== '' && collection[String(controlId)] === undefined) {
+                collection[String(controlId)] = collection[i];
+              }
+            }
+            collection.namedItem = function(key) {
+              var value = collection[String(key)];
+              return value !== undefined && typeof value !== 'function' ? value : null;
+            };
+            return collection;
+          },
           get checked() {
             var node = __kotobaNodeById(__kotobaRefNodeId(ref));
             return __kotobaBoolAttr(node, 'checked');

@@ -1735,6 +1735,33 @@
   (let [source quickjs-wasm/webapi-shim-source]
     (is (str/includes? source "__kotobaSetBooleanAttribute(ref, 'indeterminate', false);"))))
 
+;; ---- HTMLFormElement.elements -- previously entirely absent
+;; (confirmed via grep -- zero matches anywhere in the shim), even
+;; though this file already walks a form's descendant form controls in
+;; exactly this shape for both reset() and FormData's own constructor.
+;; A script reading form.elements got undefined; any indexed/named
+;; access threw a bare TypeError. Real spec: includes every listed
+;; control (this shim's own established, descendant-only
+;; __kotobaFormControl scope) REGARDLESS of disabled state (unlike
+;; FormData, which correctly skips disabled controls for submission
+;; purposes), excludes input[type=image] specifically "for historical
+;; reasons", and supports name-or-id-keyed access plus namedItem().
+;; Deliberately, honestly NOT implemented: real spec groups multiple
+;; same-name controls into a nested RadioNodeList -- this resolves to
+;; just the FIRST matching control instead, a simpler, narrower model
+;; left for a future cycle. Confirmed via a real Node.js harness (12
+;; scenarios) before touching source. ----
+
+(deftest quickjs-wasm-webapi-shim-exposes-form-elements
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "get elements() {"))
+    (is (str/includes? source "var isImageInput = String(candidate.tag || '').toLowerCase() === 'input' &&"))
+    (is (str/includes? source "var collection = __kotobaElements(ids);"))
+    (is (str/includes? source "if (controlName != null && String(controlName) !== '' && collection[String(controlName)] === undefined) {"))
+    (is (str/includes? source "if (controlId != null && String(controlId) !== '' && collection[String(controlId)] === undefined) {"))
+    (is (str/includes? source "collection.namedItem = function(key) {"))
+    (is (str/includes? source "return value !== undefined && typeof value !== 'function' ? value : null;"))))
+
 (deftest quickjs-wasm-webapi-shim-blob-reads-real-arraybuffer-bytes
   ;; A raw ArrayBuffer has NO `.length` property in real JS (only
   ;; `.byteLength` -- verified: `typeof (new ArrayBuffer(4)).length` is
