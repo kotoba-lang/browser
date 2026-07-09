@@ -349,6 +349,73 @@
         var tag = String(node && node.tag || '').toLowerCase();
         return tag === 'button' || tag === 'input' || tag === 'select' || tag === 'textarea';
       }
+      function __kotobaResetFormControl(node) {
+        // Mirrors browser.document-input's reset-control-state exactly,
+        // per-tag/type -- see form.reset()'s own comment above for why
+        // this exists as a JS-shim-local mirror rather than a shared
+        // call into that Clojure function.
+        var tag = String(node.tag || '').toLowerCase();
+        var type = String(__kotobaAttr(node, 'type') || 'text').toLowerCase();
+        var element = __kotobaElement({ nodeId: node['node/id'] });
+        if (tag === 'select') {
+          var options = __kotobaOptionIds(node);
+          var multiple = __kotobaBoolAttr(node, 'multiple');
+          var anySelected = false;
+          for (var i = 0; i < options.length; i++) {
+            var option = __kotobaElement({ nodeId: options[i] });
+            var isDefault = __kotobaBoolAttr(__kotobaNodeById(options[i]), 'default-selected');
+            if (isDefault && (multiple || !anySelected)) {
+              option.setAttribute('selected', 'true');
+              anySelected = true;
+            } else {
+              option.removeAttribute('selected');
+            }
+          }
+          if (!anySelected && !multiple && options.length > 0) {
+            __kotobaElement({ nodeId: options[0] }).setAttribute('selected', 'true');
+          }
+          element.removeAttribute('invalid');
+          element.removeAttribute('validation-reason');
+          return;
+        }
+        if (tag === 'input' && (type === 'checkbox' || type === 'radio')) {
+          element.checked = element.defaultChecked;
+          element.removeAttribute('invalid');
+          element.removeAttribute('validation-reason');
+          return;
+        }
+        if (tag === 'button' ||
+            (tag === 'input' && (type === 'submit' || type === 'reset' || type === 'button' || type === 'image'))) {
+          return;
+        }
+        if (tag === 'input' && type === 'file') {
+          element.setAttribute('value', '');
+          element.removeAttribute('invalid');
+          element.removeAttribute('validation-reason');
+          return;
+        }
+        var textInputTypes = { '': 1, 'text': 1, 'search': 1, 'url': 1, 'tel': 1, 'email': 1, 'password': 1 };
+        if (tag === 'textarea' || (tag === 'input' && textInputTypes[type])) {
+          element.value = element.defaultValue;
+          var len = element.value.length;
+          element.setAttribute('selection-start', len);
+          element.setAttribute('selection-end', len);
+          element.setAttribute('composition', '');
+          element.setAttribute('composing', 'false');
+          element.removeAttribute('invalid');
+          element.removeAttribute('validation-reason');
+          return;
+        }
+        if (tag === 'input') {
+          // value-input-types beyond text-input-types (number/range/
+          // color/date/datetime-local/month/week/time) and hidden -- same
+          // reset-control-state branch as text-input-types, minus the
+          // selection/composition reset (no meaningful text selection).
+          element.value = element.defaultValue;
+          element.removeAttribute('invalid');
+          element.removeAttribute('validation-reason');
+        }
+      }
       function __kotobaDisabledCapableControl(node) {
         var tag = String(node && node.tag || '').toLowerCase();
         return tag === 'button' || tag === 'fieldset' || tag === 'input' ||
@@ -1968,6 +2035,38 @@
               return;
             }
             this.setAttribute('value', value);
+          },
+          reset: function() {
+            // HTMLFormElement.reset() -- previously entirely absent
+            // (confirmed via grep -- zero matches anywhere in the shim),
+            // even though browser.document-input's own reset-control-
+            // state/apply-reset-default-action already correctly
+            // implement the exact same real-spec reset algorithm for
+            // native, non-scripted form resets (a real Enter-key/click
+            // on a <input type=\"reset\">). A script calling form.reset()
+            // threw a bare TypeError: form.reset is not a function.
+            // Mirrors reset-control-state's own per-tag/type branching
+            // (this shim's own descendant-only form-association model,
+            // matching new FormData(form)'s own established
+            // simplification, not the stricter real-spec model that also
+            // honors an explicit form=\"...\" attribute on a control
+            // anywhere in the document). Deliberately, honestly NOT
+            // implemented in this same fix: form.submit()/
+            // requestSubmit(), and clicking a submit/reset <button>/
+            // <input type=\"submit\"|\"reset\"> still does not itself
+            // trigger this -- __kotobaDispatchClickWithActivation only
+            // special-cases checkbox/radio activation, a separate,
+            // larger gap (submission needs to reach the real session's
+            // navigate!, mirroring the location.assign bridge) left for
+            // a future cycle.
+            var node = __kotobaNodeById(__kotobaRefNodeId(ref));
+            if (!node || String(node.tag || '').toLowerCase() !== 'form') return;
+            var ids = __kotobaDescendantNodeIds(node);
+            for (var i = 0; i < ids.length; i++) {
+              var candidate = __kotobaNodeById(ids[i]);
+              if (candidate && __kotobaFormControl(candidate)) __kotobaResetFormControl(candidate);
+            }
+            __kotobaDispatch(ref, __kotobaEvent('reset', { bubbles: true, cancelable: true }));
           },
           get checked() {
             var node = __kotobaNodeById(__kotobaRefNodeId(ref));

@@ -1583,6 +1583,28 @@
     (is (str/includes? source "option.removeAttribute('selected');"))
     (is (str/includes? source "this.setAttribute('value', matched ? target : '');"))))
 
+;; ---- HTMLFormElement.reset() -- previously entirely absent (confirmed
+;; via grep -- zero matches anywhere in the shim), even though
+;; browser.document-input's own reset-control-state/apply-reset-default-
+;; action already correctly implement the exact same real-spec reset
+;; algorithm for native, non-scripted form resets. A script calling
+;; form.reset() threw a bare TypeError: form.reset is not a function.
+;; Confirmed via a real Node.js harness (13 scenarios covering every
+;; control type's own reset branch) before touching source. Deliberately,
+;; honestly NOT implemented in this same fix: form.submit()/
+;; requestSubmit(), and clicking a submit/reset button still does not
+;; itself trigger this. ----
+
+(deftest quickjs-wasm-webapi-shim-exposes-form-reset
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "reset: function() {"))
+    (is (str/includes? source "function __kotobaResetFormControl(node)"))
+    (is (str/includes? source "element.checked = element.defaultChecked;"))
+    (is (str/includes? source "element.value = element.defaultValue;"))
+    (is (str/includes? source "var isDefault = __kotobaBoolAttr(__kotobaNodeById(options[i]), 'default-selected');"))
+    (is (str/includes? source "if (candidate && __kotobaFormControl(candidate)) __kotobaResetFormControl(candidate);"))
+    (is (str/includes? source "__kotobaDispatch(ref, __kotobaEvent('reset', { bubbles: true, cancelable: true }));"))))
+
 (deftest quickjs-wasm-webapi-shim-blob-reads-real-arraybuffer-bytes
   ;; A raw ArrayBuffer has NO `.length` property in real JS (only
   ;; `.byteLength` -- verified: `typeof (new ArrayBuffer(4)).length` is
