@@ -667,7 +667,10 @@
     (is (str/includes? source "get defaultSelected()"))
     (is (str/includes? source "set defaultSelected(value)"))
     (is (str/includes? source "__kotobaSetBooleanAttribute(ref, 'checked', value)"))
-    (is (str/includes? source "__kotobaSetBooleanAttribute(ref, 'default-selected', value)"))))
+    (is (str/includes? source "__kotobaSetBooleanAttribute(ref, 'default-selected', value)"))
+    (is (str/includes? source "get indeterminate()"))
+    (is (str/includes? source "set indeterminate(value)"))
+    (is (str/includes? source "__kotobaSetBooleanAttribute(ref, 'indeterminate', value)"))))
 
 (deftest quickjs-wasm-webapi-shim-exposes-hidden-property-bindings
   (let [source quickjs-wasm/webapi-shim-source]

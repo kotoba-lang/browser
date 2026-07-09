@@ -1890,6 +1890,13 @@
           set defaultChecked(value) {
             __kotobaSetBooleanAttribute(ref, 'default-checked', value);
           },
+          get indeterminate() {
+            var node = __kotobaNodeById(__kotobaRefNodeId(ref));
+            return __kotobaBoolAttr(node, 'indeterminate');
+          },
+          set indeterminate(value) {
+            __kotobaSetBooleanAttribute(ref, 'indeterminate', value);
+          },
           get defaultValue() {
             var node = __kotobaNodeById(__kotobaRefNodeId(ref));
             var value = __kotobaAttr(node, 'default-value');
