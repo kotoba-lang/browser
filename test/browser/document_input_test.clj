@@ -2121,6 +2121,96 @@
     (is (= [{:name "mode" :value "two" :node/id select}]
            (:form/data submitted)))))
 
+;; ---- arrow keys on a focused, closed, single <select> move its
+;; selection to the next/previous ENABLED option and fire real
+;; input/change -- real platform behavior, distinct from opening the
+;; dropdown (which this engine, having no real popup rendering, does
+;; not model). Unlike radio-group navigation, this does NOT wrap
+;; around. Previously entirely unhandled: select-control? isn't
+;; editable-node?, so reduce-event fell straight through to its
+;; generic "not editable" fallback -- the same gap class already
+;; closed for radio groups but never extended here. Confirmed via
+;; direct REPL reproduction before touching source. ----
+
+(deftest select-arrow-keys-navigate-to-next-enabled-option
+  (let [page (browser/load-html
+              {:url "kotoba://select-arrow-keys"
+               :html (str "<main><select id=\"s\">"
+                          "<option value=\"a\">A</option>"
+                          "<option value=\"b\" disabled>B</option>"
+                          "<option value=\"c\">C</option>"
+                          "</select></main>")})
+        document (:browser/document page)
+        s (bridge/query-selector document "#s")
+        document (-> document
+                     (dom/add-event-listener s "input" "input-handler")
+                     (dom/add-event-listener s "change" "change-handler"))
+        focused (document-input/reduce-event document {:event/type :pointer/click :node/id s})
+        down (document-input/reduce-event (:document focused)
+                                          {:event/type :key/down :key "ArrowDown" :node/id s})]
+    (is (= true (:handled? down)))
+    (is (= "c" (get-in down [:document :nodes s :attrs :value]))
+        "ArrowDown skips the disabled option b entirely, landing on c")
+    (is (= [[:dom/dispatch-event "input-handler" {:event/type "input" :target/id s :value "c"}]
+            [:dom/dispatch-event "change-handler" {:event/type "change" :target/id s :value "c"}]]
+           (take-last 2 (get-in down [:document :ops])))
+        "moving via arrow key fires real input/change, same as clicking an option would")
+    (let [up (document-input/reduce-event (:document down)
+                                          {:event/type :key/down :key "ArrowUp" :node/id s})]
+      (is (= "a" (get-in up [:document :nodes s :attrs :value]))
+          "ArrowUp skips the disabled option b in the other direction too"))))
+
+(deftest select-arrow-key-navigation-clamps-at-boundaries-instead-of-wrapping
+  (let [page (browser/load-html
+              {:url "kotoba://select-arrow-clamp"
+               :html "<main><select id=\"s\"><option value=\"a\">A</option><option value=\"b\">B</option></select></main>"})
+        document (:browser/document page)
+        s (bridge/query-selector document "#s")
+        document (-> document
+                     (dom/add-event-listener s "input" "input-handler")
+                     (dom/add-event-listener s "change" "change-handler"))
+        focused (document-input/reduce-event document {:event/type :pointer/click :node/id s})
+        up-at-first (document-input/reduce-event (:document focused)
+                                                  {:event/type :key/down :key "ArrowUp" :node/id s})]
+    (is (= true (:handled? up-at-first)))
+    (is (= "a" (get-in up-at-first [:document :nodes s :attrs :value]))
+        "ArrowUp on the FIRST option must clamp, not wrap around to the last")
+    (is (= (:ops (:document focused)) (:ops (:document up-at-first)))
+        "no new input/change ops beyond focusing were emitted -- nothing actually changed")
+    (let [at-last (document-input/reduce-event document
+                                               {:event/type :pointer/click :node/id s})
+          at-last (document-input/reduce-event (:document at-last)
+                                               {:event/type :key/down :key "ArrowDown" :node/id s})
+          down-at-last (document-input/reduce-event (:document at-last)
+                                                     {:event/type :key/down :key "ArrowDown" :node/id s})]
+      (is (= "b" (get-in at-last [:document :nodes s :attrs :value])))
+      (is (= "b" (get-in down-at-last [:document :nodes s :attrs :value]))
+          "ArrowDown on the LAST option must clamp, not wrap around to the first")
+      (is (= (:ops (:document at-last)) (:ops (:document down-at-last)))
+          "no new input/change ops beyond the first, real move were emitted"))))
+
+(deftest select-arrow-key-navigation-does-not-apply-to-a-multiple-select-or-a-disabled-select
+  (let [page (browser/load-html
+              {:url "kotoba://select-arrow-scope"
+               :html (str "<main>"
+                          "<select id=\"m\" multiple><option value=\"a\">A</option><option value=\"b\">B</option></select>"
+                          "<select id=\"d\" disabled><option value=\"a\">A</option><option value=\"b\">B</option></select>"
+                          "</main>")})
+        document (:browser/document page)
+        m (bridge/query-selector document "#m")
+        d (bridge/query-selector document "#d")
+        baseline-m (get-in document [:nodes m :attrs :value])
+        baseline-d (get-in document [:nodes d :attrs :value])
+        m-nav (document-input/reduce-event document {:event/type :key/down :key "ArrowDown" :node/id m})
+        d-nav (document-input/reduce-event document {:event/type :key/down :key "ArrowDown" :node/id d})]
+    (is (= false (:handled? m-nav))
+        "a multiple select's arrow-key listbox semantics are a deliberately separate, unmodeled feature")
+    (is (= baseline-m (get-in m-nav [:document :nodes m :attrs :value]))
+        "value must stay exactly at its parse-time default -- untouched by this fix")
+    (is (= false (:handled? d-nav)))
+    (is (= baseline-d (get-in d-nav [:document :nodes d :attrs :value]))
+        "value must stay exactly at its parse-time default -- untouched by this fix")))
+
 (deftest disabled-selected-option-is-not-successful-or-valid
   (let [page (browser/load-html {:url "kotoba://select"
                                  :html "<main><form id=\"form\"><select id=\"mode\" name=\"mode\" required><option id=\"locked\" value=\"locked\" selected disabled>Locked</option><option id=\"go-option\" value=\"go\">Go</option></select><select id=\"optional\" name=\"optional\"><option id=\"optional-locked\" value=\"secret\" selected disabled>Secret</option><option value=\"public\">Public</option></select><button id=\"go\" name=\"action\" value=\"go\">Go</button></form></main>"})

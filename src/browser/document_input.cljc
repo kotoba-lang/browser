@@ -316,6 +316,32 @@
        (radio-control? document node-id)
        (not (disabled-control? document node-id))))
 
+(defn- select-navigation-key?
+  "Real platform behavior: an arrow key on a focused, closed, SINGLE
+   `<select>` (no `multiple`) moves its current selection to the next/
+   previous ENABLED `<option>` and fires real `input`/`change` --
+   distinct from opening the dropdown, which this engine (having no
+   real popup/overlay rendering) does not model at all. Unlike radio
+   groups (`radio-navigation-key?` above), this does NOT wrap around:
+   ArrowDown on the last option / ArrowUp on the first is a real,
+   correctly-observed no-op in every real browser. Previously entirely
+   unhandled -- `select-control?` isn't `editable-node?`, so
+   `reduce-event` fell straight through to its generic \"not editable\"
+   branch, the same gap class `radio-navigation-key?`'s own docstring
+   already documents having closed for radio groups but never extended
+   here. Deliberately excludes `multiple` selects: a real multi-select
+   listbox's arrow-key semantics (move a separate \"current\" position
+   without necessarily changing selection, Shift-extend a range) are a
+   genuinely different, more complex feature this engine has no
+   supporting selection-range state for -- an honest scope-cut, not
+   silently wrong behavior."
+  [document node-id event]
+  (and (= :key/down (:event/type event))
+       (contains? radio-navigation-keys (:key event))
+       (select-control? document node-id)
+       (not (disabled-control? document node-id))
+       (not (truthy-attr? (get-in document [:nodes node-id :attrs :multiple])))))
+
 (defn- primary-button-click?
   "Real HTML5/DOM: only a PRIMARY-button (button 0, the default a real
    MouseEvent's own `button` defaults to when unspecified) pointer click
@@ -1447,6 +1473,21 @@
          :selected? true
          :handled? true}))))
 
+(defn- reduce-select-navigation-event
+  [document node-id event]
+  (let [options (vec (remove #(option-disabled? document %) (select-option-ids document node-id)))
+        n (count options)]
+    (if (zero? n)
+      {:document document :node/id node-id :event event :handled? true}
+      (let [current-id (selected-option-id document node-id)
+            idx (count (take-while #(not= % current-id) options))
+            delta (if (contains? #{"ArrowDown" "ArrowRight"} (:key event)) 1 -1)
+            target-idx (max 0 (min (dec n) (+ idx delta)))
+            target-id (nth options target-idx)]
+        (if (= target-id current-id)
+          {:document document :node/id node-id :event event :handled? true}
+          (reduce-select-change document node-id target-id event))))))
+
 (defn- first-descendant-control-id
   ([document node-id]
    (first-descendant-control-id document node-id #{}))
@@ -1767,6 +1808,10 @@
       (and node-id
            (radio-navigation-key? document node-id event))
       (reduce-radio-navigation-event document node-id event)
+
+      (and node-id
+           (select-navigation-key? document node-id event))
+      (reduce-select-navigation-event document node-id event)
 
       (and node-id
            (text-input-submit-event? document node-id event))
