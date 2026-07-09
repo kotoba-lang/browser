@@ -1379,3 +1379,31 @@
                                     "          },\n"
                                     "          getOwnPropertyDescriptor: function(_, prop) {")))
     (is (str/includes? source "return { value: String(value), writable: true, enumerable: true, configurable: true };"))))
+
+(deftest quickjs-wasm-webapi-shim-exposes-blob-file-formdata
+  ;; L2 Web-platform-API addition: Blob/File/FormData shim surface. Real JS
+  ;; behavior is proven by the cljs/node-test smoke
+  ;; (quickjs-blob-formdata-smoke-test); this guards the shim source's
+  ;; presence/shape on the JVM gate (matching every other shim-feature test
+  ;; in this namespace, which are source-presence checks for the same
+  ;; reason -- actual JS evaluation is the cljs target).
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "globalThis.Blob = function(blobParts, options)"))
+    (is (str/includes? source "globalThis.File = function(fileParts, filename, options)"))
+    (is (str/includes? source "globalThis.FormData = function(form)"))
+    (is (str/includes? source "function __kotobaUtf8Encode(str)"))
+    (is (str/includes? source "function __kotobaUtf8Decode(bytes)"))
+    (is (str/includes? source "globalThis.Blob.prototype.slice = function(start, end, contentType)"))
+    (is (str/includes? source "globalThis.Blob.prototype.text = function()"))
+    (is (str/includes? source "globalThis.Blob.prototype.arrayBuffer = function()"))
+    (is (str/includes? source "globalThis.File.prototype = Object.create(globalThis.Blob.prototype)"))
+    (is (str/includes? source "globalThis.FormData.prototype.append = function(name, value, filename)"))
+    (is (str/includes? source "globalThis.FormData.prototype.set = function(name, value, filename)"))
+    (is (str/includes? source "globalThis.FormData.prototype.getAll = function(name)"))
+    (is (str/includes? source "globalThis.FormData.prototype.entries = function()"))
+    (is (str/includes? source "globalThis.FormData.prototype[Symbol.iterator] = globalThis.FormData.prototype.entries"))
+    ;; `new FormData(formEl)` enumerates submittable controls and skips the
+    ;; non-submittable input types (button/submit/image/reset/file).
+    (is (str/includes? source "type === 'submit' || type === 'image' || type === 'reset' || type === 'button' || type === 'file'"))
+    (is (str/includes? source "type === 'checkbox' || type === 'radio'"))
+    (is (str/includes? source "if (!__kotobaBoolAttr(node, 'checked')) continue;"))))

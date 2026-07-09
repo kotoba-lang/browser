@@ -3634,6 +3634,231 @@
       globalThis.URL.prototype.toString = function() {
         return this.href;
       };
+      // ---- Blob / File / FormData (WHATWG File API + XHR FormData) ----
+      // L2 Web-platform-API addition. Blob is byte-faithful via an inline
+      // UTF-8 codec and accepts String / Blob / ArrayBuffer / typed-array
+      // parts; File extends Blob with name/lastModified; FormData is the
+      // iterable name->value[] map, including `new FormData(formEl)` which
+      // enumerates a form's submittable controls (reusing the existing
+      // __kotobaFormControl/__kotobaControlValue/__kotobaDisabledControl
+      // helpers). Out of scope (L3): Blob.stream() (no ReadableStream yet),
+      // fetch() accepting a FormData body (multipart/form-data encoding),
+      // and input[type=file] yielding real File entries into FormData.
+      function __kotobaUtf8Encode(str) {
+        str = String(str);
+        var bytes = [];
+        for (var i = 0; i < str.length; i++) {
+          var c = str.charCodeAt(i);
+          if (c >= 0xD800 && c <= 0xDBFF && i + 1 < str.length) {
+            var c2 = str.charCodeAt(i + 1);
+            if (c2 >= 0xDC00 && c2 <= 0xDFFF) {
+              var cp = 0x10000 + ((c - 0xD800) << 10) + (c2 - 0xDC00);
+              bytes.push(0xF0 | (cp >> 18), 0x80 | ((cp >> 12) & 0x3F), 0x80 | ((cp >> 6) & 0x3F), 0x80 | (cp & 0x3F));
+              i++;
+              continue;
+            }
+          }
+          if (c < 0x80) bytes.push(c);
+          else if (c < 0x800) bytes.push(0xC0 | (c >> 6), 0x80 | (c & 0x3F));
+          else bytes.push(0xE0 | (c >> 12), 0x80 | ((c >> 6) & 0x3F), 0x80 | (c & 0x3F));
+        }
+        return bytes;
+      }
+      function __kotobaUtf8Decode(bytes) {
+        var s = '';
+        var i = 0;
+        while (i < bytes.length) {
+          var b = bytes[i++];
+          if (b < 0x80) s += String.fromCharCode(b);
+          else if ((b & 0xE0) === 0xC0) s += String.fromCharCode(((b & 0x1F) << 6) | (bytes[i++] & 0x3F));
+          else if ((b & 0xF0) === 0xE0) s += String.fromCharCode(((b & 0x0F) << 12) | ((bytes[i++] & 0x3F) << 6) | (bytes[i++] & 0x3F));
+          else {
+            var cp = ((b & 0x07) << 18) | ((bytes[i++] & 0x3F) << 12) | ((bytes[i++] & 0x3F) << 6) | (bytes[i++] & 0x3F);
+            cp -= 0x10000;
+            s += String.fromCharCode(0xD800 | (cp >> 10), 0xDC00 | (cp & 0x3FF));
+          }
+        }
+        return s;
+      }
+      function __kotobaNormalizeBlobType(type) {
+        // Real Blob.type is a parsed MIME type (lowercased, ASCII, comments
+        // stripped). L2 approximation: lowercase + keep ASCII printable only;
+        // strict MIME parsing is deferred. A blank/absent type is ''.
+        var t = String(type == null ? '' : type).toLowerCase();
+        var out = '';
+        for (var i = 0; i < t.length; i++) {
+          var c = t.charCodeAt(i);
+          if (c >= 0x20 && c <= 0x7E) out += t.charAt(i);
+        }
+        return out;
+      }
+      function __kotobaBlobPartsToBytes(parts) {
+        var bytes = [];
+        var list = parts == null ? [] : parts;
+        for (var i = 0; i < list.length; i++) {
+          var p = list[i];
+          if (p == null) continue;
+          if (typeof p === 'string') {
+            var e = __kotobaUtf8Encode(p);
+            for (var j = 0; j < e.length; j++) bytes.push(e[j]);
+          } else if (p instanceof globalThis.Blob) {
+            var pb = p.__bytes;
+            for (var j = 0; j < pb.length; j++) bytes.push(pb[j]);
+          } else if (p && typeof p === 'object' && typeof p.length === 'number') {
+            // ArrayBuffer or any typed array view (Uint8Array et al.).
+            for (var j = 0; j < p.length; j++) bytes.push(p[j] & 0xFF);
+          } else {
+            var e = __kotobaUtf8Encode(String(p));
+            for (var j = 0; j < e.length; j++) bytes.push(e[j]);
+          }
+        }
+        return bytes;
+      }
+      globalThis.Blob = function(blobParts, options) {
+        if (!(this instanceof globalThis.Blob)) return new globalThis.Blob(blobParts, options);
+        this.__bytes = __kotobaBlobPartsToBytes(blobParts);
+        this.size = this.__bytes.length;
+        this.type = __kotobaNormalizeBlobType(options && options.type);
+      };
+      globalThis.Blob.prototype.slice = function(start, end, contentType) {
+        var size = this.size;
+        var s = start == null ? 0 : Math.trunc(Number(start));
+        var e = end == null ? size : Math.trunc(Number(end));
+        if (s < 0) s = Math.max(size + s, 0); else s = Math.min(s, size);
+        if (e < 0) e = Math.max(size + e, 0); else e = Math.min(e, size);
+        var sliced = s < e ? this.__bytes.slice(s, e) : [];
+        var blob = Object.create(globalThis.Blob.prototype);
+        blob.__bytes = sliced;
+        blob.size = sliced.length;
+        blob.type = __kotobaNormalizeBlobType(contentType);
+        return blob;
+      };
+      globalThis.Blob.prototype.text = function() {
+        return Promise.resolve(__kotobaUtf8Decode(this.__bytes));
+      };
+      globalThis.Blob.prototype.arrayBuffer = function() {
+        var buf = new Uint8Array(this.__bytes.length);
+        for (var i = 0; i < this.__bytes.length; i++) buf[i] = this.__bytes[i];
+        return Promise.resolve(buf.buffer);
+      };
+      globalThis.File = function(fileParts, filename, options) {
+        if (!(this instanceof globalThis.File)) return new globalThis.File(fileParts, filename, options);
+        globalThis.Blob.call(this, fileParts, options);
+        this.name = String(filename == null ? '' : filename);
+        this.lastModified = (options && options.lastModified != null) ? Number(options.lastModified) : 0;
+      };
+      globalThis.File.prototype = Object.create(globalThis.Blob.prototype);
+      globalThis.File.prototype.constructor = globalThis.File;
+      function __kotobaFormValue(value, filename) {
+        // FormData.append/set value coercion: String values are stringified;
+        // a Blob value is kept; a non-File Blob with a filename arg is wrapped
+        // in a File (real FormData behavior).
+        if (value instanceof globalThis.Blob) {
+          if (!(value instanceof globalThis.File) && filename != null) {
+            return new globalThis.File([value], String(filename), { type: value.type });
+          }
+          return value;
+        }
+        return String(value);
+      }
+      function __kotobaIteratorFactory(values) {
+        var i = 0;
+        var it = {
+          next: function() {
+            return i < values.length ? { value: values[i++], done: false } : { value: undefined, done: true };
+          }
+        };
+        if (typeof Symbol !== 'undefined' && Symbol.iterator) {
+          it[Symbol.iterator] = function() { return it; };
+        }
+        return it;
+      }
+      globalThis.FormData = function(form) {
+        this.__entries = [];
+        if (form == null) return;
+        if (!form || form.__kotobaRef == null) {
+          throw new TypeError('FormData: form argument must be a form element');
+        }
+        var formNode = __kotobaNodeById(__kotobaRefNodeId(form.__kotobaRef));
+        if (formNode == null) return;
+        var ids = __kotobaDescendantNodeIds(formNode);
+        for (var i = 0; i < ids.length; i++) {
+          var node = __kotobaNodeById(ids[i]);
+          if (!node || !__kotobaFormControl(node)) continue;
+          var tag = String(node.tag || '').toLowerCase();
+          var type = String(__kotobaAttr(node, 'type') || '').toLowerCase();
+          var name = __kotobaAttr(node, 'name');
+          if (name == null || name === '') continue;          // no name -> not submitted
+          if (__kotobaDisabledControl(node)) continue;          // disabled -> not submitted
+          if (tag === 'button') continue;                       // buttons are never submitted
+          if (tag === 'input' && (type === 'submit' || type === 'image' || type === 'reset' || type === 'button' || type === 'file')) continue;
+          if (tag === 'input' && (type === 'checkbox' || type === 'radio')) {
+            if (!__kotobaBoolAttr(node, 'checked')) continue;   // unchecked -> not submitted
+            var cv = __kotobaAttr(node, 'value');
+            this.append(name, (cv == null || cv === '') ? 'on' : String(cv));
+            continue;
+          }
+          // text-like inputs / textarea / select.
+          this.append(name, __kotobaControlValue(node));
+        }
+      };
+      globalThis.FormData.prototype.append = function(name, value, filename) {
+        this.__entries.push([String(name), __kotobaFormValue(value, filename)]);
+      };
+      globalThis.FormData.prototype.set = function(name, value, filename) {
+        name = String(name);
+        var v = __kotobaFormValue(value, filename);
+        var found = false;
+        var next = [];
+        for (var i = 0; i < this.__entries.length; i++) {
+          if (this.__entries[i][0] === name) {
+            if (!found) { next.push([name, v]); found = true; }
+          } else {
+            next.push(this.__entries[i]);
+          }
+        }
+        if (!found) next.push([name, v]);
+        this.__entries = next;
+      };
+      globalThis.FormData.prototype.get = function(name) {
+        name = String(name);
+        for (var i = 0; i < this.__entries.length; i++) {
+          if (this.__entries[i][0] === name) return this.__entries[i][1];
+        }
+        return null;
+      };
+      globalThis.FormData.prototype.getAll = function(name) {
+        name = String(name);
+        var out = [];
+        for (var i = 0; i < this.__entries.length; i++) {
+          if (this.__entries[i][0] === name) out.push(this.__entries[i][1]);
+        }
+        return out;
+      };
+      globalThis.FormData.prototype.has = function(name) {
+        return this.get(name) !== null;
+      };
+      globalThis.FormData.prototype.delete = function(name) {
+        name = String(name);
+        this.__entries = this.__entries.filter(function(e) { return e[0] !== name; });
+      };
+      globalThis.FormData.prototype.forEach = function(callback, thisArg) {
+        for (var i = 0; i < this.__entries.length; i++) {
+          callback.call(thisArg, this.__entries[i][1], this.__entries[i][0], this);
+        }
+      };
+      globalThis.FormData.prototype.entries = function() {
+        return __kotobaIteratorFactory(this.__entries.slice());
+      };
+      globalThis.FormData.prototype.keys = function() {
+        return __kotobaIteratorFactory(this.__entries.map(function(e) { return e[0]; }));
+      };
+      globalThis.FormData.prototype.values = function() {
+        return __kotobaIteratorFactory(this.__entries.map(function(e) { return e[1]; }));
+      };
+      if (typeof Symbol !== 'undefined' && Symbol.iterator) {
+        globalThis.FormData.prototype[Symbol.iterator] = globalThis.FormData.prototype.entries;
+      }
       globalThis.localStorage = {
         getItem: function(key) {
           var k = String(key);
