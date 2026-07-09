@@ -1540,3 +1540,35 @@
     (is (str/includes? ab-fn-source "return deferred.promise;"))
     (is (not (str/includes? ab-fn-source "return Promise.resolve"))
         "must no longer return a real, native Promise.resolve() directly")))
+
+(deftest quickjs-wasm-webapi-shim-formdata-filename-arg-honored-per-spec
+  ;; `__kotobaFormValue` (backing `FormData.prototype.append`/`.set`)
+  ;; implements real spec's \"create an entry\" Blob-handling algorithm,
+  ;; which previously got BOTH of its two steps wrong:
+  ;;  1. A plain (non-File) Blob given with NO filename arg must STILL be
+  ;;     normalized into a File defaulting its name to 'blob' -- this was
+  ;;     entirely missing; a plain Blob append stayed a plain Blob
+  ;;     (`fd.get(key) instanceof File` was wrongly false).
+  ;;  2. A filename arg, when given, ALWAYS wins and produces a renamed
+  ;;     File -- even when value was ALREADY a File. The old code's own
+  ;;     guard (`!(value instanceof globalThis.File) && filename != null`)
+  ;;     explicitly special-cased File values out of the rewrap, so
+  ;;     `fd.append('x', existingFile, 'renamed.txt')` silently kept
+  ;;     existingFile's ORIGINAL name -- real browsers rename it. This is
+  ;;     real, common FormData usage (renaming a File on append/set), not
+  ;;     an edge case.
+  ;; Confirmed via a real Node.js harness before touching source across 5
+  ;; scenarios (plain-Blob-no-filename, plain-Blob-with-filename [pre-
+  ;; existing, regression guard], File-with-filename [the reported bug],
+  ;; File-no-filename [regression guard: same object, no rewrap], plain
+  ;; string [regression guard, unaffected]).
+  (let [source quickjs-wasm/webapi-shim-source
+        idx (.indexOf source "function __kotobaFormValue(value, filename)")
+        fn-source (subs source idx (+ idx 2000))]
+    (is (str/includes? fn-source "var alreadyFile = value instanceof globalThis.File;"))
+    (is (str/includes? fn-source "var name = filename != null ? String(filename) : 'blob';"))
+    (is (str/includes? fn-source "return new globalThis.File([value], name, { type: value.type });"))
+    (is (str/includes? fn-source "return new globalThis.File([value], String(filename), { type: value.type, lastModified: value.lastModified });")
+        "renaming an ALREADY-a-File value must preserve its real type/lastModified, only changing the name")
+    (is (not (str/includes? fn-source "!(value instanceof globalThis.File) && filename != null"))
+        "the old guard that silently dropped the filename arg for already-File values must be gone")))

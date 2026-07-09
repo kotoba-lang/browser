@@ -3808,12 +3808,29 @@
       globalThis.File.prototype = Object.create(globalThis.Blob.prototype);
       globalThis.File.prototype.constructor = globalThis.File;
       function __kotobaFormValue(value, filename) {
-        // FormData.append/set value coercion: String values are stringified;
-        // a Blob value is kept; a non-File Blob with a filename arg is wrapped
-        // in a File (real FormData behavior).
+        // FormData.append/set value coercion, per the real \"create an
+        // entry\" algorithm (WHATWG XHR spec): a String value is
+        // stringified; a Blob value (File or not) is ALWAYS normalized
+        // into a File --
+        //  - a Blob that is not already a File defaults its name to
+        //    'blob' (previously it was returned as a plain Blob
+        //    unchanged whenever no filename arg was given, so
+        //    fd.get(key) instanceof File was wrongly false).
+        //  - a filename argument, when given, ALWAYS wins and produces
+        //    a renamed File, even when value was already a File
+        //    (previously an existing File's filename arg was silently
+        //    dropped entirely -- fd.append('x', existingFile,
+        //    'renamed.txt') kept existingFile's ORIGINAL name; renaming
+        //    an existing File via the filename arg is real, common
+        //    FormData usage real browsers honor).
         if (value instanceof globalThis.Blob) {
-          if (!(value instanceof globalThis.File) && filename != null) {
-            return new globalThis.File([value], String(filename), { type: value.type });
+          var alreadyFile = value instanceof globalThis.File;
+          if (!alreadyFile) {
+            var name = filename != null ? String(filename) : 'blob';
+            return new globalThis.File([value], name, { type: value.type });
+          }
+          if (filename != null) {
+            return new globalThis.File([value], String(filename), { type: value.type, lastModified: value.lastModified });
           }
           return value;
         }
