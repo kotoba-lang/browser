@@ -1572,3 +1572,33 @@
         "renaming an ALREADY-a-File value must preserve its real type/lastModified, only changing the name")
     (is (not (str/includes? fn-source "!(value instanceof globalThis.File) && filename != null"))
         "the old guard that silently dropped the filename arg for already-File values must be gone")))
+
+(deftest quickjs-wasm-webapi-shim-formdata-select-multiple-one-entry-per-option
+  ;; `new FormData(formEl)`'s constructor loop previously reused
+  ;; `__kotobaControlValue`/`__kotobaSelectValue` (a SINGLE-value
+  ;; function meant for `.value`/`.selectedIndex` accessors, which
+  ;; `return`s on the FIRST selected `<option>` it finds) for entry-list
+  ;; construction too. Real spec's \"constructing the entry list\"
+  ;; algorithm requires ONE entry per selected option -- so a real
+  ;; `<select multiple>` with two+ selections silently lost every
+  ;; selection after the first, and a `<select multiple>` with NOTHING
+  ;; selected produced a spurious '' entry instead of contributing no
+  ;; entry at all. Fixed with a new `__kotobaSelectValues` collecting
+  ;; every match (mirroring `__kotobaSelectValue`'s own already-
+  ;; established, real-Chrome-verified disabled-handling rule exactly),
+  ;; used by the FormData constructor specifically for `<select>`
+  ;; elements instead of the single-value helper.
+  (let [source quickjs-wasm/webapi-shim-source
+        fn-idx (.indexOf source "function __kotobaSelectValues(node)")
+        fn-source (subs source fn-idx (+ fn-idx 2200))
+        ctor-idx (.indexOf source "globalThis.FormData = function(form)")
+        ctor-source (subs source ctor-idx (+ ctor-idx 2000))]
+    (is (pos? fn-idx) "__kotobaSelectValues must exist")
+    (is (str/includes? fn-source "if (__kotobaBoolAttr(candidate, 'selected')) values.push(__kotobaOptionValue(candidate));"))
+    (is (str/includes? fn-source "if (values.length === 0 && !__kotobaBoolAttr(node, 'multiple') && firstEnabledOption) {"))
+    (is (str/includes? fn-source "return [__kotobaOptionValue(firstEnabledOption)];"))
+    (is (str/includes? fn-source "return values;"))
+    (is (str/includes? ctor-source "if (tag === 'select') {")
+        "the FormData constructor loop must special-case <select> instead of falling through to the generic single-value append")
+    (is (str/includes? ctor-source "var selectedValues = __kotobaSelectValues(node);"))
+    (is (str/includes? ctor-source "for (var si = 0; si < selectedValues.length; si++) this.append(name, selectedValues[si]);"))))

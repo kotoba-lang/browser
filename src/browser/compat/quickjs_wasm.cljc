@@ -494,6 +494,39 @@
         }
         return !hasSelectedOption && !multiple && firstEnabledOption ? __kotobaOptionValue(firstEnabledOption) : '';
       }
+      function __kotobaSelectValues(node) {
+        // Real HTML5 \"constructing the entry list\" algorithm for a
+        // <select>: ONE entry per selected <option>, not a single
+        // collapsed value -- the JS-facing FormData(formEl) constructor
+        // previously reused __kotobaSelectValue above (a SINGLE-value
+        // function meant for .value/.selectedIndex accessors, which
+        // `return`s on the FIRST selected option it finds) for entry-
+        // list construction too, so a real <select multiple> with two+
+        // selected options silently lost every selection after the
+        // first, and a <select multiple> with NOTHING selected produced
+        // a spurious '' entry instead of contributing no entry at all.
+        // Mirrors __kotobaSelectValue's own already-established, real-
+        // Chrome-verified disabled-handling rule exactly (an explicit
+        // selected attr wins outright regardless of disabled; the no-
+        // explicit-selection fallback is disabled-aware) -- this is
+        // that same algorithm collecting every match instead of
+        // returning on the first.
+        var descendants = __kotobaDescendantNodeIds(node);
+        var firstEnabledOption = null;
+        var values = [];
+        for (var i = 0; i < descendants.length; i++) {
+          var candidate = __kotobaNodeById(descendants[i]);
+          if (candidate && String(candidate.tag || '').toLowerCase() === 'option') {
+            var disabled = __kotobaDisabledControl(candidate);
+            if (!firstEnabledOption && !disabled) firstEnabledOption = candidate;
+            if (__kotobaBoolAttr(candidate, 'selected')) values.push(__kotobaOptionValue(candidate));
+          }
+        }
+        if (values.length === 0 && !__kotobaBoolAttr(node, 'multiple') && firstEnabledOption) {
+          return [__kotobaOptionValue(firstEnabledOption)];
+        }
+        return values;
+      }
       function __kotobaRadioGroupNodes(node) {
         var nodes = globalThis.__kotobaSnapshot.nodes || {};
         var keys = Object.keys(nodes).sort(function(a, b) { return Number(a) - Number(b); });
@@ -3873,7 +3906,16 @@
             this.append(name, (cv == null || cv === '') ? 'on' : String(cv));
             continue;
           }
-          // text-like inputs / textarea / select.
+          if (tag === 'select') {
+            // One entry per selected <option> (real spec), not the
+            // single collapsed value __kotobaControlValue's own select
+            // branch (__kotobaSelectValue) reports for .value reads --
+            // see __kotobaSelectValues's own docstring above.
+            var selectedValues = __kotobaSelectValues(node);
+            for (var si = 0; si < selectedValues.length; si++) this.append(name, selectedValues[si]);
+            continue;
+          }
+          // text-like inputs / textarea.
           this.append(name, __kotobaControlValue(node));
         }
       };
