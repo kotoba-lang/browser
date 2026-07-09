@@ -527,17 +527,37 @@
   carried under a plain `:opened` key (no `?`-stripping concern here,
   since `:opened` has no trailing `?` to begin with) so the webapi shim's
   delivery IIFE can fire a still-registered `ws.onopen` exactly once per
-  connection, mirroring `:closed`'s own plain-key delivery."
-  [websocket-fn handle opened?]
+  connection, mirroring `:closed`'s own plain-key delivery.
+
+  `error-already-delivered?` gates the drained `:error` (see
+  `browser.net.websocket/drain-messages!`'s docstring -- `{:message
+  <string>}` once a real `onError`/`onerror` genuinely fired on the real
+  socket, `nil` otherwise). Unlike `:closed?`/`:opened`, `:error` is only
+  ever included in this map's return value AT ALL when there is a real
+  error to report AND it has not already been delivered -- this fn's
+  caller (`websocket-snapshot`) is the one that decides, from the returned
+  map's presence/absence of an `:error` key, which ids to fold into
+  `state`'s own `:websocket/errored` dedup set (see that fn's docstring),
+  because unlike `:websocket/opened` (where EVERY real-handled connection
+  is unconditionally, eventually opened) not every connection ever
+  errors -- pre-emptively marking every handled id as \"error delivered\"
+  the way `take-websocket-opened-ids` does for `opened` would silently
+  suppress a genuinely later real error on a connection that has not
+  errored yet."
+  [websocket-fn handle opened? error-already-delivered?]
   (let [drained (websocket-fn {:op :drain :handle handle})
-        closed? (boolean (:closed? drained))]
+        closed? (boolean (:closed? drained))
+        error (:error drained)
+        deliver-error? (and error (not error-already-delivered?))]
     (cond-> {:messages (vec (:messages drained))
              :closed? closed?
              :closed closed?
              :opened opened?}
       (:close-info drained)
       (assoc :close-code (:code (:close-info drained))
-             :close-reason (:reason (:close-info drained))))))
+             :close-reason (:reason (:close-info drained)))
+      deliver-error?
+      (assoc :error error))))
 
 (defn- websocket-snapshot
   "Compute the REAL, current per-connection inbound-message snapshot from
@@ -561,34 +581,53 @@
   snapshot is computed -- there is no way for it to already be there
   mid-script-1.
 
-  Without a `:websocket-fn` (the default), returns `{}` immediately --
-  no connections ever have a real handle in that mode, so there is nothing
-  to drain, and the webapi shim's delivery step (see
+  Without a `:websocket-fn` (the default), returns `[{} state]` immediately
+  -- no connections ever have a real handle in that mode, so there is
+  nothing to drain, and the webapi shim's delivery step (see
   `quickjs-wasm/websocket-snapshot-source`) is a no-op against an empty
   map, keeping every pre-existing fabricated-mode caller/test unaffected.
-  `ws.onopen` is deliberately scoped the same way -- see
+  `ws.onopen`/`ws.onerror` are deliberately scoped the same way -- see
   `take-websocket-opened-ids`.
 
   `opened-ids` (from `take-websocket-opened-ids`) marks which of this
   snapshot's connection ids have NOT yet had `onopen` delivered.
 
-  Returns a JSON-safe map keyed by WebSocket id string: `{<id>
-  {:messages [...] :closed? bool :closed bool :opened bool :close-code
-  <int> :close-reason <string>}}` (`:closed?`/`:closed` are always the
-  same value, under two keys -- see `websocket-connection-snapshot`'s
-  docstring for why the plain `:closed` key has to be there too for the
-  real webapi shim delivery to see it at all. `:close-code`/`:close-reason`
-  only present once the real peer has actually closed)."
+  Unlike `opened-ids`, the `:websocket/errored` dedup set is not taken by
+  a separate caller-side fn ahead of time -- whether a connection has a
+  real error to report can only be known AFTER draining it (a real error
+  might not exist yet, or might newly appear this very call), so this fn
+  itself reads `state`'s `:websocket/errored`, decides per-connection
+  delivery via `websocket-connection-snapshot`, and returns the SAME
+  `[value state]` shape `take-worker-snapshot`/`take-broadcast-snapshot`
+  do, with `:websocket/errored` folded forward to include every id this
+  call actually delivered an `:error` key for (and only those).
+
+  Returns `[snapshot state']`, `snapshot` a JSON-safe map keyed by
+  WebSocket id string: `{<id> {:messages [...] :closed? bool :closed bool
+  :opened bool :close-code <int> :close-reason <string> :error {:message
+  <string>}}}` (`:closed?`/`:closed` are always the same value, under two
+  keys -- see `websocket-connection-snapshot`'s docstring for why the
+  plain `:closed` key has to be there too for the real webapi shim
+  delivery to see it at all. `:close-code`/`:close-reason` only present
+  once the real peer has actually closed. `:error` only present the ONE
+  time a real error is first observed for that connection)."
   [state opened-ids]
   (if-let [websocket-fn (:websocket-fn state)]
-    (reduce-kv
-     (fn [snapshot id _connection]
-       (if-let [handle (get (:websocket/handles state) id)]
-         (assoc snapshot id (websocket-connection-snapshot websocket-fn handle (contains? opened-ids id)))
-         snapshot))
-     {}
-     (:websocket/connections state))
-    {}))
+    (let [already-errored (or (:websocket/errored state) #{})
+          [snapshot newly-errored]
+          (reduce-kv
+           (fn [[snapshot errored] id _connection]
+             (if-let [handle (get (:websocket/handles state) id)]
+               (let [entry (websocket-connection-snapshot websocket-fn handle
+                                                            (contains? opened-ids id)
+                                                            (contains? already-errored id))]
+                 [(assoc snapshot id entry)
+                  (cond-> errored (contains? entry :error) (conj id))])
+               [snapshot errored]))
+           [{} #{}]
+           (:websocket/connections state))]
+      [snapshot (update state :websocket/errored (fnil into #{}) newly-errored)])
+    [{} state]))
 
 (defn- take-websocket-opened-ids
   "Consume (read, then mark-delivered) which of `state`'s currently
@@ -2212,6 +2251,7 @@
         [fetch-snap state] (take-fetch-snapshot state)
         [broadcast-snap state] (take-broadcast-snapshot state)
         [websocket-opened-ids state] (take-websocket-opened-ids state)
+        [websocket-snap state] (websocket-snapshot state websocket-opened-ids)
         state (update state :binding binding/evaluate! script)
         response (normalize-response
                   (invoke-engine (:engine state)
@@ -2222,7 +2262,7 @@
                                                             (:storage state)
                                                             (clipboard-snapshot state)
                                                             (geolocation-snapshot state)
-                                                            (websocket-snapshot state websocket-opened-ids)
+                                                            websocket-snap
                                                             worker-snap
                                                             fetch-snap
                                                             (notification-permission-snapshot state)
@@ -2250,6 +2290,7 @@
           [fetch-snap state] (take-fetch-snapshot state)
           [broadcast-snap state] (take-broadcast-snapshot state)
           [websocket-opened-ids state] (take-websocket-opened-ids state)
+          [websocket-snap state] (websocket-snapshot state websocket-opened-ids)
           state (update state :binding binding/module-load! specifier referrer)
           response (normalize-response
                     (invoke-engine (:engine state)
@@ -2260,7 +2301,7 @@
                                                               (:storage state)
                                                               (clipboard-snapshot state)
                                                               (geolocation-snapshot state)
-                                                              (websocket-snapshot state websocket-opened-ids)
+                                                              websocket-snap
                                                               worker-snap
                                                               fetch-snap
                                                               (notification-permission-snapshot state)
@@ -2321,6 +2362,7 @@
    :websocket/connections {}
    :websocket/handles {}
    :websocket/opened #{}
+   :websocket/errored #{}
    :websocket/messages []
    :crypto/random-bytes (vec (or crypto-random-bytes []))
    :crypto/random-uuids (vec (or crypto-random-uuids []))

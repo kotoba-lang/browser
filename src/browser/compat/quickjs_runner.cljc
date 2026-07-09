@@ -335,9 +335,14 @@
   PREVIOUS script tag opened would look newly-opened again to every
   SUBSEQUENT script tag's snapshot (nothing else ever removes an id from
   `:websocket/handles`), firing `onopen` repeatedly instead of exactly
-  once."
+  once. `:websocket/errored` is the exact same one-time-delivery dedup
+  pattern for `ws.onerror` (see `quickjs-execution/websocket-snapshot`) --
+  a real captured error, once delivered, must not fire again on every
+  later script tag just because the underlying real error atom never
+  resets."
   [:storage :clipboard :geolocation
    :dom/client-ids :websocket/connections :websocket/handles :websocket/opened
+   :websocket/errored
    :worker/instances :worker/handles :worker/outbox
    :net/fetch-responses
    :broadcast/channels :broadcast/outbox :history/entries :history/index

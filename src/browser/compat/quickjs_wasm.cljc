@@ -4200,6 +4200,9 @@
           if (__kwEntry.opened && typeof __kwSocket.onopen === 'function') {
             __kwSocket.onopen({});
           }
+          if (__kwEntry.error && typeof __kwSocket.onerror === 'function') {
+            __kwSocket.onerror({ message: __kwEntry.error.message || '' });
+          }
           var __kwMessages = __kwEntry.messages || [];
           for (var __kwj = 0; __kwj < __kwMessages.length; __kwj++) {
             if (typeof __kwSocket.onmessage === 'function') {

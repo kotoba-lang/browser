@@ -1067,6 +1067,30 @@
     (is (str/includes? source "if (__kwEntry.opened && typeof __kwSocket.onopen === 'function') {"))
     (is (str/includes? source "__kwSocket.onopen({});"))))
 
+(deftest quickjs-wasm-webapi-shim-websocket-onerror-fires-exactly-once
+  ;; `browser.net.websocket` genuinely captures a real `onError`/`onerror`
+  ;; event into a real `:error` atom on BOTH backends (`:clj`'s
+  ;; java.net.http.WebSocket$Listener, `:cljs`'s host WebSocket), and
+  ;; `drain-messages!` faithfully returns it -- the data pipeline worked
+  ;; end-to-end right up to the LAST step, where
+  ;; quickjs-execution/websocket-connection-snapshot silently dropped
+  ;; `(:error drained)` on the floor, so `ws.onerror` (accepted in the
+  ;; constructor, same as onopen was) was permanently dead code, exactly
+  ;; the same bug class fixed for onopen last cycle. Fixed by threading a
+  ;; real, host-computed `:error` key onto the same per-connection
+  ;; snapshot entry the delivery IIFE already reads :opened/:closed off
+  ;; of, gated by a NEW :websocket/errored one-time-delivery dedup set
+  ;; (mirroring :websocket/opened -- the real underlying error atom never
+  ;; resets once set, so without dedup the same error would redeliver on
+  ;; every later script tag forever). Confirmed via a real Node.js harness
+  ;; before touching source, then a real CLJS/QuickJS smoke test
+  ;; (quickjs-websocket-onerror-smoke-test) proving it fires once and
+  ;; never twice for a genuine OS-level connection-refused error.
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "this.onerror = null;"))
+    (is (str/includes? source "if (__kwEntry.error && typeof __kwSocket.onerror === 'function') {"))
+    (is (str/includes? source "__kwSocket.onerror({ message: __kwEntry.error.message || '' });"))))
+
 (deftest quickjs-wasm-webapi-shim-exposes-crypto-random-capability
   (let [source quickjs-wasm/webapi-shim-source]
     (is (str/includes? source "globalThis.crypto ="))
