@@ -1965,16 +1965,35 @@
           // setAttribute/__kotobaAttr path every sibling internal-
           // bookkeeping property (scrollTop/scrollLeft/defaultValue/...)
           // already correctly uses.
+          // Real HTMLInputElement/HTMLTextAreaElement.selectionStart/
+          // selectionEnd are ALWAYS clamped to [0, value.length] -- these
+          // getters previously read the raw selection-start/selection-end
+          // attrs straight through with no such clamp. This is the exact
+          // same stale-selection root cause already fixed twice
+          // downstream (cssom.layout's own paint sel-ops, org-w3-aria's
+          // accessible-node), reached here through the direct scripting
+          // API instead: set value(value) has no spec-mandated selection-
+          // reset, so a real `el.select(); el.value = shorter;` idiom
+          // left these getters reporting offsets exceeding the NEW,
+          // shorter value's own length -- arguably the most consequential
+          // of the three consumers, since a caller doing
+          // `value.slice(el.selectionStart, el.selectionEnd)` right after
+          // gets a silently wrong (empty, here) slice instead of a
+          // clamped, sane one. Confirmed via direct Node execution of the
+          // actual (pre-fix) getter bodies, copy-pasted verbatim, before
+          // touching source.
           get selectionStart() {
             var value = __kotobaParseNumber(__kotobaAttr(__kotobaNodeById(__kotobaRefNodeId(ref)), 'selection-start'));
-            return Number.isNaN(value) ? this.value.length : value;
+            var len = this.value.length;
+            return Number.isNaN(value) ? len : Math.max(0, Math.min(len, value));
           },
           set selectionStart(value) {
             this.setSelectionRange(Number(value), this.selectionEnd);
           },
           get selectionEnd() {
             var value = __kotobaParseNumber(__kotobaAttr(__kotobaNodeById(__kotobaRefNodeId(ref)), 'selection-end'));
-            return Number.isNaN(value) ? this.value.length : value;
+            var len = this.value.length;
+            return Number.isNaN(value) ? len : Math.max(0, Math.min(len, value));
           },
           set selectionEnd(value) {
             this.setSelectionRange(this.selectionStart, Number(value));

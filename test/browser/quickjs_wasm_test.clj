@@ -180,6 +180,23 @@
     (is (not (str/includes? source "node['selection-end'] ="))
         "the old bug's direct, non-attribute snapshot write must be gone")))
 
+(deftest quickjs-wasm-webapi-shim-selection-getters-clamp-to-the-real-values-length
+  ;; The selectionStart/selectionEnd GETTERS themselves (distinct from
+  ;; setSelectionRange, fixed in a prior cycle above) previously read the
+  ;; raw selection-start/selection-end attrs with no clamp against the
+  ;; current value's own length -- the same stale-selection root cause
+  ;; already fixed twice downstream (cssom.layout's paint sel-ops,
+  ;; org-w3-aria's accessible-node), reached here through the direct
+  ;; scripting API instead: set value(value) has no spec-mandated
+  ;; selection-reset, so a real `el.select(); el.value = shorter;` idiom
+  ;; left these getters reporting offsets exceeding the value's own
+  ;; length. Confirmed via direct Node execution of the actual (pre-fix)
+  ;; getter bodies, copy-pasted verbatim, before touching source.
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "return Number.isNaN(value) ? len : Math.max(0, Math.min(len, value));"))
+    (is (= 2 (count (re-seq #"return Number\.isNaN\(value\) \? len : Math\.max\(0, Math\.min\(len, value\)\);" source)))
+        "both selectionStart and selectionEnd getters must use the identical clamp")))
+
 (deftest quickjs-wasm-webapi-shim-exposes-step-up-down-methods
   ;; HTMLInputElement.stepUp()/.stepDown() -- previously entirely missing (a
   ;; repo-wide grep for `stepUp`/`stepDown` returned zero matches anywhere),

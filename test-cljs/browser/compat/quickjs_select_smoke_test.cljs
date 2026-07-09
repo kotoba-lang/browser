@@ -111,6 +111,39 @@
                                  (or (.-message err) err)))
                   (done))))))
 
+(deftest quickjs-real-selection-getters-clamp-after-a-shorter-value-is-set-test
+  ;; The JS-FACING .selectionStart/.selectionEnd GETTERS themselves
+  ;; (distinct from the real-document-attrs proof above) previously read
+  ;; the raw selection-start/selection-end attrs with no clamp against
+  ;; the CURRENT value's own length. set value(value) has no spec-
+  ;; mandated selection-reset, so selecting a range then setting a
+  ;; SHORTER value left these getters reporting offsets exceeding the
+  ;; new value's own length -- the literal HTMLInputElement DOM contract
+  ;; every real browser clamps to [0, value.length], and the actual API
+  ;; surface a page script (or the browser-use AI-agent adapter) reads
+  ;; to reason about cursor/selection position.
+  (async done
+    (-> (run-page-and-read-title!
+         {:html (str "<input id=\"note\" value=\"hello world\">"
+                     "<script>"
+                     "var note = document.getElementById('note');"
+                     "note.setSelectionRange(6, 11);"
+                     "note.value = 'hi';"
+                     "document.title = note.selectionStart + ':' + note.selectionEnd + "
+                     "':' + JSON.stringify(note.value.slice(note.selectionStart, note.selectionEnd));"
+                     "</script>")})
+        (.then (fn [title]
+                 (println "quickjs real selectionStart/End after a shorter value is set:" (pr-str title))
+                 (is (= "2:2:\"\"" title)
+                     (str "expected selectionStart/selectionEnd to clamp to the new 2-character "
+                          "value's own length (not the stale 6:11 from before the value change), "
+                          "got " (pr-str title)))
+                 (done)))
+        (.catch (fn [err]
+                  (is false (str "QuickJS WASM engine initialization / page load failed: "
+                                 (or (.-message err) err)))
+                  (done))))))
+
 (deftest quickjs-real-select-on-an-empty-input-selects-nothing-not-a-crash-test
   (async done
     (-> (run-page-and-read-title!
