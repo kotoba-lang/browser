@@ -866,6 +866,22 @@
     (is (str/includes? source "globalThis.URL = function(input, base)"))
     (is (str/includes? source "this.searchParams = new globalThis.URLSearchParams(this.search)"))))
 
+(deftest quickjs-wasm-webapi-shim-search-params-set-overwrites-the-first-matching-pair-in-place
+  ;; Real spec: URLSearchParams.prototype.set() overwrites the FIRST
+  ;; matching pair's value in place and drops any others, preserving that
+  ;; pair's position relative to other keys. The previous implementation
+  ;; was `this.delete(name); this.append(name, value);` -- delete-then-
+  ;; append removes every same-name pair and appends a fresh one at the
+  ;; end, silently reordering params whenever another key interleaves with
+  ;; the one being set (confirmed via a real Node.js harness before
+  ;; touching source: 'a=1&b=2&a=3'.set('a', '9') produced 'b=2&a=9'
+  ;; instead of the real 'a=9&b=2').
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "var found = false;\n        var next = [];\n        for (var i = 0; i < this.__pairs.length; i++) {"))
+    (is (str/includes? source "if (pair[0] === name) {\n            if (!found) {\n              next.push([name, value]);\n              found = true;\n            }\n          } else {\n            next.push(pair);\n          }"))
+    (is (str/includes? source "if (!found) next.push([name, value]);\n        this.__pairs = next;"))
+    (is (not (str/includes? source "globalThis.URLSearchParams.prototype.set = function(name, value) {\n        this.delete(name);\n        this.append(name, value);\n      };")))))
+
 (deftest quickjs-wasm-webapi-shim-exposes-permissions-query-capability
   (let [source quickjs-wasm/webapi-shim-source]
     (is (str/includes? source "globalThis.navigator.permissions"))

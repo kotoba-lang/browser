@@ -3385,8 +3385,30 @@
         this.__pairs.push([String(name), String(value)]);
       };
       globalThis.URLSearchParams.prototype.set = function(name, value) {
-        this.delete(name);
-        this.append(name, value);
+        // Real spec: overwrite the FIRST matching pair's value in place and
+        // drop any others, preserving that pair's position relative to
+        // other keys -- delete-then-append (the previous implementation)
+        // instead removed every same-name pair and re-appended a fresh one
+        // at the end, silently reordering params whenever another key
+        // interleaved with the one being set (e.g. 'a=1&b=2&a=3'.set('a',
+        // '9') produced 'b=2&a=9' instead of the real 'a=9&b=2').
+        name = String(name);
+        value = String(value);
+        var found = false;
+        var next = [];
+        for (var i = 0; i < this.__pairs.length; i++) {
+          var pair = this.__pairs[i];
+          if (pair[0] === name) {
+            if (!found) {
+              next.push([name, value]);
+              found = true;
+            }
+          } else {
+            next.push(pair);
+          }
+        }
+        if (!found) next.push([name, value]);
+        this.__pairs = next;
       };
       globalThis.URLSearchParams.prototype.get = function(name) {
         name = String(name);
