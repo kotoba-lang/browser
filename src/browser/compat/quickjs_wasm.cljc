@@ -3730,8 +3730,20 @@
           } else if (p instanceof globalThis.Blob) {
             var pb = p.__bytes;
             for (var j = 0; j < pb.length; j++) bytes.push(pb[j]);
+          } else if (p instanceof globalThis.ArrayBuffer) {
+            // A raw ArrayBuffer has NO `.length` property at all in real
+            // JS (only `.byteLength`) -- the typed-array branch below was
+            // silently never reached for this case, so a real ArrayBuffer
+            // part fell all the way through to the final String(p) else
+            // branch, encoding the literal text \"[object ArrayBuffer]\"
+            // instead of the buffer's real bytes. Wrapping it in a real
+            // Uint8Array view (real, native QuickJS TypedArray support,
+            // not faked here) reads the actual bytes correctly.
+            var view = new Uint8Array(p);
+            for (var j = 0; j < view.length; j++) bytes.push(view[j] & 0xFF);
           } else if (p && typeof p === 'object' && typeof p.length === 'number') {
-            // ArrayBuffer or any typed array view (Uint8Array et al.).
+            // Any typed array view (Uint8Array et al. -- these DO have a
+            // real `.length`, unlike a raw ArrayBuffer handled above).
             for (var j = 0; j < p.length; j++) bytes.push(p[j] & 0xFF);
           } else {
             var e = __kotobaUtf8Encode(String(p));

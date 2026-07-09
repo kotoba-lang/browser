@@ -1467,3 +1467,37 @@
     (is (str/includes? source "type === 'submit' || type === 'image' || type === 'reset' || type === 'button' || type === 'file'"))
     (is (str/includes? source "type === 'checkbox' || type === 'radio'"))
     (is (str/includes? source "if (!__kotobaBoolAttr(node, 'checked')) continue;"))))
+
+(deftest quickjs-wasm-webapi-shim-blob-reads-real-arraybuffer-bytes
+  ;; A raw ArrayBuffer has NO `.length` property in real JS (only
+  ;; `.byteLength` -- verified: `typeof (new ArrayBuffer(4)).length` is
+  ;; `'undefined'`), so `__kotobaBlobPartsToBytes`'s typed-array branch
+  ;; (`typeof p.length === 'number'`) was NEVER reached for a real
+  ;; ArrayBuffer part despite the header comment's explicit claim that
+  ;; Blob "accepts String / Blob / ArrayBuffer / typed-array parts" --
+  ;; execution fell all the way through to the final else branch, which
+  ;; does `String(p)` and UTF-8-encodes THAT -- `String(new
+  ;; ArrayBuffer(4))` is literally the 20-character text
+  ;; \"[object ArrayBuffer]\", not the buffer's real 4 bytes. So
+  ;; `new Blob([someArrayBuffer]).size` silently reported the stringified
+  ;; object's text length instead of the buffer's real byte length, and
+  ;; the actual bytes were corrupted text, not the real buffer contents.
+  ;; Only typed-array VIEWS (Uint8Array et al., which do have a real
+  ;; `.length`) were ever handled correctly by that branch. Fixed by
+  ;; adding a dedicated `p instanceof globalThis.ArrayBuffer` branch that
+  ;; wraps it in a real `Uint8Array` view (real, native QuickJS TypedArray
+  ;; support) to read the actual bytes. Confirmed via a real Node.js
+  ;; harness before touching source: a raw ArrayBuffer part now yields the
+  ;; real bytes, size 4 instead of 20; a regression-guard scenario
+  ;; confirms typed-array parts still work correctly, unaffected.
+  (let [source quickjs-wasm/webapi-shim-source
+        idx (.indexOf source "function __kotobaBlobPartsToBytes(parts)")
+        fn-source (subs source idx (+ idx 2000))]
+    (is (str/includes? fn-source "} else if (p instanceof globalThis.ArrayBuffer) {"))
+    (is (str/includes? fn-source "var view = new Uint8Array(p);"))
+    (is (str/includes? fn-source "for (var j = 0; j < view.length; j++) bytes.push(view[j] & 0xFF);"))
+    ;; Regression guard: the pre-existing typed-array branch (checked
+    ;; AFTER the new ArrayBuffer branch, per real JS if/else-if ordering)
+    ;; must still be present, unchanged in its own read logic.
+    (is (str/includes? fn-source "typeof p.length === 'number'"))
+    (is (str/includes? fn-source "for (var j = 0; j < p.length; j++) bytes.push(p[j] & 0xFF);"))))
