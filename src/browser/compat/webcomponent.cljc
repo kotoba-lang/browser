@@ -37,14 +37,34 @@
        (not (contains? reserved-names name))))
 
 (defn define
+  "Real spec: a second `customElements.define()` call either reusing an
+   already-registered NAME or an already-registered CONSTRUCTOR (a class
+   used for one name can never be reused for another) must throw
+   NotSupportedError, not silently redefine/overwrite. Mirrors the live JS
+   registrar's own `globalThis.customElements.define` (quickjs_wasm.cljc)
+   -- keep both in sync if either's rules change."
   [registry name definition]
-  (if (valid-name? name)
-    (assoc-in registry [:custom-elements/definitions name]
-              (merge {:custom-element/name name
-                      :observed-attributes []}
-                     definition))
-    (assoc registry :custom-elements/error {:reason :invalid-custom-element-name
-                                            :name name})))
+  (let [constructor-id (:constructor/id definition)
+        definitions (:custom-elements/definitions registry)]
+    (cond
+      (not (valid-name? name))
+      (assoc registry :custom-elements/error {:reason :invalid-custom-element-name
+                                               :name name})
+
+      (contains? definitions name)
+      (assoc registry :custom-elements/error {:reason :already-defined
+                                               :name name})
+
+      (and (some? constructor-id)
+           (some #(= constructor-id (:constructor/id %)) (vals definitions)))
+      (assoc registry :custom-elements/error {:reason :constructor-already-used
+                                               :name name})
+
+      :else
+      (assoc-in registry [:custom-elements/definitions name]
+                (merge {:custom-element/name name
+                        :observed-attributes []}
+                       definition)))))
 
 (defn definition
   [registry name]

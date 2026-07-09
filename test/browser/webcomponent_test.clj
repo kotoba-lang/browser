@@ -58,3 +58,53 @@
                                                        :observed-attributes ["open"]}))]
     (is (= "my-widget" (:custom-element/name (webcomponent/definition registry "my-widget"))))
     (is (nil? (:custom-elements/error registry)))))
+
+(deftest define-rejects-a-duplicate-name-and-preserves-the-first-definition
+  ;; Real spec: a second define() call reusing an already-registered NAME
+  ;; must throw NotSupportedError, not silently overwrite the first
+  ;; definition -- previously this function unconditionally assoc-in'd
+  ;; over any existing entry with no check at all, and its own live JS
+  ;; sibling (globalThis.customElements.define, quickjs_wasm.cljc) already
+  ;; correctly rejects this exact case. Confirmed via direct REPL
+  ;; evaluation before touching source.
+  (let [registry (-> (webcomponent/empty-registry)
+                     (webcomponent/define "my-widget" {:constructor/id "c1"})
+                     (webcomponent/define "my-widget" {:constructor/id "c2"}))]
+    (is (= "c1" (:constructor/id (webcomponent/definition registry "my-widget")))
+        "the first definition must survive unchanged")
+    (is (= {:reason :already-defined :name "my-widget"}
+           (:custom-elements/error registry)))))
+
+(deftest define-rejects-a-constructor-already-used-for-a-different-name
+  ;; Real spec: a class/constructor already used to define ONE name can
+  ;; never be reused to define ANOTHER name -- mirrors the JS registrar's
+  ;; own "this constructor has already been used to define ..." check.
+  (let [registry (-> (webcomponent/empty-registry)
+                     (webcomponent/define "my-widget" {:constructor/id "c1"})
+                     (webcomponent/define "my-other-widget" {:constructor/id "c1"}))]
+    (is (nil? (webcomponent/definition registry "my-other-widget"))
+        "the second, constructor-colliding name must never be registered")
+    (is (= {:reason :constructor-already-used :name "my-other-widget"}
+           (:custom-elements/error registry)))))
+
+(deftest define-allows-two-distinct-names-with-distinct-constructors
+  ;; Regression guard: the new duplicate checks must not falsely reject
+  ;; two genuinely independent, valid registrations.
+  (let [registry (-> (webcomponent/empty-registry)
+                     (webcomponent/define "my-widget" {:constructor/id "c1"})
+                     (webcomponent/define "my-other-widget" {:constructor/id "c2"}))]
+    (is (some? (webcomponent/definition registry "my-widget")))
+    (is (some? (webcomponent/definition registry "my-other-widget")))
+    (is (nil? (:custom-elements/error registry)))))
+
+(deftest define-allows-two-names-with-no-constructor-id-at-all
+  ;; Regression guard: the constructor-collision check must only fire when
+  ;; BOTH sides genuinely provide a :constructor/id -- two definitions
+  ;; that never supply one must not falsely collide against each other via
+  ;; a nil-equals-nil comparison.
+  (let [registry (-> (webcomponent/empty-registry)
+                     (webcomponent/define "my-widget" {})
+                     (webcomponent/define "my-other-widget" {}))]
+    (is (some? (webcomponent/definition registry "my-widget")))
+    (is (some? (webcomponent/definition registry "my-other-widget")))
+    (is (nil? (:custom-elements/error registry)))))
