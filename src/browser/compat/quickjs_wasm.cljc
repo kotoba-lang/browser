@@ -2760,6 +2760,23 @@
             Object.assign(request, __kotobaNodeRequest(ref, 'node'));
             if (options != null) request['fullscreen/options'] = options;
             globalThis.__kotobaRequests.push(request);
+            // Real spec: requestFullscreen() returns Promise<undefined> --
+            // this previously fell off the end with no return statement at
+            // all, so el.requestFullscreen().then(...) crashed with
+            // \"undefined.then is not a function\", not just a missing
+            // feature. The real permission-gated success/failure is only
+            // decided host-side AFTER this script finishes (apply-capability
+            // processes the queued request post-eval, same timing as
+            // websocket/connect) -- mirroring how this engine already
+            // synchronously fakes WebSocket's readyState to OPEN regardless
+            // of that later real outcome, this resolves synchronously too;
+            // deferring to the real post-script permission decision (with a
+            // rejection path) would need the same pre-computed snapshot
+            // machinery Notification.permission/requestPermission use, a
+            // larger, separately-scoped change.
+            var deferred = __kotobaMakeDeferred();
+            deferred.resolve(undefined);
+            return deferred.promise;
           }
         };
         if (elementCacheKey) globalThis.__kotobaElementCache[elementCacheKey] = element;
@@ -2882,6 +2899,15 @@
             capability: 'fullscreen/exit',
             'fullscreen/op': 'exit'
           });
+          // Real spec: exitFullscreen() also returns Promise<undefined> --
+          // same missing-Promise bug as requestFullscreen() above. Unlike
+          // that one, :fullscreen/exit always unconditionally succeeds
+          // host-side (apply-capability's :fullscreen/exit case, no
+          // permission gate at all), so resolving synchronously here is not
+          // even a simplification -- it is the real, always-true outcome.
+          var deferred = __kotobaMakeDeferred();
+          deferred.resolve(undefined);
+          return deferred.promise;
         },
         createElement: function(tag) {
           var id = __kotobaClientId();

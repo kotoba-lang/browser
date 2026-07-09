@@ -1061,6 +1061,36 @@
     (is (str/includes? source "capability: 'fullscreen/exit'"))
     (is (str/includes? source "'fullscreen/op': 'exit'"))))
 
+(deftest quickjs-wasm-webapi-shim-fullscreen-methods-return-real-promises
+  ;; Real spec: `Element.prototype.requestFullscreen()` and
+  ;; `Document.prototype.exitFullscreen()` both return `Promise<undefined>`
+  ;; -- previously both fell off the end of their function bodies with no
+  ;; `return` statement at all, so `el.requestFullscreen().then(...)` /
+  ;; `await document.exitFullscreen()` crashed with "undefined.then is not
+  ;; a function", not just a missing feature -- the same bug shape as
+  ;; cycle 133's Notification.requestPermission() fix. Fixed by wrapping
+  ;; both in the established __kotobaMakeDeferred thenable, resolving
+  ;; synchronously with `undefined`: for exitFullscreen this is the real,
+  ;; always-true outcome (apply-capability's :fullscreen/exit case has no
+  ;; permission gate at all); for requestFullscreen this is a deliberate,
+  ;; honest simplification mirroring how this engine already synchronously
+  ;; fakes WebSocket's readyState to OPEN regardless of the real,
+  ;; post-script permission-gated outcome -- modeling a real rejection path
+  ;; would need the same pre-computed snapshot machinery Notification.
+  ;; permission/requestPermission use, a larger, separately-scoped change.
+  ;; Confirmed via a real Node.js harness before touching source.
+  (let [source quickjs-wasm/webapi-shim-source
+        request-idx (.indexOf source "requestFullscreen: function(options)")
+        request-fn-source (subs source request-idx (+ request-idx 1600))
+        exit-idx (.indexOf source "exitFullscreen: function()")
+        exit-fn-source (subs source exit-idx (+ exit-idx 900))]
+    (is (str/includes? request-fn-source "var deferred = __kotobaMakeDeferred();"))
+    (is (str/includes? request-fn-source "deferred.resolve(undefined);"))
+    (is (str/includes? request-fn-source "return deferred.promise;"))
+    (is (str/includes? exit-fn-source "var deferred = __kotobaMakeDeferred();"))
+    (is (str/includes? exit-fn-source "deferred.resolve(undefined);"))
+    (is (str/includes? exit-fn-source "return deferred.promise;"))))
+
 (deftest quickjs-wasm-webapi-shim-exposes-media-capture-capability
   (let [source quickjs-wasm/webapi-shim-source]
     (is (str/includes? source "globalThis.navigator.mediaDevices"))
