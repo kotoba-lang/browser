@@ -147,6 +147,7 @@
       globalThis.__kotobaSnapshot = globalThis.__kotobaSnapshot || { root: null, nodes: {} };
       globalThis.__kotobaWebSockets = globalThis.__kotobaWebSockets || {};
       globalThis.__kotobaWorkers = globalThis.__kotobaWorkers || {};
+      globalThis.__kotobaBroadcastChannels = globalThis.__kotobaBroadcastChannels || {};
       globalThis.__kotobaFetchPending = globalThis.__kotobaFetchPending || {};
       globalThis.__kotobaClientNodes = {};
       globalThis.__kotobaElementCache = {};
@@ -4054,10 +4055,21 @@
         delete globalThis.__kotobaWorkers[this.__kotobaWorkerId];
       };
       globalThis.BroadcastChannel = function(name) {
+        // Real spec: postMessage() must reach every OTHER channel
+        // instance sharing this same name (including across real page
+        // scripts) via its onmessage -- previously onmessage was never
+        // even initialized here, and no registry existed to deliver into
+        // (contrast WebSocket/Worker just above, both of which register
+        // into their own globalThis.__kotoba* map for exactly this
+        // reason). BroadcastChannel was a write-only sink to a host-side
+        // audit log, confirmed via direct REPL evaluation before touching
+        // source.
         var channelId = 'broadcast-' + globalThis.__kotobaNextBroadcastId;
         globalThis.__kotobaNextBroadcastId = globalThis.__kotobaNextBroadcastId + 1;
         this.__kotobaBroadcastId = channelId;
         this.name = String(name);
+        this.onmessage = null;
+        globalThis.__kotobaBroadcastChannels[channelId] = this;
         globalThis.__kotobaRequests.push({
           capability: 'broadcast/open',
           'broadcast/id': channelId,
@@ -4076,6 +4088,7 @@
           capability: 'broadcast/close',
           'broadcast/id': this.__kotobaBroadcastId
         });
+        delete globalThis.__kotobaBroadcastChannels[this.__kotobaBroadcastId];
       };
       globalThis.setTimeout = function(callback, delay) {
         var timerId = globalThis.__kotobaNextTimerId;
@@ -4180,6 +4193,23 @@
           for (var __kwoj = 0; __kwoj < __kwoMessages.length; __kwoj++) {
             if (typeof __kwoWorker.onmessage === 'function') {
               __kwoWorker.onmessage({ data: __kwoMessages[__kwoj] });
+            }
+          }
+        }
+      })();
+      (function() {
+        var __kotobaBcSnap = globalThis.__kotobaBroadcastSnapshot || {};
+        var __kotobaBcRegistry = globalThis.__kotobaBroadcastChannels || {};
+        var __kbcIds = Object.keys(__kotobaBcSnap);
+        for (var __kbci = 0; __kbci < __kbcIds.length; __kbci++) {
+          var __kbcId = __kbcIds[__kbci];
+          var __kbcEntry = __kotobaBcSnap[__kbcId];
+          var __kbcChannel = __kotobaBcRegistry[__kbcId];
+          if (!__kbcChannel || !__kbcEntry) continue;
+          var __kbcMessages = __kbcEntry.messages || [];
+          for (var __kbcj = 0; __kbcj < __kbcMessages.length; __kbcj++) {
+            if (typeof __kbcChannel.onmessage === 'function') {
+              __kbcChannel.onmessage({ data: __kbcMessages[__kbcj] });
             }
           }
         }
@@ -4673,6 +4703,28 @@
           "globalThis.__kotobaCryptoUuidOffset = 0;")))
 
 #?(:cljs
+   (defn- broadcast-snapshot-source
+     "JS source that installs the real, current per-BroadcastChannel
+     inbound-message snapshot (`quickjs-execution/broadcast-snapshot`,
+     computed host-side from messages OTHER same-name channels genuinely
+     posted -- see that fn and `apply-capability`'s `:broadcast/post-
+     message` fan-out) as `globalThis.__kotobaBroadcastSnapshot`, keyed by
+     BroadcastChannel id. Mirrors `worker-snapshot-source` exactly:
+     installing this snapshot is not enough on its own, the webapi shim
+     below also actively DELIVERS it (see the bottom of
+     `webapi-shim-source`) -- for each id present here with a still-
+     registered live `BroadcastChannel` instance
+     (`globalThis.__kotobaBroadcastChannels`, persisted across script tags
+     within a page the same way `globalThis.__kotobaWorkers` already is),
+     it invokes that instance's `onmessage` SYNCHRONOUSLY once per
+     buffered message, in arrival order, before the script's own source
+     runs."
+     [broadcast-snapshot]
+     (str "globalThis.__kotobaBroadcastSnapshot = "
+          (js/JSON.stringify (clj->js (jsonable (or broadcast-snapshot {}))))
+          ";")))
+
+#?(:cljs
    (defn- dump-result
      ([module source url modules]
       (dump-result module source url modules nil false nil nil nil nil nil nil nil nil nil nil))
@@ -4717,7 +4769,7 @@
            context))))
 
 #?(:cljs
-   (defn- install-document-shim! [vm document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot notification-snapshot history-length-snapshot cookie-snapshot crypto-snapshot]
+   (defn- install-document-shim! [vm document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot notification-snapshot history-length-snapshot cookie-snapshot crypto-snapshot broadcast-snapshot]
      (eval-dispose! vm (snapshot-source document-snapshot) "kotoba://quickjs/document-snapshot.js")
      (eval-dispose! vm (storage-snapshot-source storage-snapshot) "kotoba://quickjs/storage-snapshot.js")
      (eval-dispose! vm (clipboard-snapshot-source clipboard-snapshot) "kotoba://quickjs/clipboard-snapshot.js")
@@ -4729,12 +4781,13 @@
      (eval-dispose! vm (history-length-snapshot-source history-length-snapshot) "kotoba://quickjs/history-length-snapshot.js")
      (eval-dispose! vm (cookie-snapshot-source cookie-snapshot) "kotoba://quickjs/cookie-snapshot.js")
      (eval-dispose! vm (crypto-snapshot-source crypto-snapshot) "kotoba://quickjs/crypto-snapshot.js")
+     (eval-dispose! vm (broadcast-snapshot-source broadcast-snapshot) "kotoba://quickjs/broadcast-snapshot.js")
      (eval-dispose! vm webapi-shim-source "kotoba://quickjs/webapi-shim.js")))
 
 #?(:cljs
-   (defn- context-eval-result [context source url module? document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot notification-snapshot history-length-snapshot cookie-snapshot crypto-snapshot]
+   (defn- context-eval-result [context source url module? document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot notification-snapshot history-length-snapshot cookie-snapshot crypto-snapshot broadcast-snapshot]
      (let [vm (:vm context)
-           _ (install-document-shim! vm document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot notification-snapshot history-length-snapshot cookie-snapshot crypto-snapshot)
+           _ (install-document-shim! vm document-snapshot storage-snapshot clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot notification-snapshot history-length-snapshot cookie-snapshot crypto-snapshot broadcast-snapshot)
            response (eval-result vm source url module?)
            requests (dump-requests vm)]
        (assoc response :requests requests))))
@@ -4993,7 +5046,8 @@
                                                           (:notification/snapshot request)
                                                           (:history/snapshot request)
                                                           (:cookie/snapshot request)
-                                                          (:crypto/snapshot request))
+                                                          (:crypto/snapshot request)
+                                                          (:broadcast/snapshot request))
 
                                      :js/module-load
                                      (if-let [source (resolve-module-source modules module-provider (:specifier request))]
@@ -5011,7 +5065,8 @@
                                                             (:notification/snapshot request)
                                                             (:history/snapshot request)
                                                             (:cookie/snapshot request)
-                                                            (:crypto/snapshot request))
+                                                            (:crypto/snapshot request)
+                                                            (:broadcast/snapshot request))
                                        {:error :quickjs/module-not-found
                                         :specifier (:specifier request)
                                         :requests []})

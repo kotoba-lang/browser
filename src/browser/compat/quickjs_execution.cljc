@@ -76,8 +76,16 @@
   running `payload`'s script (`:crypto/snapshot`) and answer
   `crypto.getRandomValues`/`crypto.randomUUID` synchronously from real
   pre-seeded randomness instead of always returning zeros/a fixed
-  placeholder UUID."
-  [call payload capability-results document storage clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot notification-snapshot history-length-snapshot cookie-snapshot crypto-snapshot]
+  placeholder UUID, and the real per-BroadcastChannel inbound-message
+  snapshot already TAKEN (consumed, not re-derived -- see
+  `broadcast-snapshot`/`take-broadcast-snapshot` below, mirroring
+  `worker-snapshot`/`take-worker-snapshot` exactly) from a previous
+  script's real `postMessage` fan-out to OTHER same-name channels, so
+  `quickjs-wasm`'s webapi shim can install it as a VM global before
+  running `payload`'s script (`:broadcast/snapshot`) and deliver any real
+  messages a same-name channel genuinely posted since the script that
+  registered THIS channel ran to that channel's own `onmessage`."
+  [call payload capability-results document storage clipboard-snapshot geolocation-snapshot websocket-snapshot worker-snapshot fetch-snapshot notification-snapshot history-length-snapshot cookie-snapshot crypto-snapshot broadcast-snapshot]
   (let [snapshot (cond-> (dom-bridge/document-snapshot document)
                    (:script/node-id payload)
                    (assoc :current-script (:script/node-id payload)))]
@@ -93,7 +101,8 @@
                        :notification/snapshot notification-snapshot
                        :history/snapshot history-length-snapshot
                        :cookie/snapshot cookie-snapshot
-                       :crypto/snapshot crypto-snapshot)
+                       :crypto/snapshot crypto-snapshot
+                       :broadcast/snapshot broadcast-snapshot)
                 capability-results)))
 
 (defn- take-capability-results
@@ -619,6 +628,42 @@
   Mirrors `take-capability-results`'s `[value state]` shape."
   [state]
   [(worker-snapshot state) (assoc state :worker/outbox {})])
+
+(defn- broadcast-snapshot
+  "Compute the REAL, current per-BroadcastChannel inbound-message snapshot
+  from `state`'s persisted `:broadcast/outbox` -- the BroadcastChannel
+  analogue of `worker-snapshot`: unlike a real WebSocket's inbound bytes,
+  a BroadcastChannel has no external transport at all -- every message is
+  entirely simulated within this engine's own state, so (mirroring
+  Worker's own same-process, synchronous delivery reasoning) there is
+  nothing to actively drain; `apply-capability`'s `:broadcast/post-message`
+  case already fans a message out into every OTHER open, same-name
+  channel's own `:broadcast/outbox` entry the instant it's posted. This
+  fn just reads (does not yet clear) whatever has accumulated there since
+  the last take. See `take-broadcast-snapshot` for the consuming half.
+  Returns a JSON-safe map keyed by BroadcastChannel id string:
+  `{<id> {:messages [...]}}`."
+  [state]
+  (reduce-kv
+   (fn [snapshot id messages]
+     (if (seq messages)
+       (assoc snapshot id {:messages (vec messages)})
+       snapshot))
+   {}
+   (:broadcast/outbox state)))
+
+(defn- take-broadcast-snapshot
+  "Consume (read, then clear) `state`'s `:broadcast/outbox` via
+  `broadcast-snapshot` -- mirrors `take-worker-snapshot` exactly.
+  `evaluate!`/`load-module!` take (and clear) the snapshot BEFORE
+  invoking the engine for the NEXT script, so a message a PREVIOUS
+  script's same-name channel `postMessage`d is delivered into THIS
+  channel's still-registered `onmessage` at the start of THIS script's
+  eval -- deliberately deferred by one script-tag boundary, mirroring
+  every other cross-instance delivery mechanism in this file (never
+  same-tick, even though the fan-out itself is computed synchronously)."
+  [state]
+  [(broadcast-snapshot state) (assoc state :broadcast/outbox {})])
 
 (defn- jsonable-error
   "Convert a response's `:error` keyword (if any) into a plain, JSON-safe
@@ -1975,10 +2020,29 @@
           result {:broadcast/id (:broadcast/id request)
                   :message (:message request)}]
       (if channel
-        (-> state
-            (update :broadcast/messages conj result)
-            (assoc :last-result result)
-            (record-result {:ok? true :result result}))
+        ;; Real spec: postMessage() fans the message out to every OTHER
+        ;; channel instance that shares this channel's own :broadcast/name
+        ;; and is still open -- never back to the sender itself. Previously
+        ;; this only ever appended to :broadcast/messages, a flat audit
+        ;; log nothing ever reads back into any channel's own onmessage --
+        ;; BroadcastChannel was a write-only sink, confirmed via direct
+        ;; REPL evaluation before touching source: two channels with the
+        ;; SAME name, one posting, never delivered to the other at all.
+        ;; Fixed by additionally queueing into each target's own
+        ;; :broadcast/outbox (see broadcast-snapshot/take-broadcast-
+        ;; snapshot), the exact same take/clear mechanism worker-snapshot
+        ;; already established for Worker's own same-process delivery.
+        (let [target-ids (for [[id entry] (:broadcast/channels state)
+                                :when (and (not= id (:broadcast/id request))
+                                          (= (:broadcast/name entry) (:broadcast/name channel))
+                                          (not= :closed (:state entry)))]
+                            id)]
+          (-> (reduce (fn [state target-id]
+                        (update-in state [:broadcast/outbox target-id] (fnil conj []) (:message request)))
+                      (update state :broadcast/messages conj result)
+                      target-ids)
+              (assoc :last-result result)
+              (record-result {:ok? true :result result})))
         (-> state
             (assoc :last-error :broadcast/not-open)
             (record-result {:ok? false
@@ -1992,6 +2056,10 @@
       (if channel
         (-> state
             (assoc-in [:broadcast/channels (:broadcast/id request) :state] :closed)
+            ;; Real spec: close() also empties the channel's OWN pending
+            ;; message queue -- any not-yet-delivered messages posted to
+            ;; it before this close() call must never reach its onmessage.
+            (assoc-in [:broadcast/outbox (:broadcast/id request)] [])
             (update :context/requests conj (assoc result :capability :broadcast/close))
             (assoc :last-result result)
             (record-result {:ok? true :result result}))
@@ -2085,6 +2153,7 @@
   (let [[capability-results state] (take-capability-results state)
         [worker-snap state] (take-worker-snapshot state)
         [fetch-snap state] (take-fetch-snapshot state)
+        [broadcast-snap state] (take-broadcast-snapshot state)
         state (update state :binding binding/evaluate! script)
         response (normalize-response
                   (invoke-engine (:engine state)
@@ -2101,7 +2170,8 @@
                                                             (notification-permission-snapshot state)
                                                             (history-length-snapshot state)
                                                             (cookie-snapshot state)
-                                                            (crypto-snapshot state))))
+                                                            (crypto-snapshot state)
+                                                            broadcast-snap)))
         state (record-response-errors state response)
         state (apply-requests state (:requests response))]
     (-> state
@@ -2120,6 +2190,7 @@
           [capability-results state] (take-capability-results state)
           [worker-snap state] (take-worker-snapshot state)
           [fetch-snap state] (take-fetch-snapshot state)
+          [broadcast-snap state] (take-broadcast-snapshot state)
           state (update state :binding binding/module-load! specifier referrer)
           response (normalize-response
                     (invoke-engine (:engine state)
@@ -2136,7 +2207,8 @@
                                                               (notification-permission-snapshot state)
                                                               (history-length-snapshot state)
                                                               (cookie-snapshot state)
-                                                              (crypto-snapshot state))))
+                                                              (crypto-snapshot state)
+                                                              broadcast-snap)))
           state (record-response-errors state response)
           state (apply-requests state (:requests response))]
       (-> state
@@ -2199,6 +2271,7 @@
    :net/fetch-responses {}
    :broadcast/channels {}
    :broadcast/messages []
+   :broadcast/outbox {}
    :beacon/requests []
    :history/entries []
    :history/index -1

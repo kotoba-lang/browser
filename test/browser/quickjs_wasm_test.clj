@@ -1081,6 +1081,22 @@
     (is (str/includes? source "globalThis.BroadcastChannel.prototype.close = function()"))
     (is (str/includes? source "capability: 'broadcast/close'"))))
 
+(deftest quickjs-wasm-webapi-shim-broadcast-channel-actually-delivers-to-same-name-peers
+  ;; Real spec: postMessage() must reach every OTHER same-name channel
+  ;; instance's onmessage. Previously BroadcastChannel was a write-only
+  ;; sink to a host-side audit log (:broadcast/messages) -- onmessage was
+  ;; never even initialized, and no registry existed for a delivery step
+  ;; to walk, unlike WebSocket/Worker which both already had exactly this
+  ;; machinery. Confirmed via a real CLJS/QuickJS smoke test before fixing
+  ;; that two channels with the SAME name, one posting, never delivered
+  ;; to the other at all.
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "this.onmessage = null;\n        globalThis.__kotobaBroadcastChannels[channelId] = this;"))
+    (is (str/includes? source "delete globalThis.__kotobaBroadcastChannels[this.__kotobaBroadcastId];"))
+    (is (str/includes? source "globalThis.__kotobaBroadcastChannels = globalThis.__kotobaBroadcastChannels || {};"))
+    (is (str/includes? source "var __kotobaBcSnap = globalThis.__kotobaBroadcastSnapshot || {};"))
+    (is (str/includes? source "if (typeof __kbcChannel.onmessage === 'function') {"))))
+
 (deftest quickjs-wasm-webapi-shim-exposes-animation-frame-timer-capability
   (let [source quickjs-wasm/webapi-shim-source]
     (is (str/includes? source "globalThis.requestAnimationFrame = function(callback)"))

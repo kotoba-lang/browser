@@ -1114,6 +1114,109 @@
            (:capability/results state)))
     (is (= :broadcast/not-open (:last-error state)))))
 
+(deftest quickjs-broadcast-post-message-fans-out-to-a-same-name-open-peer
+  ;; Real spec: postMessage() fans the message out to every OTHER channel
+  ;; sharing this channel's own name and still open -- previously this
+  ;; only ever appended to :broadcast/messages, a flat audit log nothing
+  ;; ever read back into any channel's own onmessage. Confirmed via
+  ;; direct REPL evaluation before touching source: two channels with the
+  ;; SAME name, one posting, never delivered to the other at all.
+  (let [adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :engine (fn [_]
+                          {:result :broadcast
+                           :requests [{:request/id "open-a" :capability :broadcast/open
+                                       :broadcast/id "chan-a" :broadcast/name "x"}
+                                      {:request/id "open-b" :capability :broadcast/open
+                                       :broadcast/id "chan-b" :broadcast/name "x"}
+                                      {:request/id "post" :capability :broadcast/post-message
+                                       :broadcast/id "chan-a" :message "hello"}]})})
+        state (execution/evaluate! state {:source "/* open both, post from a */"})]
+    (is (= ["hello"] (get-in state [:broadcast/outbox "chan-b"]))
+        "the OTHER same-name channel must receive the posted message")
+    (is (nil? (get-in state [:broadcast/outbox "chan-a"]))
+        "the SENDER must never receive its own posted message")))
+
+(deftest quickjs-broadcast-post-message-does-not-fan-out-to-a-closed-peer
+  (let [adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :engine (fn [_]
+                          {:result :broadcast
+                           :requests [{:request/id "open-a" :capability :broadcast/open
+                                       :broadcast/id "chan-a" :broadcast/name "y"}
+                                      {:request/id "open-b" :capability :broadcast/open
+                                       :broadcast/id "chan-b" :broadcast/name "y"}
+                                      {:request/id "close-b" :capability :broadcast/close
+                                       :broadcast/id "chan-b"}
+                                      {:request/id "post" :capability :broadcast/post-message
+                                       :broadcast/id "chan-a" :message "late"}]})})
+        state (execution/evaluate! state {:source "/* open both, close b, post from a */"})]
+    (is (empty? (get-in state [:broadcast/outbox "chan-b"]))
+        "a channel already closed before the post must never receive it")))
+
+(deftest quickjs-broadcast-post-message-does-not-fan-out-to-a-different-name-peer
+  (let [adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :engine (fn [_]
+                          {:result :broadcast
+                           :requests [{:request/id "open-a" :capability :broadcast/open
+                                       :broadcast/id "chan-a" :broadcast/name "room-a"}
+                                      {:request/id "open-b" :capability :broadcast/open
+                                       :broadcast/id "chan-b" :broadcast/name "room-b"}
+                                      {:request/id "post" :capability :broadcast/post-message
+                                       :broadcast/id "chan-a" :message "wrong room"}]})})
+        state (execution/evaluate! state {:source "/* open both with different names, post from a */"})]
+    (is (nil? (get-in state [:broadcast/outbox "chan-b"]))
+        "a channel with a DIFFERENT name must never receive the message")))
+
+(deftest quickjs-broadcast-close-empties-the-closing-channels-own-pending-outbox
+  ;; Real spec: close() also empties the channel's OWN pending message
+  ;; queue -- any not-yet-delivered messages posted to it before this
+  ;; close() call must never reach its onmessage.
+  (let [adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :engine (fn [_]
+                          {:result :broadcast
+                           :requests [{:request/id "open-a" :capability :broadcast/open
+                                       :broadcast/id "chan-a" :broadcast/name "z"}
+                                      {:request/id "open-b" :capability :broadcast/open
+                                       :broadcast/id "chan-b" :broadcast/name "z"}
+                                      {:request/id "post" :capability :broadcast/post-message
+                                       :broadcast/id "chan-a" :message "pending"}
+                                      {:request/id "close-b" :capability :broadcast/close
+                                       :broadcast/id "chan-b"}]})})
+        state (execution/evaluate! state {:source "/* post to b, then close b before it is ever taken */"})]
+    (is (empty? (get-in state [:broadcast/outbox "chan-b"]))
+        "a message pending for a channel must be discarded the moment that channel closes")))
+
+(deftest quickjs-broadcast-snapshot-threads-into-the-next-evaluate!-call-and-is-consumed
+  ;; Mirrors worker-snapshot/take-worker-snapshot's own established
+  ;; test precedent: the snapshot must be threaded into the engine
+  ;; invocation as :broadcast/snapshot, and consuming it (take) must
+  ;; clear :broadcast/outbox so the SAME message is never delivered
+  ;; twice.
+  (let [adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        received-payload (atom nil)
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :engine (fn [request]
+                          (reset! received-payload request)
+                          {:result :ok :requests []})})
+        state (assoc state :broadcast/outbox {"chan-b" ["hello" "world"]})
+        state (execution/evaluate! state {:source "/* probe */"})]
+    (is (= {"chan-b" {:messages ["hello" "world"]}} (:broadcast/snapshot @received-payload)))
+    (is (= {} (:broadcast/outbox state))
+        "the outbox must be cleared (taken) once threaded into the invocation")))
+
 (deftest quickjs-beacon-send-records-sandboxed-request-with-profile-grant
   (let [profile (-> (profile/new-profile {:id "work"})
                     (profile/grant-permission "https://metrics.example" :beacon/send))

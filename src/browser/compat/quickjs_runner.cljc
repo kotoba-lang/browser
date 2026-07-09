@@ -322,12 +322,19 @@
   `:browser.session/navigation` entry count, on every call, which already
   gives the identical answer within one page generation (a session's
   navigation depth cannot change without a navigation, and a navigation
-  always bumps the generation -- see `runtime-state-for-generation`)."
+  always bumps the generation -- see `runtime-state-for-generation`).
+  `:broadcast/outbox` is the BroadcastChannel analogue of `:worker/outbox`:
+  real messages a same-name channel already, genuinely fanned out to (see
+  `quickjs-execution`'s `:broadcast/post-message` case) but not yet
+  delivered into the receiving channel's own `onmessage` -- persisting it
+  here is what lets a LATER script tag's `broadcast-snapshot` still
+  deliver a message a PREVIOUS script tag's `postMessage` already fanned
+  out to it."
   [:storage :clipboard :geolocation
    :dom/client-ids :websocket/connections :websocket/handles
    :worker/instances :worker/handles :worker/outbox
    :net/fetch-responses
-   :broadcast/channels :history/entries :history/index
+   :broadcast/channels :broadcast/outbox :history/entries :history/index
    :global/listeners
    ;; console.* output accumulates across scripts within a page generation so
    ;; the L1 DevTools console panel (browser.devtools) can inspect it from the
