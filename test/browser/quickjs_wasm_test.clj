@@ -1563,6 +1563,26 @@
     (is (str/includes? source "event.__kotobaComposedPath = __kotobaComposedPathFrom(targetId);"))
     (is (str/includes? source "event.__kotobaComposedPath = target === 'window' ? [globalThis] : [globalThis.document, globalThis];"))))
 
+;; ---- HTMLSelectElement.value setter -- previously fell straight through
+;; to the generic setAttribute('value', ...) path, which writes an
+;; attribute on the <select> node itself that NOTHING reads back (the
+;; getter -- and __kotobaSelectValue, which every other select-value
+;; consumer in this shim shares -- scans descendant <option>s for
+;; `selected`, never the select's own `value` attr), so el.value = 'y' was
+;; a complete no-op: no option's `selected` changed, selectedIndex stayed
+;; put. The sibling set selectedIndex(value) already got this correctly.
+;; Confirmed via a real Node.js harness (8 scenarios) before touching
+;; source. ----
+
+(deftest quickjs-wasm-webapi-shim-select-value-setter-toggles-option-selectedness
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "set value(value) {"))
+    (is (str/includes? source "var options = __kotobaOptionIds(node);"))
+    (is (str/includes? source "if (!matched && __kotobaOptionValue(optionNode) === target) {"))
+    (is (str/includes? source "option.setAttribute('selected', 'true');"))
+    (is (str/includes? source "option.removeAttribute('selected');"))
+    (is (str/includes? source "this.setAttribute('value', matched ? target : '');"))))
+
 (deftest quickjs-wasm-webapi-shim-blob-reads-real-arraybuffer-bytes
   ;; A raw ArrayBuffer has NO `.length` property in real JS (only
   ;; `.byteLength` -- verified: `typeof (new ArrayBuffer(4)).length` is

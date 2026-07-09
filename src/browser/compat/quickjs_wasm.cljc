@@ -1931,6 +1931,42 @@
             return value == null ? '' : String(value);
           },
           set value(value) {
+            // Real HTMLSelectElement.value setter: for each option, set
+            // selectedness true only for the FIRST option whose own value
+            // equals the new value, false for every other -- previously
+            // this fell straight through to the generic setAttribute
+            // ('value', ...) path below, which writes an attribute on the
+            // <select> node itself that NOTHING reads back (the getter
+            // just above -- and __kotobaSelectValue, which every other
+            // select-value consumer in this shim shares -- scans
+            // descendant <option>s for `selected`, never the select's own
+            // `value` attr), so el.value = 'y' was a complete no-op: no
+            // option's `selected` changed, selectedIndex stayed put,
+            // FormData/submission still reflected the old selection. The
+            // sibling set selectedIndex(value) right below already gets
+            // this correctly (walks every option, toggles selected by
+            // index) -- confirmed via a real Node.js harness before
+            // touching source. Mirrors document_input.cljc's own
+            // set-select-option, which does the same walk-and-toggle for
+            // real user-driven (non-scripted) select interaction.
+            var node = __kotobaNodeById(__kotobaRefNodeId(ref));
+            if (node && String(node.tag || '').toLowerCase() === 'select') {
+              var options = __kotobaOptionIds(node);
+              var target = String(value);
+              var matched = false;
+              for (var i = 0; i < options.length; i++) {
+                var optionNode = __kotobaNodeById(options[i]);
+                var option = __kotobaElement({ nodeId: options[i] });
+                if (!matched && __kotobaOptionValue(optionNode) === target) {
+                  option.setAttribute('selected', 'true');
+                  matched = true;
+                } else {
+                  option.removeAttribute('selected');
+                }
+              }
+              this.setAttribute('value', matched ? target : '');
+              return;
+            }
             this.setAttribute('value', value);
           },
           get checked() {
