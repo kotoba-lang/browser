@@ -1623,6 +1623,36 @@
     (is (str/includes? source "if (!globalThis.__kotobaSnapshot || globalThis.__kotobaSnapshot.focus == null) return false;"))
     (is (str/includes? source "if (!__kotobaDescendantOrSelf(node, __kotobaNodeById(globalThis.__kotobaSnapshot.focus))) return false;"))))
 
+;; ---- Structural pseudo-classes (:first-child/:last-child/:only-child/
+;; :first-of-type/:last-of-type/:nth-child()/:nth-of-type()/:nth-last-
+;; child()/:nth-last-of-type()) -- previously entirely absent from the
+;; JS-facing selector engine (confirmed via grep -- zero matches),
+;; despite the sibling cssom.core already having a thoroughly tested
+;; An+B implementation for real CSS styling. The old pseudo-parsing regex
+;; didn't even capture a parenthesized argument like nth-child(2n+1)'s
+;; "2n+1" at all -- silently discarded, so every structural selector via
+;; a script-facing query (document.querySelectorAll, Element.matches/
+;; closest) always returned empty/false/null. Confirmed via a real
+;; Node.js harness (22 scenarios) before touching source. ----
+
+(deftest quickjs-wasm-webapi-shim-selector-engine-supports-structural-pseudo-classes
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "var pseudoPattern = /:([A-Za-z_][-A-Za-z0-9_]*)(?:\\(([^)]*)\\))?/g;"))
+    (is (str/includes? source "function __kotobaStructuralSiblingIds(node, sameTag)"))
+    (is (str/includes? source "function __kotobaParseNthExpression(arg)"))
+    (is (str/includes? source "function __kotobaNthMatches(position, a, b)"))
+    (is (str/includes? source "case 'first-child':"))
+    (is (str/includes? source "case 'last-child': {"))
+    (is (str/includes? source "case 'only-child':"))
+    (is (str/includes? source "case 'first-of-type':"))
+    (is (str/includes? source "case 'last-of-type': {"))
+    (is (str/includes? source "case 'nth-child':"))
+    (is (str/includes? source "case 'nth-of-type':"))
+    (is (str/includes? source "case 'nth-last-child':"))
+    (is (str/includes? source "case 'nth-last-of-type': {"))
+    (is (str/includes? source "if (trimmed === 'even') return [2, 0];"))
+    (is (str/includes? source "if (trimmed === 'odd') return [2, 1];"))))
+
 (deftest quickjs-wasm-webapi-shim-blob-reads-real-arraybuffer-bytes
   ;; A raw ArrayBuffer has NO `.length` property in real JS (only
   ;; `.byteLength` -- verified: `typeof (new ArrayBuffer(4)).length` is

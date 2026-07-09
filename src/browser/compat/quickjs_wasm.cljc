@@ -955,11 +955,20 @@
           });
         }
         var withoutAttrs = selector.replace(attrPattern, '');
-        var pseudoPattern = /:([A-Za-z_][-A-Za-z0-9_]*)/g;
+        // The optional (...) group here is what a structural pseudo like
+        // :nth-child(2n+1) needs -- previously this pattern had no such
+        // group at all, so the argument was silently discarded (leaving
+        // only the bare name \"nth-child\" behind) and every structural
+        // pseudo-class always fell through to __kotobaMatchesSimple's
+        // default: return false branch.
+        var pseudoPattern = /:([A-Za-z_][-A-Za-z0-9_]*)(?:\\(([^)]*)\\))?/g;
         var pseudos = [];
         var pseudoMatch;
         while ((pseudoMatch = pseudoPattern.exec(withoutAttrs)) !== null) {
-          pseudos.push(String(pseudoMatch[1]).toLowerCase());
+          pseudos.push({
+            name: String(pseudoMatch[1]).toLowerCase(),
+            arg: pseudoMatch[2] != null ? pseudoMatch[2].trim() : null
+          });
         }
         var withoutPseudos = withoutAttrs.replace(pseudoPattern, '');
         var tagMatch = withoutPseudos.match(/^([A-Za-z][A-Za-z0-9_-]*)/);
@@ -1052,6 +1061,48 @@
         if (last) selectors.push(last);
         return selectors;
       }
+      function __kotobaStructuralSiblingIds(node, sameTag) {
+        // The element-type siblings a structural pseudo-class (:nth-
+        // child/:first-child/etc below) evaluates position against --
+        // ALL element children of the parent (real spec: nth-child
+        // counts every sibling element regardless of disabled state,
+        // matching cssom.core's own structural-siblings, which is NOT
+        // disabled-aware either -- confirmed by reading that function
+        // before writing this one). `sameTag` scopes to only same-tag
+        // siblings, for the *-of-type family.
+        if (!node || node['parent/id'] == null) return [];
+        var siblingIds = __kotobaChildElements(node['parent/id']);
+        if (!sameTag) return siblingIds;
+        var tag = String(node.tag || '').toLowerCase();
+        return siblingIds.filter(function(id) {
+          var sibling = __kotobaNodeById(id);
+          return sibling && String(sibling.tag || '').toLowerCase() === tag;
+        });
+      }
+      function __kotobaParseNthExpression(arg) {
+        // Mirrors cssom.core/parse-nth-expression exactly: even -> [2 0],
+        // odd -> [2 1], a bare signed integer -> [0 B], and the general
+        // An+B form (case-insensitive, optional sign on A, optional
+        // digits before 'n', optional +/- B) via the same shape regex.
+        // Returns null for anything unparseable (an invalid nth argument
+        // real spec treats as \"matches nothing\", not a match-everything
+        // fallback).
+        if (arg == null) return null;
+        var trimmed = String(arg).trim().toLowerCase();
+        if (trimmed === 'even') return [2, 0];
+        if (trimmed === 'odd') return [2, 1];
+        if (/^[+-]?\\d+$/.test(trimmed)) return [0, parseInt(trimmed, 10)];
+        var m = trimmed.match(/^([+-]?)(\\d*)n(?:\\s*([+-])\\s*(\\d+))?$/);
+        if (!m) return null;
+        var a = (m[1] === '-' ? -1 : 1) * (m[2] === '' ? 1 : parseInt(m[2], 10));
+        var b = m[3] ? (m[3] === '-' ? -1 : 1) * parseInt(m[4], 10) : 0;
+        return [a, b];
+      }
+      function __kotobaNthMatches(position, a, b) {
+        if (a === 0) return position === b;
+        var n = (position - b) / a;
+        return n >= 0 && Number.isInteger(n);
+      }
       function __kotobaMatchesSimple(node, simple) {
         if (!node || node['node/type'] !== 'element') return false;
         if (simple.tag && String(node.tag || '').toLowerCase() !== simple.tag) return false;
@@ -1092,7 +1143,8 @@
           }
         }
         for (var p = 0; p < simple.pseudos.length; p++) {
-          switch (simple.pseudos[p]) {
+          var pseudo = simple.pseudos[p];
+          switch (pseudo.name) {
             case 'disabled':
               if (!__kotobaDisabledControl(node)) return false;
               break;
@@ -1143,6 +1195,62 @@
               if (!globalThis.__kotobaSnapshot || globalThis.__kotobaSnapshot.focus == null) return false;
               if (!__kotobaDescendantOrSelf(node, __kotobaNodeById(globalThis.__kotobaSnapshot.focus))) return false;
               break;
+            // Structural pseudo-classes -- previously entirely absent
+            // (confirmed via grep -- zero matches anywhere in this
+            // shim), even though the sibling cssom.core (this repo's own
+            // real CSS styling engine) already has a thoroughly tested
+            // An+B/nth-child/nth-of-type/first-of-type/last-of-type
+            // implementation. Any selector using one of these via a
+            // script-facing query (document.querySelectorAll,
+            // Element.matches/closest) always got an empty/false/null
+            // result, since this switch's default: branch fails the
+            // WHOLE simple-selector match unconditionally for any
+            // unrecognized pseudo name -- and the OLD pseudo-parsing
+            // regex (see __kotobaParseSimpleSelector above) didn't even
+            // capture a parenthesized argument like nth-child(2n+1)'s
+            // \"2n+1\" at all, silently discarding it. Fixed by mirroring
+            // cssom.core's own algorithm exactly (__kotobaStructural
+            // SiblingIds/__kotobaParseNthExpression/__kotobaNthMatches
+            // above), including matching its own scope: :only-of-type is
+            // deliberately NOT implemented here either, since it isn't
+            // implemented in cssom.core (this repo's own reference
+            // implementation) at all -- not a new scope-cut introduced
+            // by this fix. Verified via a real Node.js harness before
+            // touching source.
+            case 'first-child':
+              if (__kotobaStructuralSiblingIds(node, false).indexOf(node['node/id']) !== 0) return false;
+              break;
+            case 'last-child': {
+              var lastChildSiblings = __kotobaStructuralSiblingIds(node, false);
+              if (lastChildSiblings.indexOf(node['node/id']) !== lastChildSiblings.length - 1) return false;
+              break;
+            }
+            case 'only-child':
+              if (__kotobaStructuralSiblingIds(node, false).length !== 1) return false;
+              break;
+            case 'first-of-type':
+              if (__kotobaStructuralSiblingIds(node, true).indexOf(node['node/id']) !== 0) return false;
+              break;
+            case 'last-of-type': {
+              var lastOfTypeSiblings = __kotobaStructuralSiblingIds(node, true);
+              if (lastOfTypeSiblings.indexOf(node['node/id']) !== lastOfTypeSiblings.length - 1) return false;
+              break;
+            }
+            case 'nth-child':
+            case 'nth-of-type':
+            case 'nth-last-child':
+            case 'nth-last-of-type': {
+              var sameTag = pseudo.name === 'nth-of-type' || pseudo.name === 'nth-last-of-type';
+              var fromEnd = pseudo.name === 'nth-last-child' || pseudo.name === 'nth-last-of-type';
+              var ab = __kotobaParseNthExpression(pseudo.arg);
+              if (!ab) return false;
+              var nthSiblings = __kotobaStructuralSiblingIds(node, sameTag);
+              var nthIndex = nthSiblings.indexOf(node['node/id']);
+              if (nthIndex < 0) return false;
+              var nthPosition = fromEnd ? nthSiblings.length - nthIndex : nthIndex + 1;
+              if (!__kotobaNthMatches(nthPosition, ab[0], ab[1])) return false;
+              break;
+            }
             default:
               return false;
           }
