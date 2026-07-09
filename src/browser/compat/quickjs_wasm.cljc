@@ -3890,7 +3890,17 @@
         });
         var permission = (globalThis.__kotobaNotificationSnapshot && globalThis.__kotobaNotificationSnapshot.permission) || 'default';
         if (typeof callback === 'function') callback(permission);
-        return permission;
+        // Real spec: requestPermission() ALWAYS returns a real Promise
+        // (the deprecated callback param is additive, not a replacement) --
+        // this previously returned a bare string, so the extremely common
+        // Notification.requestPermission().then(...) pattern crashed with
+        // \"permission.then is not a function\", not just a missing feature.
+        // The permission decision is already known synchronously host-side
+        // (same as clipboard.readText/writeText above), so it resolves
+        // immediately via the same __kotobaMakeDeferred thenable those use.
+        var deferred = __kotobaMakeDeferred();
+        deferred.resolve(permission);
+        return deferred.promise;
       };
       globalThis.Notification.prototype.close = function() {
         // Real spec: every Notification instance has a close() method --

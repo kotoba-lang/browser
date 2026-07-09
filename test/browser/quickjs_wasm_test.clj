@@ -1022,6 +1022,36 @@
     (is (str/includes? source "globalThis.Notification.prototype.close = function()"))
     (is (str/includes? source "capability: 'notification/close'"))))
 
+(deftest quickjs-wasm-webapi-shim-notification-request-permission-returns-a-real-promise
+  ;; Real spec: `Notification.requestPermission()` is declared
+  ;; `static Promise<NotificationPermission> requestPermission(optional
+  ;; NotificationPermissionCallback deprecatedCallback)` -- it must ALWAYS
+  ;; return a real thenable, with the callback param being an additive
+  ;; legacy convenience, not a replacement for the Promise contract.
+  ;; Previously this returned a bare permission string, so the extremely
+  ;; common `Notification.requestPermission().then(perm => ...)` pattern
+  ;; crashed with "permission.then is not a function" -- not just a
+  ;; missing feature, a hard TypeError on real, conformant script code.
+  ;; Every sibling capability that resolves a synchronously-already-known
+  ;; host decision (clipboard.readText/writeText, fetch(), getUserMedia())
+  ;; already wraps it in __kotobaMakeDeferred -- requestPermission was the
+  ;; one outlier that skipped this established convention. Confirmed via
+  ;; a real Node.js harness before touching source: .then() now resolves
+  ;; with the real permission string, the legacy callback still fires,
+  ;; and (per spec) requestPermission never rejects.
+  (let [source quickjs-wasm/webapi-shim-source
+        idx (.indexOf source "globalThis.Notification.requestPermission = function(callback)")
+        fn-source (subs source idx (+ idx 1400))]
+    (is (str/includes? fn-source "if (typeof callback === 'function') callback(permission);"))
+    (is (str/includes? fn-source "var deferred = __kotobaMakeDeferred();")
+        "requestPermission must build a real __kotobaMakeDeferred thenable, mirroring clipboard.readText/writeText's own already-known-synchronous-value pattern")
+    (is (str/includes? fn-source "deferred.resolve(permission);")
+        "the thenable must resolve with the real permission string, not reject or ignore it")
+    (is (str/includes? fn-source "return deferred.promise;")
+        "requestPermission must return the real thenable's .promise, not the bare permission string")
+    (is (not (str/includes? fn-source "return permission;"))
+        "must no longer return the bare, non-thenable permission string directly")))
+
 (deftest quickjs-wasm-webapi-shim-exposes-fullscreen-capability
   (let [source quickjs-wasm/webapi-shim-source]
     (is (str/includes? source "requestFullscreen: function(options)"))
