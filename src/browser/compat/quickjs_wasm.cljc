@@ -595,19 +595,40 @@
         return values;
       }
       function __kotobaRadioGroupNodes(node) {
+        // Real spec (https://html.spec.whatwg.org/multipage/input.html#radio-button-group):
+        // same NON-EMPTY name *and* same OWNER FORM -- previously
+        // compared the raw form= attribute STRING directly (String(null)
+        // for two radios with no explicit form= at all, the common
+        // nested-in-a-<form> case), never walking the tree to find the
+        // true owner form, so two same-named radios sitting in two
+        // DIFFERENT <form> elements were wrongly merged into one group.
+        // Separately, a radio with NO name is its own singleton group --
+        // previously String(__kotobaAttr(node, 'name')) collapsed every
+        // nameless radio to the literal string \"null\", so unrelated
+        // nameless radios anywhere on the page wrongly cleared each
+        // other's checkedness. Mirrors document_input.cljc's own
+        // radio-group-node-ids exactly, reusing the same
+        // __kotobaFormOwnerId this shim already has for form.reset()'s
+        // own descendant-based form-association model. Confirmed via a
+        // real Node.js harness before touching source.
         var nodes = globalThis.__kotobaSnapshot.nodes || {};
         var keys = Object.keys(nodes).sort(function(a, b) { return Number(a) - Number(b); });
-        var name = String(__kotobaAttr(node, 'name'));
-        var form = String(__kotobaAttr(node, 'form'));
+        var name = __kotobaAttr(node, 'name');
+        var named = name != null && String(name).trim() !== '';
+        var groupFormId = named ? __kotobaFormOwnerId(node) : null;
         var result = [];
         for (var i = 0; i < keys.length; i++) {
           var candidate = nodes[keys[i]];
-          if (candidate &&
-              String(candidate.tag || '').toLowerCase() === 'input' &&
-              String(__kotobaAttr(candidate, 'type') || 'text').toLowerCase() === 'radio' &&
-              String(__kotobaAttr(candidate, 'name')) === name &&
-              String(__kotobaAttr(candidate, 'form')) === form &&
-              !__kotobaDisabledControl(candidate)) {
+          if (!candidate ||
+              String(candidate.tag || '').toLowerCase() !== 'input' ||
+              String(__kotobaAttr(candidate, 'type') || 'text').toLowerCase() !== 'radio' ||
+              __kotobaDisabledControl(candidate)) continue;
+          if (named) {
+            if (String(__kotobaAttr(candidate, 'name')) === String(name) &&
+                __kotobaFormOwnerId(candidate) === groupFormId) {
+              result.push(candidate);
+            }
+          } else if (candidate['node/id'] === node['node/id']) {
             result.push(candidate);
           }
         }

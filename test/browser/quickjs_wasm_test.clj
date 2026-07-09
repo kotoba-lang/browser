@@ -1698,6 +1698,26 @@
     (is (str/includes? source "if (type === 'text') return String(child.text || '').length > 0;"))
     (is (str/includes? source "if (!__kotobaEmptyPseudoMatches(node)) return false;"))))
 
+;; ---- Radio button group scoping (__kotobaRadioGroupNodes, used by the
+;; scripted .checked= setter, .click() activation, and the required-
+;; validity check) -- previously diverged from the already-correct CLJ
+;; reference implementation (document_input.cljc's radio-group-node-ids)
+;; in two ways: (1) same-named radios in DIFFERENT <form> elements (the
+;; common nested case, no explicit form= attribute) were wrongly merged
+;; into one group, since the old code compared the raw form= attribute
+;; STRING directly (String(null) for both) instead of walking the tree
+;; to find the true owner form; (2) EVERY nameless radio anywhere on the
+;; page was wrongly merged into one group, since String(undefined name)
+;; collapsed to the literal string "null" for all of them. Confirmed via
+;; a real Node.js harness (5 scenarios) before touching source. ----
+
+(deftest quickjs-wasm-webapi-shim-radio-group-scoped-by-owner-form-and-name
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "var named = name != null && String(name).trim() !== '';"))
+    (is (str/includes? source "var groupFormId = named ? __kotobaFormOwnerId(node) : null;"))
+    (is (str/includes? source "__kotobaFormOwnerId(candidate) === groupFormId) {"))
+    (is (str/includes? source "} else if (candidate['node/id'] === node['node/id']) {"))))
+
 (deftest quickjs-wasm-webapi-shim-blob-reads-real-arraybuffer-bytes
   ;; A raw ArrayBuffer has NO `.length` property in real JS (only
   ;; `.byteLength` -- verified: `typeof (new ArrayBuffer(4)).length` is

@@ -269,4 +269,62 @@
                                  (or (.-message err) err)))
                   (done))))))
 
+(deftest quickjs-real-radio-checked-setter-does-not-clear-sibling-in-a-different-form-test
+  ;; Real spec: same-named radios are only a mutually-exclusive group
+  ;; when they share the same OWNER FORM -- previously this shim
+  ;; compared the raw form= attribute STRING directly (String(null) for
+  ;; both, the common nested-in-a-<form> case with no explicit form=
+  ;; attribute at all), so two same-named radios in DIFFERENT <form>
+  ;; elements were wrongly merged into one group.
+  (async done
+    (-> (run-page-and-read-title!
+         (str "<main>"
+              "<form><input id=\"a\" type=\"radio\" name=\"g\" checked></form>"
+              "<form><input id=\"b\" type=\"radio\" name=\"g\"></form>"
+              "<script>"
+              "var a = document.getElementById('a');"
+              "var b = document.getElementById('b');"
+              "b.checked = true;"
+              "document.title = a.checked + ':' + b.checked;"
+              "</script></main>"))
+        (.then (fn [title]
+                 (println "quickjs real radio cross-form independence ->" (pr-str title))
+                 (is (= "true:true" title)
+                     (str "setting b.checked = true must NOT clear sibling a's checked "
+                          "state -- a and b are in DIFFERENT forms, so they are independent "
+                          "groups, got document.title = " (pr-str title)))
+                 (done)))
+        (.catch (fn [err]
+                  (is false (str "QuickJS WASM engine initialization / page load failed: "
+                                 (or (.-message err) err)))
+                  (done))))))
+
+(deftest quickjs-real-nameless-radios-are-independent-not-a-mutually-exclusive-group-test
+  ;; Real spec: a radio with NO name is its own singleton group --
+  ;; previously String(undefined name) collapsed to the literal string
+  ;; "null" for every nameless radio, so unrelated nameless radios
+  ;; anywhere on the page wrongly cleared each other's checkedness.
+  (async done
+    (-> (run-page-and-read-title!
+         (str "<main>"
+              "<input id=\"a\" type=\"radio\" checked>"
+              "<input id=\"b\" type=\"radio\">"
+              "<script>"
+              "var a = document.getElementById('a');"
+              "var b = document.getElementById('b');"
+              "b.checked = true;"
+              "document.title = a.checked + ':' + b.checked;"
+              "</script></main>"))
+        (.then (fn [title]
+                 (println "quickjs real nameless radio independence ->" (pr-str title))
+                 (is (= "true:true" title)
+                     (str "setting b.checked = true must NOT clear sibling a's checked "
+                          "state -- neither radio has a name, so each is its own "
+                          "independent group, got document.title = " (pr-str title)))
+                 (done)))
+        (.catch (fn [err]
+                  (is false (str "QuickJS WASM engine initialization / page load failed: "
+                                 (or (.-message err) err)))
+                  (done))))))
+
 
