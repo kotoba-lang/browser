@@ -1240,6 +1240,36 @@
     (is (str/includes? source "var __kotobaBcSnap = globalThis.__kotobaBroadcastSnapshot || {};"))
     (is (str/includes? source "if (typeof __kbcChannel.onmessage === 'function') {"))))
 
+;; ---- AbortController/AbortSignal -- previously entirely absent (every
+;; other commonly-paired webapi class, e.g. MutationObserver/Notification/
+;; WebSocket, was defined, but not these two), so the standard
+;; cancellable-fetch pattern (new AbortController() + fetch(url, {signal})
+;; + controller.abort()) threw a bare ReferenceError on construction, and
+;; fetch() never read request.signal at all. Confirmed via exhaustive grep
+;; of every `globalThis.X = ` assignment in this file, and via a real
+;; Node.js harness (verbatim extraction) before touching source. ----
+
+(deftest quickjs-wasm-webapi-shim-exposes-abort-controller-and-signal
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "function __kotobaMakeAbortSignal()"))
+    (is (str/includes? source "get aborted() { return aborted; }"))
+    (is (str/includes? source "get reason() { return reason; }"))
+    (is (str/includes? source "addEventListener: function(type, handler)"))
+    (is (str/includes? source "throwIfAborted: function()"))
+    (is (str/includes? source "_abort: function(customReason)"))
+    (is (str/includes? source "globalThis.AbortController = function()"))
+    (is (str/includes? source "globalThis.AbortController.prototype.abort = function(reason)"))
+    (is (str/includes? source "globalThis.AbortSignal = {"))
+    (is (str/includes? source "abort: function(reason) {"))))
+
+(deftest quickjs-wasm-webapi-shim-fetch-honors-abort-signal
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "var signal = request && request.signal;"))
+    (is (str/includes? source "if (signal && signal.aborted) {"))
+    (is (str/includes? source "deferred.reject(signal.reason !== undefined ? signal.reason : new Error('AbortError: The user aborted a request.'));"))
+    (is (str/includes? source "signal.addEventListener('abort', function() {"))
+    (is (str/includes? source "delete globalThis.__kotobaFetchPending[fetchId];"))))
+
 (deftest quickjs-wasm-webapi-shim-exposes-animation-frame-timer-capability
   (let [source quickjs-wasm/webapi-shim-source]
     (is (str/includes? source "globalThis.requestAnimationFrame = function(callback)"))

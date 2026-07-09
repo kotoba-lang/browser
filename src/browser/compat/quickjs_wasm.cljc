@@ -3404,17 +3404,99 @@
         };
         return response;
       }
+      // AbortController/AbortSignal -- previously entirely absent from this
+      // shim (every other commonly-paired webapi class, e.g. MutationObserver/
+      // Notification/WebSocket, was defined, but not these two), so the
+      // standard cancellable-fetch pattern (`new AbortController()` +
+      // `fetch(url, {signal})` + `controller.abort()`) threw a bare
+      // ReferenceError on construction, and fetch() never read `request.signal`
+      // at all even if a caller hand-rolled a signal-shaped object. Both
+      // classes are plain-object based (not real prototype chains), so
+      // `instanceof AbortSignal` is NOT supported -- an honest simplification;
+      // `.aborted`/`.reason`/`addEventListener('abort', ...)`/`onabort`/
+      // `throwIfAborted()` are what real code overwhelmingly actually checks.
+      // No DOMException type exists anywhere in this shim (see btoa/atob's own
+      // established convention above), so the default abort reason is a plain
+      // Error whose message embeds \"AbortError:\", matching that same posture.
+      function __kotobaMakeAbortSignal() {
+        var listeners = [];
+        var aborted = false;
+        var reason;
+        return {
+          get aborted() { return aborted; },
+          get reason() { return reason; },
+          onabort: null,
+          addEventListener: function(type, handler) {
+            if (type === 'abort' && typeof handler === 'function' && listeners.indexOf(handler) === -1) {
+              listeners.push(handler);
+            }
+          },
+          removeEventListener: function(type, handler) {
+            if (type !== 'abort') return;
+            var idx = listeners.indexOf(handler);
+            if (idx !== -1) listeners.splice(idx, 1);
+          },
+          throwIfAborted: function() {
+            if (aborted) throw reason;
+          },
+          _abort: function(customReason) {
+            if (aborted) return;
+            aborted = true;
+            reason = customReason !== undefined ? customReason : new Error('AbortError: signal is aborted without reason');
+            var event = { type: 'abort' };
+            if (typeof this.onabort === 'function') this.onabort(event);
+            for (var i = 0; i < listeners.length; i++) listeners[i](event);
+          }
+        };
+      }
+      globalThis.AbortController = function() {
+        this.signal = __kotobaMakeAbortSignal();
+      };
+      globalThis.AbortController.prototype.abort = function(reason) {
+        this.signal._abort(reason);
+      };
+      globalThis.AbortSignal = {
+        abort: function(reason) {
+          var signal = __kotobaMakeAbortSignal();
+          signal._abort(reason !== undefined ? reason : new Error('AbortError: The user aborted a request.'));
+          return signal;
+        }
+      };
       globalThis.fetch = function(url, request) {
-        var fetchId = 'fetch-' + globalThis.__kotobaNextFetchId;
-        globalThis.__kotobaNextFetchId = globalThis.__kotobaNextFetchId + 1;
-        globalThis.__kotobaRequests.push({
-          capability: 'net/fetch',
-          'request/id': fetchId,
-          url: String(url),
-          request: request || {}
-        });
+        var signal = request && request.signal;
         var deferred = __kotobaMakeDeferred();
-        globalThis.__kotobaFetchPending[fetchId] = deferred;
+        if (signal && signal.aborted) {
+          // Real spec: an already-aborted signal rejects fetch() immediately
+          // with the signal's own reason, WITHOUT ever issuing the request at
+          // all -- confirmed via direct REPL reproduction that this was
+          // previously impossible to even express (AbortController didn't
+          // exist), let alone honored.
+          deferred.reject(signal.reason !== undefined ? signal.reason : new Error('AbortError: The user aborted a request.'));
+        } else {
+          var fetchId = 'fetch-' + globalThis.__kotobaNextFetchId;
+          globalThis.__kotobaNextFetchId = globalThis.__kotobaNextFetchId + 1;
+          globalThis.__kotobaRequests.push({
+            capability: 'net/fetch',
+            'request/id': fetchId,
+            url: String(url),
+            request: request || {}
+          });
+          globalThis.__kotobaFetchPending[fetchId] = deferred;
+          if (signal) {
+            // A signal aborted AFTER the request was issued but BEFORE real
+            // delivery arrives (a genuine window: fetch responses deliver
+            // across script-tag boundaries via the fetch-snapshot mechanism,
+            // not synchronously within the same tag) rejects the SAME
+            // deferred and removes the pending registration, so a later
+            // delivery snapshot correctly finds nothing left to resolve.
+            signal.addEventListener('abort', function() {
+              if (globalThis.__kotobaFetchPending[fetchId]) {
+                delete globalThis.__kotobaFetchPending[fetchId];
+                deferred.reject(signal.reason !== undefined ? signal.reason : new Error('AbortError: The user aborted a request.'));
+              }
+            });
+          }
+        }
         // Same synchronous, byte-for-byte-unchanged fabricated fields this
         // always returned before real fetch() delivery existed (a script
         // reading `.ok`/`.status`/`.capability` synchronously, without ever
