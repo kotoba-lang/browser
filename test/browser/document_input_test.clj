@@ -2211,6 +2211,71 @@
     (is (= baseline-d (get-in d-nav [:document :nodes d :attrs :value]))
         "value must stay exactly at its parse-time default -- untouched by this fix")))
 
+;; ---- Home/End on a focused, closed, single <select> jump directly to
+;; the first/last ENABLED option -- real native behavior distinct from
+;; the arrow keys' one-step move, and deliberately its own separate key
+;; set (radio groups do NOT respond to Home/End at all). Previously
+;; silent no-ops for the same "not editable" fallback reason the arrow
+;; keys were before their own fix -- the text-caret Home/End branch
+;; elsewhere in reduce-event never runs for a <select> either, since it
+;; too is gated behind editable-node?. Confirmed via direct REPL
+;; reproduction before touching source. ----
+
+(deftest select-home-end-keys-jump-to-first-and-last-enabled-option
+  (let [page (browser/load-html
+              {:url "kotoba://select-home-end"
+               :html (str "<main><select id=\"s\">"
+                          "<option value=\"a\">A</option>"
+                          "<option value=\"b\">B</option>"
+                          "<option value=\"c\" selected>C</option>"
+                          "<option value=\"d\">D</option>"
+                          "<option value=\"e\" disabled>E</option>"
+                          "</select></main>")})
+        document (:browser/document page)
+        s (bridge/query-selector document "#s")
+        document (-> document
+                     (dom/add-event-listener s "input" "input-handler")
+                     (dom/add-event-listener s "change" "change-handler"))
+        focused (document-input/reduce-event document {:event/type :pointer/click :node/id s})
+        end (document-input/reduce-event (:document focused)
+                                         {:event/type :key/down :key "End" :node/id s})]
+    (is (= true (:handled? end)))
+    (is (= "d" (get-in end [:document :nodes s :attrs :value]))
+        "End jumps to the last ENABLED option, skipping disabled e entirely")
+    (is (= [[:dom/dispatch-event "input-handler" {:event/type "input" :target/id s :value "d"}]
+            [:dom/dispatch-event "change-handler" {:event/type "change" :target/id s :value "d"}]]
+           (take-last 2 (get-in end [:document :ops])))
+        "Home/End fire real input/change, same as arrow-key navigation would")
+    (let [home (document-input/reduce-event (:document focused)
+                                             {:event/type :key/down :key "Home" :node/id s})]
+      (is (= "a" (get-in home [:document :nodes s :attrs :value]))
+          "Home jumps to the first option"))
+    (let [already-last (document-input/reduce-event (:document end)
+                                                     {:event/type :key/down :key "End" :node/id s})]
+      (is (= "d" (get-in already-last [:document :nodes s :attrs :value])))
+      (is (= (:ops (:document end)) (:ops (:document already-last)))
+          "End while already at the last enabled option is a real no-op -- no re-dispatch"))))
+
+(deftest select-home-end-keys-do-not-apply-to-a-multiple-select-or-a-disabled-select
+  (let [page (browser/load-html
+              {:url "kotoba://select-home-end-scope"
+               :html (str "<main>"
+                          "<select id=\"m\" multiple><option value=\"a\">A</option><option value=\"b\">B</option></select>"
+                          "<select id=\"d\" disabled><option value=\"a\">A</option><option value=\"b\">B</option></select>"
+                          "</main>")})
+        document (:browser/document page)
+        m (bridge/query-selector document "#m")
+        d (bridge/query-selector document "#d")
+        baseline-m (get-in document [:nodes m :attrs :value])
+        baseline-d (get-in document [:nodes d :attrs :value])
+        m-nav (document-input/reduce-event document {:event/type :key/down :key "End" :node/id m})
+        d-nav (document-input/reduce-event document {:event/type :key/down :key "End" :node/id d})]
+    (is (= false (:handled? m-nav))
+        "a multiple select's listbox semantics are a deliberately separate, unmodeled feature")
+    (is (= baseline-m (get-in m-nav [:document :nodes m :attrs :value])))
+    (is (= false (:handled? d-nav)))
+    (is (= baseline-d (get-in d-nav [:document :nodes d :attrs :value])))))
+
 (deftest disabled-selected-option-is-not-successful-or-valid
   (let [page (browser/load-html {:url "kotoba://select"
                                  :html "<main><form id=\"form\"><select id=\"mode\" name=\"mode\" required><option id=\"locked\" value=\"locked\" selected disabled>Locked</option><option id=\"go-option\" value=\"go\">Go</option></select><select id=\"optional\" name=\"optional\"><option id=\"optional-locked\" value=\"secret\" selected disabled>Secret</option><option value=\"public\">Public</option></select><button id=\"go\" name=\"action\" value=\"go\">Go</button></form></main>"})

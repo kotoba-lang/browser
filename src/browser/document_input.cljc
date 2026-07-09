@@ -316,6 +316,9 @@
        (radio-control? document node-id)
        (not (disabled-control? document node-id))))
 
+(def ^:private select-boundary-keys
+  #{"Home" "End"})
+
 (defn- select-navigation-key?
   "Real platform behavior: an arrow key on a focused, closed, SINGLE
    `<select>` (no `multiple`) moves its current selection to the next/
@@ -334,10 +337,22 @@
    without necessarily changing selection, Shift-extend a range) are a
    genuinely different, more complex feature this engine has no
    supporting selection-range state for -- an honest scope-cut, not
-   silently wrong behavior."
+   silently wrong behavior.
+
+   `Home`/`End` jump directly to the first/last ENABLED option, real
+   native `<select>` behavior distinct from the arrow keys' one-step
+   move -- deliberately its OWN separate key set
+   (`select-boundary-keys`), not folded into `radio-navigation-keys`,
+   since real radio groups do NOT respond to Home/End at all (only
+   `<select>` does). Previously silent no-ops for the same
+   \"not editable\" fallback reason as the arrow keys were before their
+   own fix: the text-caret Home/End branch later in `reduce-event`
+   never runs for a `<select>` either, since it too is gated behind
+   `editable-node?`."
   [document node-id event]
   (and (= :key/down (:event/type event))
-       (contains? radio-navigation-keys (:key event))
+       (or (contains? radio-navigation-keys (:key event))
+           (contains? select-boundary-keys (:key event)))
        (select-control? document node-id)
        (not (disabled-control? document node-id))
        (not (truthy-attr? (get-in document [:nodes node-id :attrs :multiple])))))
@@ -1481,8 +1496,11 @@
       {:document document :node/id node-id :event event :handled? true}
       (let [current-id (selected-option-id document node-id)
             idx (count (take-while #(not= % current-id) options))
-            delta (if (contains? #{"ArrowDown" "ArrowRight"} (:key event)) 1 -1)
-            target-idx (max 0 (min (dec n) (+ idx delta)))
+            key (:key event)
+            target-idx (case key
+                         "Home" 0
+                         "End" (dec n)
+                         (max 0 (min (dec n) (+ idx (if (contains? #{"ArrowDown" "ArrowRight"} key) 1 -1)))))
             target-id (nth options target-idx)]
         (if (= target-id current-id)
           {:document document :node/id node-id :event event :handled? true}
