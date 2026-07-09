@@ -1645,6 +1645,36 @@
                        (= "external-long-invalid" (second %)))
                   (get-in external-result [:document :ops])))))
 
+;; ---- minlength/maxlength are real HTML5's own restriction to text/
+;; search/url/tel/email/password <input>s and <textarea> -- NOT
+;; number/range/color/date/datetime-local/month/week/time. Previously
+;; too-short/too-long were gated only by `(some? text-value)`, with no
+;; type restriction at all, so a real, common shape like
+;; <input type="number" value="12345" maxlength="3"> was spuriously
+;; flagged invalid. Confirmed via direct REPL reproduction before
+;; touching source. ----
+
+(deftest length-constraints-do-not-apply-to-non-text-like-input-types
+  (let [page (browser/load-html
+              {:url "kotoba://length-constraint-scope"
+               :html (str "<main><form id=\"form\">"
+                          "<input id=\"n\" name=\"n\" type=\"number\" value=\"12345\" maxlength=\"3\">"
+                          "<input id=\"r\" name=\"r\" type=\"range\" value=\"99\" min=\"0\" max=\"100\" maxlength=\"1\">"
+                          "<input id=\"d\" name=\"d\" type=\"date\" value=\"2026-07-10\" maxlength=\"1\">"
+                          "<button id=\"go\">Go</button></form></main>")})
+        document (:browser/document page)
+        n (bridge/query-selector document "#n")
+        r (bridge/query-selector document "#r")
+        d (bridge/query-selector document "#d")
+        go (bridge/query-selector document "#go")
+        result (document-input/reduce-event document {:event/type :pointer/click :node/id go})]
+    (is (= true (:submitted? result))
+        "maxlength must be ignored entirely for number/range/date -- nothing here should block submit")
+    (is (nil? (:invalid? result)))
+    (is (= "" (get-in result [:document :nodes n :attrs :validation-reason])))
+    (is (= "" (get-in result [:document :nodes r :attrs :validation-reason])))
+    (is (= "" (get-in result [:document :nodes d :attrs :validation-reason])))))
+
 (deftest numeric-range-validation-blocks-submit
   ;; The confirmed repro from the bug report: before this fix, neither
   ;; this reducer's real form-submission-blocking validation NOR

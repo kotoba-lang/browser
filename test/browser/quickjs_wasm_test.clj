@@ -131,8 +131,12 @@
   (let [source quickjs-wasm/webapi-shim-source]
     (is (str/includes? source "function __kotobaValidationReason(node)"))
     (is (str/includes? source "return 'valueMissing';"))
-    (is (str/includes? source "if (!Number.isNaN(minlength) && value.length > 0 && value.length < minlength) return 'tooShort';"))
-    (is (str/includes? source "if (!Number.isNaN(maxlength) && value.length > maxlength) return 'tooLong';"))
+    ;; minlength/maxlength are now correctly restricted to text-like
+    ;; controls + textarea (lengthApplicable) -- see the dedicated
+    ;; quickjs-wasm-webapi-shim-restricts-length-validation-to-text-like-controls
+    ;; test below for the full fix; this checks the calls still exist.
+    (is (str/includes? source "if (lengthApplicable && !Number.isNaN(minlength) && value.length > 0 && value.length < minlength) return 'tooShort';"))
+    (is (str/includes? source "if (lengthApplicable && !Number.isNaN(maxlength) && value.length > maxlength) return 'tooLong';"))
     (is (str/includes? source "return 'rangeUnderflow';"))
     (is (str/includes? source "return 'rangeOverflow';"))
     (is (str/includes? source "function __kotobaWillValidate(node)"))
@@ -317,6 +321,21 @@
     (is (str/includes? source "var patternRegex = patternApplicable ? __kotobaCompilePattern(pattern) : null;"))
     (is (str/includes? source "if (patternRegex && !patternRegex.test(value)) return 'patternMismatch';"))
     (is (str/includes? source "patternMismatch: reason === 'patternMismatch',"))))
+
+(deftest quickjs-wasm-webapi-shim-restricts-length-validation-to-text-like-controls
+  ;; Real HTML5's own restriction: minlength/maxlength apply ONLY to
+  ;; text/search/url/tel/email/password <input>s and <textarea> -- NOT
+  ;; number/range/color/date/datetime-local/month/week/time, and not
+  ;; <select>/checkbox/radio either. Previously had NO type guard at
+  ;; all here (even broader than the CLJ-side browser.document-input
+  ;; gap this was fixed together with), so e.g. a real
+  ;; <input type="number" value="12345" maxlength="3"> was spuriously
+  ;; flagged tooLong. Confirmed via a real Node.js harness (verbatim
+  ;; extraction) before touching source.
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "var lengthApplicable = tag === 'textarea' || textLikeInputType;"))
+    (is (str/includes? source "if (lengthApplicable && !Number.isNaN(minlength) && value.length > 0 && value.length < minlength) return 'tooShort';"))
+    (is (str/includes? source "if (lengthApplicable && !Number.isNaN(maxlength) && value.length > maxlength) return 'tooLong';"))))
 
 (deftest quickjs-wasm-webapi-shim-exposes-type-mismatch-validation
   ;; Real HTML5 type="email"/"url" format checking -- previously an

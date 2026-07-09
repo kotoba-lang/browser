@@ -976,7 +976,21 @@
    `:step-mismatch` (see `step-invalid?`) is checked LAST, after
    `:range-underflow`/`:range-overflow`, matching real ValidityState's
    own IDL property order (`stepMismatch` is declared after
-   `rangeOverflow` in the real interface)."
+   `rangeOverflow` in the real interface).
+
+   `:too-short`/`:too-long` are restricted to `text-input-types`
+   `<input>`s and `<textarea>` (see `length-constrained?` below) --
+   previously gated only by `(some? text-value)` with no type
+   restriction at all, so a real, common shape like
+   `<input type=\"number\" value=\"12345\" maxlength=\"3\">` was
+   spuriously flagged `:too-long`, even though HTML5 restricts
+   `minlength`/`maxlength` to the same text-like set `pattern` is
+   restricted to (plus `<textarea>`, which `pattern` explicitly
+   excludes). Fixed together with the identical gap in this repo's own
+   JS-facing `__kotobaValidationReason` and kotoba-lang/cssom's
+   `constraint-invalid?`, both of which had no type guard at all (even
+   broader than this fn's own gap, since their shared `value` accessor
+   also resolves for `<select>`/checkbox/radio)."
   [document node-id]
   (let [node (get-in document [:nodes node-id])
         attrs (:attrs node)
@@ -984,6 +998,22 @@
         text-value (text-value-for-validation document node-id)
         min-length (parse-int (:minlength attrs) nil)
         max-length (parse-int (:maxlength attrs) nil)
+        ;; Real HTML5's own restriction: minlength/maxlength apply ONLY to
+        ;; text/search/url/tel/email/password <input>s and to <textarea>
+        ;; (unlike `pattern` below, which excludes <textarea>) -- NOT to
+        ;; number/range/color/date/datetime-local/month/week/time. Both
+        ;; too-short/too-long were previously gated only by `(some?
+        ;; text-value)`, with no type restriction at all, even though
+        ;; text-value-for-validation already returns a value for every
+        ;; value-input-types member (the number/range/date family
+        ;; included) -- so a real, common shape like
+        ;; <input type="number" value="12345" maxlength="3"> was
+        ;; spuriously flagged invalid purely because of an attribute HTML5
+        ;; says doesn't apply to that type at all. Confirmed via direct
+        ;; REPL reproduction before touching source.
+        length-constrained? (or (= :textarea (:tag node))
+                                 (and (= :input (:tag node))
+                                      (contains? text-input-types type)))
         range-value (when (and (= :input (:tag node))
                                (contains? #{"number" "range"} type)
                                (some? text-value)
@@ -1013,12 +1043,14 @@
 
         (and (some? text-value)
              min-length
+             length-constrained?
              (not (str/blank? text-value))
              (< (count text-value) min-length))
         :too-short
 
         (and (some? text-value)
              max-length
+             length-constrained?
              (> (count text-value) max-length))
         :too-long
 

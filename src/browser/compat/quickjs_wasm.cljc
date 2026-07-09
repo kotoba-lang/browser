@@ -756,20 +756,31 @@
         // and only ever enforced against a non-blank value (an empty,
         // non-required field's own emptiness is `required`'s concern, not
         // `pattern`'s).
-        var pattern = __kotobaAttr(node, 'pattern');
-        var patternApplicable = tag === 'input' &&
+        var textLikeInputType = tag === 'input' &&
           (type === 'text' || type === 'search' || type === 'url' || type === 'tel' ||
-           type === 'email' || type === 'password') &&
-          pattern != null && value.trim() !== '';
+           type === 'email' || type === 'password');
+        var pattern = __kotobaAttr(node, 'pattern');
+        var patternApplicable = textLikeInputType && pattern != null && value.trim() !== '';
         var patternRegex = patternApplicable ? __kotobaCompilePattern(pattern) : null;
+        // Real HTML5's own restriction: minlength/maxlength apply ONLY to
+        // text-like <input>s and <textarea> (unlike `pattern` above, which
+        // excludes <textarea>) -- NOT to number/range/color/date/
+        // datetime-local/month/week/time, and not to <select>/checkbox/
+        // radio either, even though `value` above resolves to something
+        // non-empty for those too. Previously had NO type guard at all
+        // (even broader than the CLJ-side browser.document-input gap this
+        // was fixed together with), so e.g. a real
+        // <input type=\"number\" value=\"12345\" maxlength=\"3\"> was
+        // spuriously flagged tooLong.
+        var lengthApplicable = tag === 'textarea' || textLikeInputType;
         if (__kotobaBoolAttr(node, 'required') &&
             ((tag === 'input' && type === 'checkbox' && !__kotobaBoolAttr(node, 'checked')) ||
              (tag === 'input' && type === 'radio' && !__kotobaRadioRequiredSatisfied(node)) ||
              (!(tag === 'input' && (type === 'checkbox' || type === 'radio')) && value.trim() === ''))) {
           return 'valueMissing';
         }
-        if (!Number.isNaN(minlength) && value.length > 0 && value.length < minlength) return 'tooShort';
-        if (!Number.isNaN(maxlength) && value.length > maxlength) return 'tooLong';
+        if (lengthApplicable && !Number.isNaN(minlength) && value.length > 0 && value.length < minlength) return 'tooShort';
+        if (lengthApplicable && !Number.isNaN(maxlength) && value.length > maxlength) return 'tooLong';
         if (tag === 'input' && __kotobaTypeMismatch(type, value)) return 'typeMismatch';
         if (patternRegex && !patternRegex.test(value)) return 'patternMismatch';
         if (!Number.isNaN(rangeValue) && !Number.isNaN(rangeMin) && rangeValue < rangeMin) return 'rangeUnderflow';
