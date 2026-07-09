@@ -1605,6 +1605,24 @@
     (is (str/includes? source "if (candidate && __kotobaFormControl(candidate)) __kotobaResetFormControl(candidate);"))
     (is (str/includes? source "__kotobaDispatch(ref, __kotobaEvent('reset', { bubbles: true, cancelable: true }));"))))
 
+;; ---- :focus-within pseudo-class -- previously entirely absent from
+;; __kotobaMatchesSimple's pseudo switch (confirmed via grep -- zero
+;; matches), even though plain :focus is implemented one case above it,
+;; the __kotobaDescendantOrSelf helper it needs already exists in this
+;; same file, and the sibling cssom.core/matches-pseudo? already
+;; correctly implements the identical descendant-or-self semantics for
+;; real CSS styling. Any selector using :focus-within via matches()/
+;; closest()/querySelector() fell into the default branch, which fails
+;; the WHOLE simple-selector match unconditionally, regardless of actual
+;; focus state. Confirmed via a real Node.js harness (5 scenarios) before
+;; touching source. ----
+
+(deftest quickjs-wasm-webapi-shim-selector-engine-supports-focus-within
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "case 'focus-within':"))
+    (is (str/includes? source "if (!globalThis.__kotobaSnapshot || globalThis.__kotobaSnapshot.focus == null) return false;"))
+    (is (str/includes? source "if (!__kotobaDescendantOrSelf(node, __kotobaNodeById(globalThis.__kotobaSnapshot.focus))) return false;"))))
+
 (deftest quickjs-wasm-webapi-shim-blob-reads-real-arraybuffer-bytes
   ;; A raw ArrayBuffer has NO `.length` property in real JS (only
   ;; `.byteLength` -- verified: `typeof (new ArrayBuffer(4)).length` is

@@ -1123,6 +1123,26 @@
             case 'focus':
               if (!globalThis.__kotobaSnapshot || node['node/id'] !== globalThis.__kotobaSnapshot.focus) return false;
               break;
+            case 'focus-within':
+              // Real spec: matches an element that itself holds focus OR
+              // has a descendant that does -- previously entirely absent
+              // from this switch (confirmed via grep -- zero matches),
+              // so any selector using it fell into the default branch,
+              // which fails the WHOLE simple-selector match unconditionally
+              // (not \"matches nothing\", every element matching it always
+              // failed regardless of actual focus state). The sibling
+              // cssom.core/matches-pseudo? already implements this
+              // correctly for real CSS styling (descendant-or-self? from
+              // the candidate down to the focused node) -- this JS-facing
+              // selector engine (backing matches()/closest()/
+              // querySelector()) never got the same case, even though
+              // plain :focus one line above it, and the
+              // __kotobaDescendantOrSelf helper this needs, both already
+              // exist in this same file. Confirmed via a real Node.js
+              // harness before touching source.
+              if (!globalThis.__kotobaSnapshot || globalThis.__kotobaSnapshot.focus == null) return false;
+              if (!__kotobaDescendantOrSelf(node, __kotobaNodeById(globalThis.__kotobaSnapshot.focus))) return false;
+              break;
             default:
               return false;
           }
