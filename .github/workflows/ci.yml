@@ -27,5 +27,7 @@ jobs:
         run: git clone --depth 1 https://github.com/kotoba-lang/quickjs ../quickjs
       - name: Checkout org-w3-aria sibling (deps.edn :local/root)
         run: git clone --depth 1 https://github.com/kotoba-lang/org-w3-aria ../org-w3-aria
+      - name: Checkout devtools sibling (deps.edn :local/root)
+        run: git clone --depth 1 https://github.com/kotoba-lang/devtools ../devtools
       - run: clojure -M:test
       - run: clojure -M:lint
