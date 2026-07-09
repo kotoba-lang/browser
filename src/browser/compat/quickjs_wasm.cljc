@@ -1712,6 +1712,34 @@
           event.cancelBubble = true;
           event.immediatePropagationStopped = true;
         };
+        // Real spec: composedPath() returns the FULL dispatch path computed
+        // at dispatch start, target through ancestors, regardless of a
+        // later stopPropagation()/stopImmediatePropagation() call and
+        // regardless of event.bubbles (bubbles only gates whether
+        // ancestor LISTENERS actually run, not what the path itself
+        // contains) -- previously entirely absent (event.composedPath was
+        // undefined on every event, everywhere, confirmed via grep across
+        // the whole shim: this is the single event-construction helper
+        // every Event/CustomEvent/MouseEvent/KeyboardEvent constructor and
+        // every dispatch path shares). __kotobaDispatch/
+        // __kotobaDispatchGlobalEvent below populate the real
+        // __kotobaComposedPath array before invoking any listener; a
+        // hand-constructed event never dispatched at all (e.g.
+        // `new Event('x').composedPath()`) correctly returns [], matching
+        // real spec (an event with no path yet). A fresh array copy is
+        // returned each call, matching real spec/browser behavior that
+        // external code cannot mutate the internal path by holding a
+        // reference to a previous composedPath() result. Deliberately,
+        // honestly NOT implemented: real spec resets the path to [] once
+        // dispatch has fully finished -- this shim's synchronous,
+        // single-pass dispatch has no separate \"still dispatching\" state
+        // to track that with, so composedPath() called AFTER a listener
+        // (from outside dispatch entirely) still returns the same path it
+        // had during dispatch, a rare edge case almost no real script
+        // exercises (composedPath() is used from inside a listener).
+        event.composedPath = function() {
+          return (event.__kotobaComposedPath || []).slice();
+        };
         return event;
       }
       function __kotobaEventPayload(event, targetId) {
@@ -1741,6 +1769,28 @@
           metaKey: Boolean(event && event.metaKey)
         };
       }
+      function __kotobaComposedPathFrom(targetId) {
+        // Real spec's event path: target, then every ancestor up to (and
+        // including) the document's own root element -- and, only when
+        // that walk genuinely reaches the LIVE document (not a detached
+        // node/fragment a script built but never appended), document and
+        // window too, since real composedPath() correctly omits both for
+        // an event dispatched on a node outside the document tree.
+        var path = [];
+        var pathId = targetId;
+        var lastPathId = null;
+        while (pathId != null) {
+          path.push(__kotobaElement({ nodeId: pathId }));
+          lastPathId = pathId;
+          var pathNode = __kotobaNodeById(pathId);
+          pathId = pathNode && pathNode['parent/id'] != null ? pathNode['parent/id'] : null;
+        }
+        if (lastPathId === globalThis.__kotobaSnapshot.root) {
+          path.push(globalThis.document);
+          path.push(globalThis);
+        }
+        return path;
+      }
       function __kotobaDispatch(ref, event) {
         var targetId = __kotobaRefNodeId(ref);
         var eventType = String(event && (event['event/type'] || event.type || 'event'));
@@ -1753,6 +1803,7 @@
         Object.assign(request, __kotobaNodeRequest(ref, 'node'));
         globalThis.__kotobaRequests.push(request);
         event.target = __kotobaElement(ref);
+        event.__kotobaComposedPath = __kotobaComposedPathFrom(targetId);
         var currentId = targetId;
         while (currentId != null) {
           var currentTarget = __kotobaElement({ nodeId: currentId });
@@ -3314,6 +3365,7 @@
         var eventType = String(event.type || 'event');
         event.target = target === 'window' ? globalThis : globalThis.document;
         event.currentTarget = event.target;
+        event.__kotobaComposedPath = target === 'window' ? [globalThis] : [globalThis.document, globalThis];
         var key = __kotobaGlobalEventKey(target, eventType);
         var listeners = globalThis.__kotobaListeners[key] || [];
         for (var i = 0; i < listeners.length; i++) {

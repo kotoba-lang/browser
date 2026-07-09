@@ -1541,6 +1541,28 @@
     (is (str/includes? source "globalThis.TextDecoder.prototype.decode = function(input)"))
     (is (str/includes? source "var bytes = (input instanceof ArrayBuffer) ? new Uint8Array(input) : input;"))))
 
+;; ---- Event.prototype.composedPath() -- previously entirely absent
+;; (confirmed via grep -- zero matches anywhere in the repo). __kotobaEvent
+;; is the single event-construction helper every Event/CustomEvent/
+;; MouseEvent/KeyboardEvent constructor and every dispatch path shares, but
+;; it never attached a composedPath method at all -- event.composedPath was
+;; undefined on every event, everywhere. Confirmed via a real Node.js
+;; harness (8 scenarios: in-document bubbling path, fresh-array-per-call,
+;; no-mutation-leak, path unaffected by stopPropagation, detached-node path
+;; correctly omitting document/window, a never-dispatched event returning
+;; [], and both document-level/window-level dispatch paths) before
+;; touching source. ----
+
+(deftest quickjs-wasm-webapi-shim-exposes-composed-path
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "event.composedPath = function()"))
+    (is (str/includes? source "return (event.__kotobaComposedPath || []).slice();"))
+    (is (str/includes? source "function __kotobaComposedPathFrom(targetId)"))
+    (is (str/includes? source "if (lastPathId === globalThis.__kotobaSnapshot.root)"))
+    (is (str/includes? source "path.push(globalThis.document);"))
+    (is (str/includes? source "event.__kotobaComposedPath = __kotobaComposedPathFrom(targetId);"))
+    (is (str/includes? source "event.__kotobaComposedPath = target === 'window' ? [globalThis] : [globalThis.document, globalThis];"))))
+
 (deftest quickjs-wasm-webapi-shim-blob-reads-real-arraybuffer-bytes
   ;; A raw ArrayBuffer has NO `.length` property in real JS (only
   ;; `.byteLength` -- verified: `typeof (new ArrayBuffer(4)).length` is
