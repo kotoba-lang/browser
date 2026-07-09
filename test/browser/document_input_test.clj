@@ -897,6 +897,100 @@
         "a radio without a name attribute is not part of any group")
     (is (= true (get-in selected [:document :nodes two :attrs :checked])))))
 
+;; ---- arrow keys on a focused radio move focus to and check the next/
+;; previous ENABLED radio in the same HTML radio button group, wrapping
+;; around -- real native platform behavior, distinct from (and
+;; independent of) Tab-order navigation. Previously entirely
+;; unhandled: an arrow keydown on a radio fired only the generic
+;; `keydown` DOM event and did nothing else, since activation-key?
+;; only recognizes Space and editable-node? is false for a radio, so
+;; reduce-event fell straight through to its generic "not editable"
+;; branch. Confirmed via direct REPL reproduction before touching
+;; source. ----
+
+(deftest radio-arrow-keys-navigate-and-check-within-the-group
+  (let [page (browser/load-html
+              {:url "kotoba://radio-arrow-keys"
+               :html (str "<main>"
+                          "<input id=\"a\" type=\"radio\" name=\"g\" checked>"
+                          "<input id=\"b\" type=\"radio\" name=\"g\" disabled>"
+                          "<input id=\"c\" type=\"radio\" name=\"g\">"
+                          "</main>")})
+        document (:browser/document page)
+        a (bridge/query-selector document "#a")
+        b (bridge/query-selector document "#b")
+        c (bridge/query-selector document "#c")
+        document (-> document
+                     (dom/add-event-listener c "input" "input-handler")
+                     (dom/add-event-listener c "change" "change-handler"))
+        focus-a (document-input/reduce-event document {:event/type :pointer/click :node/id a})
+        down (document-input/reduce-event (:document focus-a)
+                                          {:event/type :key/down :key "ArrowDown" :node/id a})]
+    (is (= true (:handled? down)))
+    (is (= true (:commit? down)))
+    (is (= c (:node/id down))
+        "ArrowDown skips the disabled radio b entirely, landing on c")
+    (is (= false (get-in down [:document :nodes a :attrs :checked])))
+    (is (= true (get-in down [:document :nodes c :attrs :checked])))
+    (is (= c (get-in down [:document :focus]))
+        "focus itself moves to the newly-checked radio, not just its checked state")
+    (is (= [[:dom/dispatch-event "input-handler" {:event/type "input" :target/id c :checked true}]
+            [:dom/dispatch-event "change-handler" {:event/type "change" :target/id c :checked true}]]
+           (take-last 2 (get-in down [:document :ops])))
+        "moving via arrow key fires real input/change on the newly-checked radio, same as a click would")
+    (let [wrap (document-input/reduce-event (:document down)
+                                            {:event/type :key/down :key "ArrowDown" :node/id c})]
+      (is (= a (:node/id wrap))
+          "ArrowDown from the LAST enabled radio wraps around to the first"))
+    (let [up (document-input/reduce-event (:document focus-a)
+                                          {:event/type :key/down :key "ArrowUp" :node/id a})]
+      (is (= c (:node/id up))
+          "ArrowUp from the FIRST radio wraps backward to the last enabled one, also skipping disabled b"))))
+
+(deftest radio-arrow-key-navigation-does-not-re-fire-events-for-an-already-checked-target
+  ;; A group of exactly one enabled radio: the arrow key still "moves" to
+  ;; the only member (itself), which is already checked -- must not
+  ;; spuriously re-dispatch input/change for a state that didn't change.
+  (let [page (browser/load-html
+              {:url "kotoba://radio-arrow-singleton"
+               :html "<main><input id=\"solo\" type=\"radio\" name=\"only\" checked></main>"})
+        document (:browser/document page)
+        solo (bridge/query-selector document "#solo")
+        document (-> document
+                     (dom/add-event-listener solo "input" "input-handler")
+                     (dom/add-event-listener solo "change" "change-handler"))
+        focused (document-input/reduce-event document {:event/type :pointer/click :node/id solo})
+        nav (document-input/reduce-event (:document focused)
+                                         {:event/type :key/down :key "ArrowDown" :node/id solo})]
+    (is (= true (:handled? nav)))
+    (is (= false (:commit? nav))
+        "no real state changed -- nothing to commit")
+    (is (= (:ops (:document focused)) (:ops (:document nav)))
+        "no new input/change ops beyond focusing were emitted")))
+
+(deftest radio-arrow-key-navigation-ignores-a-nameless-radio-and-a-disabled-radio
+  (let [page (browser/load-html
+              {:url "kotoba://radio-arrow-scope"
+               :html (str "<main>"
+                          "<input id=\"lone\" type=\"radio\" checked>"
+                          "<input id=\"only-enabled\" type=\"radio\" name=\"disabled-group\" checked>"
+                          "<input id=\"other-disabled\" type=\"radio\" name=\"disabled-group\" disabled>"
+                          "</main>")})
+        document (:browser/document page)
+        lone (bridge/query-selector document "#lone")
+        only-enabled (bridge/query-selector document "#only-enabled")
+        focus-lone (document-input/reduce-event document {:event/type :pointer/click :node/id lone})
+        lone-nav (document-input/reduce-event (:document focus-lone)
+                                              {:event/type :key/down :key "ArrowDown" :node/id lone})
+        focus-enabled (document-input/reduce-event (:document focus-lone)
+                                                    {:event/type :pointer/click :node/id only-enabled})
+        enabled-nav (document-input/reduce-event (:document focus-enabled)
+                                                  {:event/type :key/down :key "ArrowRight" :node/id only-enabled})]
+    (is (= false (:commit? lone-nav))
+        "a nameless radio is its own independent group of one -- arrow key is a no-op")
+    (is (= false (:commit? enabled-nav))
+        "a group with only ONE enabled member (its sibling is disabled) is effectively a no-op")))
+
 (deftest focused-controls-activate-from-keyboard
   (let [page (browser/load-html {:url "kotoba://keys"
                                  :html "<main><button id=\"run\">Run</button><input id=\"input-button\" type=\"button\" value=\"Input button\"><input id=\"flag\" type=\"checkbox\"><input id=\"one\" type=\"radio\" name=\"mode\" checked><input id=\"two\" type=\"radio\" name=\"mode\"></main>"})

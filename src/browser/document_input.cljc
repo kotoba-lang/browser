@@ -295,6 +295,27 @@
   (and (= :key/down (:event/type event))
        (= "Enter" (:key event))))
 
+(def ^:private radio-navigation-keys
+  #{"ArrowUp" "ArrowDown" "ArrowLeft" "ArrowRight"})
+
+(defn- radio-navigation-key?
+  "Real platform behavior, distinct from (and independent of) Tab-order
+   navigation: an arrow key on a focused radio button moves focus to the
+   next/previous ENABLED radio in the same HTML radio button group
+   (wrapping around) and checks it, unchecking whichever was checked
+   before -- this is native browser behavior, not a scripted convenience.
+   Previously entirely unhandled: an arrow keydown on a radio fired only
+   the generic `keydown` DOM event and did nothing else, since
+   `activation-key?` only recognizes Space (radio/checkbox never respond
+   to Enter or arrow keys for activation) and `editable-node?` is false
+   for a radio, so `reduce-event` fell straight through to its generic
+   \"not editable\" branch."
+  [document node-id event]
+  (and (= :key/down (:event/type event))
+       (contains? radio-navigation-keys (:key event))
+       (radio-control? document node-id)
+       (not (disabled-control? document node-id))))
+
 (defn- primary-button-click?
   "Real HTML5/DOM: only a PRIMARY-button (button 0, the default a real
    MouseEvent's own `button` defaults to when unspecified) pointer click
@@ -1429,6 +1450,29 @@
           id
           (recur (parent-node-id document id)))))))
 
+(defn- reduce-radio-navigation-event
+  [document node-id event]
+  (let [group (vec (sort (radio-group-node-ids document node-id)))
+        n (count group)]
+    (if (< n 2)
+      {:document document :node/id node-id :event event :handled? true :commit? false}
+      (let [idx (count (take-while #(not= % node-id) group))
+            delta (if (contains? #{"ArrowDown" "ArrowRight"} (:key event)) 1 -1)
+            target-id (nth group (mod (+ idx delta) n))
+            already-checked? (truthy-attr? (get-in document [:nodes target-id :attrs :checked]))
+            document (-> document
+                         (focus-editable target-id)
+                         (as-> d (reduce #(dom/set-attribute %1 %2 :checked (= %2 target-id)) d group)))
+            document (cond-> document
+                       (not already-checked?) (clear-node-validation-state target-id)
+                       (not already-checked?) (dom/dispatch-event target-id "input" (checked-event target-id "input" true))
+                       (not already-checked?) (dom/dispatch-event target-id "change" (checked-event target-id "change" true)))]
+        {:document document
+         :node/id target-id
+         :event event
+         :handled? true
+         :commit? true}))))
+
 (defn- reduce-click-event
   [document node-id event]
   (if-let [control-id (let [control-id (label-control-id document node-id)]
@@ -1687,6 +1731,10 @@
            node-id
            (closest-link-id document node-id))
       (reduce-click-event document node-id (assoc event :event/type :pointer/click))
+
+      (and node-id
+           (radio-navigation-key? document node-id event))
+      (reduce-radio-navigation-event document node-id event)
 
       (and node-id
            (text-input-submit-event? document node-id event))
