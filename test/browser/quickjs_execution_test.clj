@@ -1091,6 +1091,85 @@
               (str "onerror must not fire a second time on a later script tag even though the "
                    "real error atom still reports the same error -- got " (pr-str snapshot))))))))
 
+(deftest quickjs-websocket-onclose-delivers-exactly-once-across-script-tags
+  ;; `ws.onclose` fires from the SAME webapi shim JS lines it always has
+  ;; (`if (__kwEntry.closed) { ... ws.onclose(...) }`, unchanged this
+  ;; cycle) -- unlike onopen/onerror, this fix needed NO shim edit at all,
+  ;; only host-side gating of the VALUE the shim already reads. Before
+  ;; this fix, `websocket-connection-snapshot` recomputed the plain
+  ;; `:closed` key straight from the drained, never-resetting `closed?`
+  ;; atom on EVERY script tag with zero dedup, unlike the `:opened`/
+  ;; `:error` siblings in this very same function -- a real peer-
+  ;; initiated close would fire onclose on every later script tag
+  ;; forever. This test proves the host-state half: `websocket-snapshot`
+  ;; only reports a truthy `:closed` the FIRST time a real close is
+  ;; observed (script 3, once the fake websocket-fn starts reporting
+  ;; one), and NOT again on a later evaluate! call (script 4) now that
+  ;; `:websocket/closed` has recorded it as already delivered -- even
+  ;; though `:closed?` (the idiomatic, `?`-suffixed key some other test
+  ;; asserts against directly) correctly keeps reporting the real,
+  ;; ungated terminal state forever, unchanged.
+  (let [profile (-> (profile/new-profile {:id "work"})
+                    (profile/grant-permission "wss://socket.example" :websocket/connect))
+        adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        drain-call-count (atom 0)
+        websocket-fn (fn [{:keys [op]}]
+                       (case op
+                         :connect {:ok? true :handle {:fake/handle "socket-1"}}
+                         :drain (do (swap! drain-call-count inc)
+                                    (if (>= @drain-call-count 2)
+                                      {:messages [] :closed? true
+                                       :close-info {:code 1006 :reason "abnormal closure"}}
+                                      {:messages [] :closed? false}))
+                         {:ok? false :error :websocket/unsupported-op}))
+        received-payload (atom nil)
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :net-context {:profile profile
+                              :page-url "https://app.example/chat"}
+                :websocket-fn websocket-fn
+                :engine (fn [request]
+                          (reset! received-payload request)
+                          {:result :websocket
+                           :requests [{:request/id "connect"
+                                       :capability :websocket/connect
+                                       :websocket/id "websocket-1"
+                                       :url "wss://socket.example/chat"}]})})
+        ;; Script 1: opens the connection.
+        state (execution/evaluate! state {:source "const ws = new WebSocket('wss://socket.example/chat')"})]
+    (is (empty? (:websocket/closed state))
+        "no connection has ever closed yet")
+    ;; Script 2: the first drain call (via websocket-snapshot) -- the fake
+    ;; websocket-fn does not report a close yet.
+    (let [state (execution/evaluate! state {:source "/* script 2 */"})
+          snapshot (:websocket/snapshot @received-payload)]
+      (is (false? (get-in snapshot ["websocket-1" :closed?])))
+      (is (false? (get-in snapshot ["websocket-1" :closed])))
+      (is (empty? (:websocket/closed state)))
+      ;; Script 3: the second drain call -- the fake websocket-fn now
+      ;; reports a real close for the first time. Must be delivered.
+      (let [state (execution/evaluate! state {:source "/* script 3 */"})
+            snapshot (:websocket/snapshot @received-payload)]
+        (is (true? (get-in snapshot ["websocket-1" :closed?]))
+            "the raw, ungated :closed? key must report the real terminal state")
+        (is (true? (get-in snapshot ["websocket-1" :closed]))
+            (str "expected script 3's snapshot to report the newly-observed real close -- got "
+                 (pr-str snapshot)))
+        (is (contains? (:websocket/closed state) "websocket-1")
+            "the dedup set must record this id as delivered once its close has been reported")
+        ;; Script 4: the underlying closed? atom still reports true
+        ;; forever (real close atoms never reset), so :closed? must keep
+        ;; reporting true too, but the gated :closed key must NOT be
+        ;; redelivered.
+        (let [_ (execution/evaluate! state {:source "/* script 4 */"})
+              snapshot (:websocket/snapshot @received-payload)]
+          (is (true? (get-in snapshot ["websocket-1" :closed?]))
+              "the raw, ungated :closed? key must keep reporting the real terminal state forever")
+          (is (false? (get-in snapshot ["websocket-1" :closed]))
+              (str "onclose must not fire a second time on a later script tag even though the "
+                   "real closed? atom still reports true -- got " (pr-str snapshot))))))))
+
 (deftest quickjs-crypto-random-uses-sandboxed-provider
   (let [adapter (quickjs/new-adapter {:origin "https://app.example"
                                       :profile-id "work"})

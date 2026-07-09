@@ -339,10 +339,14 @@
   pattern for `ws.onerror` (see `quickjs-execution/websocket-snapshot`) --
   a real captured error, once delivered, must not fire again on every
   later script tag just because the underlying real error atom never
-  resets."
+  resets. `:websocket/closed` is the same pattern again for `ws.onclose`
+  -- the underlying `closed?` atom (`browser.net.websocket/drain-
+  messages!`) is a terminal flag that never resets once true, so without
+  this dedup a peer-initiated close would re-fire `onclose` on every
+  later script tag forever instead of exactly once."
   [:storage :clipboard :geolocation
    :dom/client-ids :websocket/connections :websocket/handles :websocket/opened
-   :websocket/errored
+   :websocket/errored :websocket/closed
    :worker/instances :worker/handles :worker/outbox
    :net/fetch-responses
    :broadcast/channels :broadcast/outbox :history/entries :history/index
