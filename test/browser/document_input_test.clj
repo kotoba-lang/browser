@@ -602,6 +602,21 @@
            (filter #(= :dom/dispatch-event (first %)) (get-in result [:document :ops])))
         "click must fire before input, which must fire before change")))
 
+(deftest checkbox-click-permanently-clears-indeterminate
+  ;; Real spec: a checkbox's pre-click activation steps unconditionally
+  ;; clear `indeterminate` to false, permanently -- previously this
+  ;; engine never touched `indeterminate` at all in the real, non-
+  ;; scripted pointer-click path, so a checkbox set indeterminate stayed
+  ;; indeterminate forever after being clicked, confirmed via direct
+  ;; REPL reproduction before touching source.
+  (let [page (browser/load-html {:url "kotoba://checkbox-indeterminate"
+                                 :html "<main><input id=\"flag\" type=\"checkbox\" indeterminate></main>"})
+        document (:browser/document page)
+        flag (bridge/query-selector document "#flag")
+        result (document-input/reduce-event document {:event/type :pointer/click :node/id flag})]
+    (is (= true (get-in result [:document :nodes flag :attrs :checked])))
+    (is (= false (get-in result [:document :nodes flag :attrs :indeterminate])))))
+
 (deftest radio-click-dispatches-click-before-input-and-change
   (let [page (browser/load-html {:url "kotoba://radio-order"
                                  :html (str "<main><input id=\"a\" type=\"radio\" name=\"g\">"

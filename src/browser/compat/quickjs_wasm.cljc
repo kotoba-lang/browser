@@ -687,6 +687,19 @@
           if (tag === 'input' && type === 'checkbox') {
             previousChecked = __kotobaBoolAttr(node, 'checked');
             __kotobaSetBooleanAttribute(ref, 'checked', !previousChecked);
+            // Real spec: pre-click activation unconditionally clears
+            // indeterminate to false, permanently -- unlike checked
+            // above, this is NEVER reverted even if the click's default
+            // action is later canceled (see the cancel-revert branch
+            // below, which only restores checked). Previously
+            // indeterminate was never touched by this fn at all, so a
+            // checkbox set indeterminate stayed indeterminate forever
+            // after a real .click()/dispatchEvent, confirmed via a real
+            // Node.js harness before touching source. Mirrors the
+            // identical fix just made in document_input.cljc's own
+            // reduce-click-event for the real, non-scripted pointer-
+            // click path.
+            __kotobaSetBooleanAttribute(ref, 'indeterminate', false);
             stateChanged = true;
           } else if (tag === 'input' && type === 'radio' && !__kotobaBoolAttr(node, 'checked')) {
             var group = __kotobaRadioGroupNodes(node);

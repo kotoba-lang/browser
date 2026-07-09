@@ -91,3 +91,65 @@
                   (println "quickjs indeterminate checkbox smoke ERROR ->" err)
                   (is false (str "smoke threw: " err))
                   (done))))))
+
+(defn- run-page-and-read-title!
+  [html]
+  (js/Promise.
+   (fn [resolve reject]
+     (let [url "https://app.example/indeterminate-checkbox-click"
+           fetch-fn (canned-fetch-fn {url html})
+           h (host/recording-host)
+           base-session (session/new-session
+                         (quickjs-runner/quickjs-session-opts {:host h :fetch-fn fetch-fn}))]
+       (-> (session/ensure-script-engine! base-session)
+           (.then
+            (fn [ready-session]
+              (try
+                (let [after (session/navigate! ready-session url)
+                      title (get-in after [:browser.session/page :browser/title])]
+                  (dispose-engine! ready-session)
+                  (resolve title))
+                (catch :default e
+                  (dispose-engine! ready-session)
+                  (reject e)))))
+           (.catch (fn [err]
+                     (dispose-engine! base-session)
+                     (reject err))))))))
+
+(deftest quickjs-real-checkbox-click-permanently-clears-indeterminate-test
+  ;; Real spec: a checkbox's pre-click activation steps unconditionally
+  ;; clear `indeterminate` to false, permanently -- previously
+  ;; __kotobaDispatchClickWithActivation's checkbox branch flipped
+  ;; `checked` but never touched `indeterminate` at all, so a checkbox
+  ;; set indeterminate stayed indeterminate forever after a real
+  ;; .click(). This must hold true EVEN when a click listener calls
+  ;; preventDefault() -- unlike `checked` (which correctly reverts on a
+  ;; canceled click), `indeterminate` is never reverted once cleared.
+  (async done
+    (-> (run-page-and-read-title!
+         (str "<main><input id=\"cb\" type=\"checkbox\" indeterminate>"
+              "<script>"
+              "var cb = document.getElementById('cb');"
+              "var r = [];"
+              "r.push(cb.indeterminate === true ? 1 : 'not-initially-indeterminate');"
+              "cb.click();"
+              "r.push(cb.checked === true ? 1 : 'click-did-not-check');"
+              "r.push(cb.indeterminate === false ? 1 : 'click-did-not-clear-indeterminate');"
+              "cb.indeterminate = true;"
+              "cb.addEventListener('click', function(e) { e.preventDefault(); });"
+              "cb.click();"
+              "r.push(cb.checked === true ? 1 : 'canceled-click-wrongly-toggled-checked:' + cb.checked);"
+              "r.push(cb.indeterminate === false ? 1 : 'canceled-click-did-not-clear-indeterminate');"
+              "var bad = r.filter(function(x) { return x !== 1; });"
+              "document.title = bad.length === 0 ? 'PASS' : 'FAIL:' + bad.join(';');"
+              "</script></main>"))
+        (.then (fn [title]
+                 (println "quickjs real checkbox click clears indeterminate ->" (pr-str title))
+                 (is (= "PASS" title)
+                     (str "expected .click() to permanently clear indeterminate (even when "
+                          "canceled) on real QuickJS -- got " (pr-str title)))
+                 (done)))
+        (.catch (fn [err]
+                  (println "quickjs checkbox click indeterminate smoke ERROR ->" err)
+                  (is false (str "smoke threw: " err))
+                  (done))))))

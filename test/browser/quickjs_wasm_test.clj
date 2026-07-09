@@ -1718,6 +1718,23 @@
     (is (str/includes? source "__kotobaFormOwnerId(candidate) === groupFormId) {"))
     (is (str/includes? source "} else if (candidate['node/id'] === node['node/id']) {"))))
 
+;; ---- Checkbox click activation permanently clears indeterminate --
+;; previously __kotobaDispatchClickWithActivation's checkbox branch
+;; flipped `checked` but never touched `indeterminate` at all (confirmed
+;; via grep -- zero references inside the click-activation code path), so
+;; a checkbox set indeterminate stayed indeterminate forever after a
+;; real .click()/dispatchEvent. Real spec: this clear is PERMANENT,
+;; never reverted even if the click's default action is later canceled
+;; (unlike `checked`, which the cancel-revert branch DOES restore).
+;; Mirrors the identical fix made in document_input.cljc's own
+;; reduce-click-event for the real, non-scripted pointer-click path.
+;; Confirmed via a real Node.js harness (5 scenarios, including the
+;; not-reverted-on-cancel nuance) before touching source. ----
+
+(deftest quickjs-wasm-webapi-shim-checkbox-click-clears-indeterminate
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "__kotobaSetBooleanAttribute(ref, 'indeterminate', false);"))))
+
 (deftest quickjs-wasm-webapi-shim-blob-reads-real-arraybuffer-bytes
   ;; A raw ArrayBuffer has NO `.length` property in real JS (only
   ;; `.byteLength` -- verified: `typeof (new ArrayBuffer(4)).length` is

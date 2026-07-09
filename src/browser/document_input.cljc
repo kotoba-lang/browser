@@ -1651,6 +1651,21 @@
                            ;; checkbox recorded input, then change, then
                            ;; click, backwards from every real browser).
                            checkbox? (dom/set-attribute node-id :checked checked?)
+                           ;; Real spec: a checkbox's pre-click activation
+                           ;; steps unconditionally clear `indeterminate`
+                           ;; to false, permanently -- unlike `checked`
+                           ;; above, this is NEVER reverted even if the
+                           ;; click's default action is later canceled
+                           ;; (this fn has no cancel/revert branch of its
+                           ;; own at all, so "unconditional" is simply
+                           ;; "always applied here"). Previously
+                           ;; `indeterminate` was never touched by this
+                           ;; fn at all -- confirmed via direct REPL
+                           ;; reproduction that a checkbox set
+                           ;; indeterminate stayed indeterminate forever
+                           ;; after a real pointer click, contradicting
+                           ;; every real browser.
+                           checkbox? (dom/set-attribute node-id :indeterminate false)
                            radio-changed? (as-> d
                                             (reduce #(dom/set-attribute %1 %2 :checked (= %2 node-id))
                                                     d
