@@ -282,7 +282,12 @@
                                  :html "<main><section id=\"pane\" overflow=\"auto\" scroll-top=\"24\" scroll-left=\"3\"><p>Scrolled</p></section></main>"})
         tree (a11y/tree (:browser/document page))
         pane (first (:a11y/children tree))]
-    (is (= "region" (:a11y/role pane)))
+    ;; overflow/scroll-top/scroll-left projection applies to any node
+    ;; regardless of role -- #pane is an unnamed <section> (no
+    ;; aria-label/aria-labelledby) so per HTML-AAM it now correctly
+    ;; computes "generic", not "region" (org-w3-aria's
+    ;; section-form-role-depends-on-accessible-name).
+    (is (= "generic" (:a11y/role pane)))
     (is (= "auto" (:a11y/overflow pane)))
     (is (= "24" (:a11y/scroll-top pane)))
     (is (= "3" (:a11y/scroll-left pane)))))
