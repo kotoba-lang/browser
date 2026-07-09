@@ -3850,6 +3850,14 @@
         }
       };
       globalThis.Notification = function(title, options) {
+        // Real spec: the NotificationOptions dict a script passes in
+        // (body/icon/tag/data/...) must be reflected back onto the
+        // instance -- previously `options` was only ever forwarded into
+        // the outbound request, never read back onto `this`, so
+        // `new Notification('hi', {body: 'x'}).body` was silently
+        // `undefined`, dropping data a script wrote in. Confirmed via a
+        // real Node.js harness before touching source.
+        options = options || {};
         var request = {
           capability: 'notification/show',
           title: String(title)
@@ -3857,6 +3865,22 @@
         if (options != null) request['notification/options'] = options;
         globalThis.__kotobaRequests.push(request);
         this.title = String(title);
+        this.dir = options.dir == null ? 'auto' : String(options.dir);
+        this.lang = options.lang == null ? '' : String(options.lang);
+        this.body = options.body == null ? '' : String(options.body);
+        this.tag = options.tag == null ? '' : String(options.tag);
+        this.icon = options.icon == null ? '' : String(options.icon);
+        this.image = options.image == null ? '' : String(options.image);
+        this.badge = options.badge == null ? '' : String(options.badge);
+        this.vibrate = Array.isArray(options.vibrate) ? options.vibrate.slice() : [];
+        this.renotify = Boolean(options.renotify);
+        this.requireInteraction = Boolean(options.requireInteraction);
+        this.silent = options.silent == null ? null : Boolean(options.silent);
+        this.data = options.data === undefined ? null : options.data;
+        this.onclick = null;
+        this.onshow = null;
+        this.onclose = null;
+        this.onerror = null;
       };
       globalThis.Notification.permission = (globalThis.__kotobaNotificationSnapshot && globalThis.__kotobaNotificationSnapshot.permission) || 'default';
       globalThis.Notification.requestPermission = function(callback) {
@@ -3867,6 +3891,16 @@
         var permission = (globalThis.__kotobaNotificationSnapshot && globalThis.__kotobaNotificationSnapshot.permission) || 'default';
         if (typeof callback === 'function') callback(permission);
         return permission;
+      };
+      globalThis.Notification.prototype.close = function() {
+        // Real spec: every Notification instance has a close() method --
+        // previously entirely missing, so a perfectly conformant script
+        // calling n.close() crashed the whole script with a TypeError
+        // (n.close is not a function), not just a missing feature.
+        globalThis.__kotobaRequests.push({
+          capability: 'notification/close',
+          title: this.title
+        });
       };
       globalThis.WebSocket = function(url, protocols) {
         var socketId = 'websocket-' + globalThis.__kotobaNextWebSocketId;

@@ -453,6 +453,33 @@
            (:capability/results state)))
     (is (= :permission/not-granted (:last-error state)))))
 
+(deftest quickjs-notification-close-records-and-succeeds-with-no-permission-check
+  ;; Real spec: every Notification instance has a close() method --
+  ;; previously entirely missing, so a real script calling n.close()
+  ;; crashed the whole script with a TypeError, not just a missing
+  ;; feature. Unlike show/request-permission, close() needs no fresh
+  ;; permission decision -- it only ever dismisses a notification the
+  ;; script itself already owns, so this succeeds even without ANY
+  ;; profile permission grant (mirrors WebSocket/BroadcastChannel's own
+  ;; close() cases, neither of which are permission-gated either).
+  (let [adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :engine (fn [_]
+                          {:result :notifications
+                           :requests [{:request/id "close"
+                                       :capability :notification/close
+                                       :title "Ready"}]})})
+        state (execution/evaluate! state {:source "n.close()"})]
+    (is (= [{:title "Ready"}] (:notification/requests state)))
+    (is (= [{:capability :notification/close
+             :request/id "close"
+             :ok? true
+             :result {:title "Ready"}}]
+           (:capability/results state)))
+    (is (nil? (:last-error state)))))
+
 (deftest quickjs-notification-permission-snapshot-reports-granted-with-profile-grant
   ;; notification-permission-snapshot is the REAL, host-side-computed
   ;; permission decision `invocation-with-snapshots` threads into the engine

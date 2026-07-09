@@ -1003,6 +1003,25 @@
     (is (str/includes? source "var permission = (globalThis.__kotobaNotificationSnapshot && globalThis.__kotobaNotificationSnapshot.permission) || 'default'")
         "requestPermission's callback/return value must read the REAL, host-computed permission decision off globalThis.__kotobaNotificationSnapshot (installed by notification-permission-snapshot-source BEFORE this shim runs) instead of always reporting the hardcoded 'default' literal regardless of what was actually granted.")))
 
+(deftest quickjs-wasm-webapi-shim-notification-reflects-options-and-exposes-close
+  ;; Real spec: the NotificationOptions dict a script passes in
+  ;; (body/icon/tag/data/...) must be reflected back onto the instance,
+  ;; and every Notification instance must have a working close() method
+  ;; -- previously options were only ever forwarded into the outbound
+  ;; request, never read back onto `this` (so
+  ;; `new Notification('hi', {body: 'x'}).body` was silently `undefined`),
+  ;; and close() did not exist at all (a real script calling n.close()
+  ;; crashed with a TypeError, not just a missing feature). Confirmed via
+  ;; a real Node.js harness before touching source.
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "options = options || {};"))
+    (is (str/includes? source "this.dir = options.dir == null ? 'auto' : String(options.dir);"))
+    (is (str/includes? source "this.body = options.body == null ? '' : String(options.body);"))
+    (is (str/includes? source "this.silent = options.silent == null ? null : Boolean(options.silent);"))
+    (is (str/includes? source "this.data = options.data === undefined ? null : options.data;"))
+    (is (str/includes? source "globalThis.Notification.prototype.close = function()"))
+    (is (str/includes? source "capability: 'notification/close'"))))
+
 (deftest quickjs-wasm-webapi-shim-exposes-fullscreen-capability
   (let [source quickjs-wasm/webapi-shim-source]
     (is (str/includes? source "requestFullscreen: function(options)"))

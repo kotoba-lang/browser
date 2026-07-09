@@ -1459,6 +1459,8 @@
                                        :quickjs/invalid-capability-request)
     :notification/show (when-not (string? (:title request))
                          :quickjs/invalid-capability-request)
+    :notification/close (when-not (present? request :title)
+                          :quickjs/invalid-capability-request)
     :fullscreen/request (when-not (node-ref? request)
                           :quickjs/invalid-capability-request)
     :fullscreen/exit (when-not (= :exit (:fullscreen/op request))
@@ -1787,6 +1789,21 @@
                                      :error error
                                      :permission/decision decision}
                               (nil? error) (dissoc :error)))))
+
+    :notification/close
+    ;; Real spec: every Notification instance has a close() method --
+    ;; previously entirely missing from this shim (a hard TypeError crash
+    ;; on a documented instance method, not just a missing feature), and
+    ;; correspondingly no host-side handling existed at all. Mirrors
+    ;; :notification/show's own :notification/requests audit-trail
+    ;; convention; unlike show, close needs no fresh permission decision
+    ;; -- it only ever dismisses a notification the script itself already
+    ;; owns.
+    (let [result {:title (:title request)}]
+      (-> state
+          (update :notification/requests conj result)
+          (assoc :last-result result)
+          (record-result {:ok? true :result result})))
 
     :fullscreen/request
     (let [fullscreen-result (fullscreen-request-result state request)

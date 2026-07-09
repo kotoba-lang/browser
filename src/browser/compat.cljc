@@ -28,6 +28,7 @@
     :geolocation/read
     :notification/request-permission
     :notification/show
+    :notification/close
     :fullscreen/request
     :fullscreen/exit
     :media/capture
