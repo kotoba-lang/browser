@@ -520,13 +520,21 @@
   called, which the webapi shim flips `readyState` for locally and
   synchronously on its own) would never fire the script's `ws.onclose` or
   flip its `ws.readyState` to `CLOSED` -- the terminal state would silently
-  read back as still-open forever from the script's perspective."
-  [websocket-fn handle]
+  read back as still-open forever from the script's perspective.
+
+  `opened?` (a plain boolean, computed by the caller from `state`'s
+  `:websocket/opened` dedup set -- see `take-websocket-opened-ids`) is
+  carried under a plain `:opened` key (no `?`-stripping concern here,
+  since `:opened` has no trailing `?` to begin with) so the webapi shim's
+  delivery IIFE can fire a still-registered `ws.onopen` exactly once per
+  connection, mirroring `:closed`'s own plain-key delivery."
+  [websocket-fn handle opened?]
   (let [drained (websocket-fn {:op :drain :handle handle})
         closed? (boolean (:closed? drained))]
     (cond-> {:messages (vec (:messages drained))
              :closed? closed?
-             :closed closed?}
+             :closed closed?
+             :opened opened?}
       (:close-info drained)
       (assoc :close-code (:code (:close-info drained))
              :close-reason (:reason (:close-info drained))))))
@@ -558,24 +566,56 @@
   to drain, and the webapi shim's delivery step (see
   `quickjs-wasm/websocket-snapshot-source`) is a no-op against an empty
   map, keeping every pre-existing fabricated-mode caller/test unaffected.
+  `ws.onopen` is deliberately scoped the same way -- see
+  `take-websocket-opened-ids`.
+
+  `opened-ids` (from `take-websocket-opened-ids`) marks which of this
+  snapshot's connection ids have NOT yet had `onopen` delivered.
 
   Returns a JSON-safe map keyed by WebSocket id string: `{<id>
-  {:messages [...] :closed? bool :closed bool :close-code <int>
-  :close-reason <string>}}` (`:closed?`/`:closed` are always the same
-  value, under two keys -- see `websocket-connection-snapshot`'s docstring
-  for why the plain `:closed` key has to be there too for the real webapi
-  shim delivery to see it at all. `:close-code`/`:close-reason` only
-  present once the real peer has actually closed)."
-  [state]
+  {:messages [...] :closed? bool :closed bool :opened bool :close-code
+  <int> :close-reason <string>}}` (`:closed?`/`:closed` are always the
+  same value, under two keys -- see `websocket-connection-snapshot`'s
+  docstring for why the plain `:closed` key has to be there too for the
+  real webapi shim delivery to see it at all. `:close-code`/`:close-reason`
+  only present once the real peer has actually closed)."
+  [state opened-ids]
   (if-let [websocket-fn (:websocket-fn state)]
     (reduce-kv
      (fn [snapshot id _connection]
        (if-let [handle (get (:websocket/handles state) id)]
-         (assoc snapshot id (websocket-connection-snapshot websocket-fn handle))
+         (assoc snapshot id (websocket-connection-snapshot websocket-fn handle (contains? opened-ids id)))
          snapshot))
      {}
      (:websocket/connections state))
     {}))
+
+(defn- take-websocket-opened-ids
+  "Consume (read, then mark-delivered) which of `state`'s currently
+  real-handled WebSocket connections have NOT yet had their `open` event
+  delivered to the script -- `:websocket/opened` (see
+  `browser.compat.quickjs-runner`'s `persistent-execution-keys`) is a
+  dedup set of ids already delivered, mirroring `:custom-elements/
+  upgraded`'s one-time-delivery pattern in `browser.compat.webcomponent`.
+
+  Without this dedup, a connection sitting in `:websocket/handles` forever
+  (nothing ever removes it) would have `websocket-snapshot` re-report it as
+  newly opened on EVERY later `<script>` tag, firing `ws.onopen` over and
+  over -- not just the first missing-entirely bug this fixes, but a worse
+  one.
+
+  Scoped to real (`:websocket-fn`-injected) connections only, exactly like
+  `websocket-snapshot`'s own message/close delivery -- a fabricated-mode
+  connection never gets a handle in the first place, so this is always
+  empty there, keeping every pre-existing fabricated-mode caller/test
+  unaffected.
+
+  Mirrors `take-worker-snapshot`'s `[value state]` shape."
+  [state]
+  (let [handled-ids (keys (:websocket/handles state))
+        already (or (:websocket/opened state) #{})
+        newly-opened (into #{} (remove already) handled-ids)]
+    [newly-opened (update state :websocket/opened (fnil into #{}) handled-ids)]))
 
 (defn- worker-snapshot
   "Compute the REAL, current per-Worker inbound-message snapshot from
@@ -2171,6 +2211,7 @@
         [worker-snap state] (take-worker-snapshot state)
         [fetch-snap state] (take-fetch-snapshot state)
         [broadcast-snap state] (take-broadcast-snapshot state)
+        [websocket-opened-ids state] (take-websocket-opened-ids state)
         state (update state :binding binding/evaluate! script)
         response (normalize-response
                   (invoke-engine (:engine state)
@@ -2181,7 +2222,7 @@
                                                             (:storage state)
                                                             (clipboard-snapshot state)
                                                             (geolocation-snapshot state)
-                                                            (websocket-snapshot state)
+                                                            (websocket-snapshot state websocket-opened-ids)
                                                             worker-snap
                                                             fetch-snap
                                                             (notification-permission-snapshot state)
@@ -2208,6 +2249,7 @@
           [worker-snap state] (take-worker-snapshot state)
           [fetch-snap state] (take-fetch-snapshot state)
           [broadcast-snap state] (take-broadcast-snapshot state)
+          [websocket-opened-ids state] (take-websocket-opened-ids state)
           state (update state :binding binding/module-load! specifier referrer)
           response (normalize-response
                     (invoke-engine (:engine state)
@@ -2218,7 +2260,7 @@
                                                               (:storage state)
                                                               (clipboard-snapshot state)
                                                               (geolocation-snapshot state)
-                                                              (websocket-snapshot state)
+                                                              (websocket-snapshot state websocket-opened-ids)
                                                               worker-snap
                                                               fetch-snap
                                                               (notification-permission-snapshot state)
@@ -2278,6 +2320,7 @@
    :media/streams []
    :websocket/connections {}
    :websocket/handles {}
+   :websocket/opened #{}
    :websocket/messages []
    :crypto/random-bytes (vec (or crypto-random-bytes []))
    :crypto/random-uuids (vec (or crypto-random-uuids []))

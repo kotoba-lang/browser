@@ -4197,6 +4197,9 @@
           var __kwEntry = __kotobaWsSnapshot[__kwId];
           var __kwSocket = __kotobaWsRegistry[__kwId];
           if (!__kwSocket || !__kwEntry) continue;
+          if (__kwEntry.opened && typeof __kwSocket.onopen === 'function') {
+            __kwSocket.onopen({});
+          }
           var __kwMessages = __kwEntry.messages || [];
           for (var __kwj = 0; __kwj < __kwMessages.length; __kwj++) {
             if (typeof __kwSocket.onmessage === 'function') {

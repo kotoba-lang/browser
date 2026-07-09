@@ -1049,6 +1049,24 @@
     (is (str/includes? source "globalThis.WebSocket.prototype.close = function(code, reason)"))
     (is (str/includes? source "capability: 'websocket/close'"))))
 
+(deftest quickjs-wasm-webapi-shim-websocket-onopen-fires-exactly-once
+  ;; `this.onopen = null;` was accepted in the WebSocket constructor
+  ;; alongside onmessage/onclose/onerror, but the delivery IIFE below only
+  ;; ever invoked onmessage/onclose -- onopen was permanently dead code, so
+  ;; the extremely common `ws.onopen = function() { ws.send(...); };`
+  ;; pattern silently never ran. Fixed by threading a real, host-computed
+  ;; `:opened` flag (quickjs-execution/take-websocket-opened-ids, a
+  ;; one-time-delivery dedup set mirroring :custom-elements/upgraded) onto
+  ;; the same per-connection snapshot entry the delivery IIFE already reads
+  ;; :closed off of. Confirmed via a real Node.js harness before touching
+  ;; source, then a real CLJS/QuickJS smoke test
+  ;; (quickjs-websocket-onopen-smoke-test) proving it fires once and never
+  ;; twice across three real <script> tags against a real echo server.
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "this.onopen = null;"))
+    (is (str/includes? source "if (__kwEntry.opened && typeof __kwSocket.onopen === 'function') {"))
+    (is (str/includes? source "__kwSocket.onopen({});"))))
+
 (deftest quickjs-wasm-webapi-shim-exposes-crypto-random-capability
   (let [source quickjs-wasm/webapi-shim-source]
     (is (str/includes? source "globalThis.crypto ="))

@@ -329,9 +329,15 @@
   delivered into the receiving channel's own `onmessage` -- persisting it
   here is what lets a LATER script tag's `broadcast-snapshot` still
   deliver a message a PREVIOUS script tag's `postMessage` already fanned
-  out to it."
+  out to it. `:websocket/opened` is a dedup set of connection ids that
+  have ALREADY had `ws.onopen` delivered (see `quickjs-execution/take-
+  websocket-opened-ids`) -- without persisting it here, a connection a
+  PREVIOUS script tag opened would look newly-opened again to every
+  SUBSEQUENT script tag's snapshot (nothing else ever removes an id from
+  `:websocket/handles`), firing `onopen` repeatedly instead of exactly
+  once."
   [:storage :clipboard :geolocation
-   :dom/client-ids :websocket/connections :websocket/handles
+   :dom/client-ids :websocket/connections :websocket/handles :websocket/opened
    :worker/instances :worker/handles :worker/outbox
    :net/fetch-responses
    :broadcast/channels :broadcast/outbox :history/entries :history/index

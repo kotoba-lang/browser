@@ -963,6 +963,62 @@
       (is (= 1006 (get-in snapshot ["websocket-1" :close-code])))
       (is (= "abnormal closure" (get-in snapshot ["websocket-1" :close-reason]))))))
 
+(deftest quickjs-websocket-onopen-delivers-exactly-once-across-script-tags
+  ;; `ws.onopen` was accepted by the webapi shim's constructor but never
+  ;; invoked at all -- see quickjs_wasm_test.clj's
+  ;; quickjs-wasm-webapi-shim-websocket-onopen-fires-exactly-once for the
+  ;; JS-shim half of this fix. This test proves the host-state half:
+  ;; take-websocket-opened-ids/websocket-snapshot correctly mark a
+  ;; connection as newly-:opened on the FIRST evaluate! call after it was
+  ;; established (script 2, mirroring onmessage/onclose's own never-
+  ;; same-tick delivery discipline), and NOT again on a later evaluate!
+  ;; call (script 3) now that :websocket/opened has recorded it as already
+  ;; delivered -- without that dedup, a connection sitting in
+  ;; :websocket/handles forever would look newly-opened on every later
+  ;; script tag, firing onopen repeatedly.
+  (let [profile (-> (profile/new-profile {:id "work"})
+                    (profile/grant-permission "wss://socket.example" :websocket/connect))
+        adapter (quickjs/new-adapter {:origin "https://app.example"
+                                      :profile-id "work"})
+        websocket-fn (fn [{:keys [op]}]
+                       (case op
+                         :connect {:ok? true :handle {:fake/handle "socket-1"}}
+                         :drain {:messages [] :closed? false}
+                         {:ok? false :error :websocket/unsupported-op}))
+        received-payload (atom nil)
+        state (execution/new-state
+               {:binding (binding/empty-binding adapter)
+                :net-context {:profile profile
+                              :page-url "https://app.example/chat"}
+                :websocket-fn websocket-fn
+                :engine (fn [request]
+                          (reset! received-payload request)
+                          {:result :websocket
+                           :requests [{:request/id "connect"
+                                       :capability :websocket/connect
+                                       :websocket/id "websocket-1"
+                                       :url "wss://socket.example/chat"}]})})
+        ;; Script 1: opens the connection. Its OWN snapshot (computed
+        ;; BEFORE this request is applied) cannot report it as opened yet.
+        state (execution/evaluate! state {:source "const ws = new WebSocket('wss://socket.example/chat')"})]
+    (is (empty? (:websocket/opened state))
+        "a connection opened by THIS script cannot appear in its own opened-delivery dedup set yet")
+    ;; Script 2: the FIRST snapshot computed after the connection landed
+    ;; in :websocket/handles -- must report :opened true.
+    (let [state (execution/evaluate! state {:source "/* script 2 */"})
+          snapshot (:websocket/snapshot @received-payload)]
+      (is (true? (get-in snapshot ["websocket-1" :opened]))
+          (str "expected script 2's snapshot to report the connection script 1 opened as "
+               "newly-:opened -- got " (pr-str snapshot)))
+      (is (contains? (:websocket/opened state) "websocket-1")
+          "the dedup set must record this id as delivered once its snapshot has been computed")
+      ;; Script 3: must NOT re-report :opened true a second time.
+      (let [_ (execution/evaluate! state {:source "/* script 3 */"})
+            snapshot (:websocket/snapshot @received-payload)]
+        (is (false? (get-in snapshot ["websocket-1" :opened]))
+            (str "onopen must not fire a second time on a later script tag -- got "
+                 (pr-str snapshot)))))))
+
 (deftest quickjs-crypto-random-uses-sandboxed-provider
   (let [adapter (quickjs/new-adapter {:origin "https://app.example"
                                       :profile-id "work"})
