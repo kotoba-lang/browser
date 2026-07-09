@@ -1103,6 +1103,38 @@
         var n = (position - b) / a;
         return n >= 0 && Number.isInteger(n);
       }
+      function __kotobaRangeLimitedControl(node) {
+        // Mirrors cssom.core/range-limited-control? exactly: only
+        // type=number|range even have real range semantics at all, and
+        // \"limited\" means a parseable min OR max (either one, not both)
+        // -- a control with neither is spec's \"no range limitation\",
+        // which must match NEITHER :in-range NOR :out-of-range below.
+        var type = String(__kotobaAttr(node, 'type') || 'text').toLowerCase();
+        if (type !== 'number' && type !== 'range') return false;
+        var min = __kotobaParseNumber(__kotobaAttr(node, 'min'));
+        var max = __kotobaParseNumber(__kotobaAttr(node, 'max'));
+        return !Number.isNaN(min) || !Number.isNaN(max);
+      }
+      function __kotobaRangeInvalid(node) {
+        // Mirrors cssom.core/range-invalid? exactly -- deliberately NOT
+        // reusing __kotobaValidationReason above: that fn stops at the
+        // FIRST failing reason in a fixed precedence order (valueMissing/
+        // tooShort/tooLong/typeMismatch/patternMismatch/range*/
+        // stepMismatch), so a control that's e.g. both required-and-blank
+        // AND out of range would report valueMissing only, silently
+        // masking the range problem for :in-range/:out-of-range's own,
+        // narrower purpose (which cares only about min/max, independent
+        // of every other constraint).
+        var type = String(__kotobaAttr(node, 'type') || 'text').toLowerCase();
+        if (type !== 'number' && type !== 'range') return false;
+        var value = __kotobaControlValue(node);
+        if (value.trim() === '') return false;
+        var n = __kotobaParseNumber(value);
+        if (Number.isNaN(n)) return false;
+        var min = __kotobaParseNumber(__kotobaAttr(node, 'min'));
+        var max = __kotobaParseNumber(__kotobaAttr(node, 'max'));
+        return (!Number.isNaN(min) && n < min) || (!Number.isNaN(max) && n > max);
+      }
       function __kotobaMatchesSimple(node, simple) {
         if (!node || node['node/type'] !== 'element') return false;
         if (simple.tag && String(node.tag || '').toLowerCase() !== simple.tag) return false;
@@ -1251,6 +1283,31 @@
               if (!__kotobaNthMatches(nthPosition, ab[0], ab[1])) return false;
               break;
             }
+            case 'in-range':
+              // Previously entirely absent (confirmed via grep -- zero
+              // matches), even though the sibling cssom.core already
+              // implements this correctly for real CSS styling via
+              // in-range?/out-of-range? (which this mirrors exactly,
+              // including the tag=input/disabled/constraint-validation-
+              // barred/range-limited gating -- an unbounded number input
+              // with neither min nor max matches NEITHER pseudo, per
+              // spec). Any selector using it via a script-facing query
+              // always returned an empty/false/null result regardless of
+              // whether the control's value actually satisfied its own
+              // min/max.
+              if (String(node.tag || '').toLowerCase() !== 'input' ||
+                  __kotobaDisabledControl(node) ||
+                  __kotobaConstraintValidationBarredControl(node) ||
+                  !__kotobaRangeLimitedControl(node) ||
+                  __kotobaRangeInvalid(node)) return false;
+              break;
+            case 'out-of-range':
+              if (String(node.tag || '').toLowerCase() !== 'input' ||
+                  __kotobaDisabledControl(node) ||
+                  __kotobaConstraintValidationBarredControl(node) ||
+                  !__kotobaRangeLimitedControl(node) ||
+                  !__kotobaRangeInvalid(node)) return false;
+              break;
             default:
               return false;
           }

@@ -1653,6 +1653,30 @@
     (is (str/includes? source "if (trimmed === 'even') return [2, 0];"))
     (is (str/includes? source "if (trimmed === 'odd') return [2, 1];"))))
 
+;; ---- :in-range/:out-of-range pseudo-classes -- previously entirely
+;; absent from the JS-facing selector engine (confirmed via grep -- zero
+;; matches), even though the sibling cssom.core already implements this
+;; correctly for real CSS styling via in-range?/out-of-range?. Any
+;; selector using one of these via a script-facing query always returned
+;; an empty/false/null result, regardless of whether the control's value
+;; actually satisfied its own min/max. Deliberately does NOT reuse
+;; __kotobaValidationReason (which stops at the first failing reason in a
+;; fixed precedence order, potentially masking a real range problem
+;; behind an unrelated valueMissing/pattern failure) -- two standalone
+;; helpers mirror cssom.core's own range-limited-control?/range-invalid?
+;; exactly instead. Confirmed via a real Node.js harness (13 scenarios)
+;; before touching source. ----
+
+(deftest quickjs-wasm-webapi-shim-selector-engine-supports-in-range-out-of-range
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "function __kotobaRangeLimitedControl(node)"))
+    (is (str/includes? source "function __kotobaRangeInvalid(node)"))
+    (is (str/includes? source "case 'in-range':"))
+    (is (str/includes? source "case 'out-of-range':"))
+    (is (str/includes? source "!__kotobaRangeLimitedControl(node) ||"))
+    (is (str/includes? source "return !Number.isNaN(min) || !Number.isNaN(max);"))
+    (is (str/includes? source "return (!Number.isNaN(min) && n < min) || (!Number.isNaN(max) && n > max);"))))
+
 (deftest quickjs-wasm-webapi-shim-blob-reads-real-arraybuffer-bytes
   ;; A raw ArrayBuffer has NO `.length` property in real JS (only
   ;; `.byteLength` -- verified: `typeof (new ArrayBuffer(4)).length` is
