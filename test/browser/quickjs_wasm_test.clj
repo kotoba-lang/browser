@@ -489,6 +489,37 @@
                                     "              observer.targets.push(entry);\n"
                                     "            }")))))
 
+(deftest quickjs-wasm-webapi-shim-exposes-custom-elements-registry
+  ;; webapi/webapi-surface's :window list has always declared :customElements
+  ;; as supported (compat_test.clj's webapi-surface-includes-* tests only
+  ;; check the DECLARATION map itself, never cross-check against this
+  ;; shim's actual source), but no code anywhere installed
+  ;; globalThis.customElements -- any real script calling
+  ;; customElements.define()/.get()/.whenDefined() crashed the whole
+  ;; script tag with a ReferenceError instead of running real DOM
+  ;; registration semantics. Confirmed via a real Node.js harness (not
+  ;; just static comparison) before fixing: a verbatim extraction of this
+  ;; exact implementation validated name rules, duplicate-name/duplicate-
+  ;; constructor rejection, get(), and whenDefined()'s both already-
+  ;; defined and defined-later resolution paths.
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "globalThis.__kotobaCustomElementDefinitions = {}"))
+    (is (str/includes? source "function __kotobaValidCustomElementName(name)"))
+    (is (str/includes? source "globalThis.customElements = {"))
+    (is (str/includes? source "define: function(name, constructor, options)"))
+    (is (str/includes? source "get: function(name)"))
+    (is (str/includes? source "whenDefined: function(name)"))
+    (is (str/includes? source "is not a valid custom element name"))
+    (is (str/includes? source "is already defined"))
+    (is (str/includes? source "this constructor has already been used to define"))))
+
+(deftest quickjs-wasm-webapi-shim-custom-elements-name-validation-matches-reserved-svg-mathml-names
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "'annotation-xml': true, 'color-profile': true, 'font-face': true,"))
+    (is (str/includes? source "'font-face-src': true, 'font-face-uri': true, 'font-face-format': true,"))
+    (is (str/includes? source "'font-face-name': true, 'missing-glyph': true"))
+    (is (str/includes? source "if (name.slice(0, 3).toLowerCase() === 'xml') return false;"))))
+
 (deftest quickjs-wasm-webapi-shim-exposes-dom-traversal-properties
   (let [source quickjs-wasm/webapi-shim-source]
     (is (str/includes? source "function __kotobaChildNodeId(nodeId, elementsOnly, last)"))

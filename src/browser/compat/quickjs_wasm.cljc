@@ -3039,6 +3039,83 @@
         observer.instance = instance;
         return instance;
       };
+      /* globalThis.customElements was declared in webapi-surface's :window
+         list (compat/webapi.cljc) but no code anywhere ever installed it --
+         any real page script calling customElements.define()/.get() (an
+         extremely common feature-detection/registration pattern) crashed
+         the whole script tag with a ReferenceError, not a spec-shaped
+         error. This is a registration-only implementation: define/get/
+         whenDefined work for real, matching real DOM semantics for name
+         validation and duplicate detection, but -- unlike the fully self-
+         contained MutationObserver above -- it deliberately does NOT
+         upgrade already-created elements or fire connectedCallback/
+         disconnectedCallback/attributeChangedCallback on them, since this
+         shim's elements are plain objects rather than instances of a real
+         HTMLElement class hierarchy (no globalThis.HTMLElement exists to
+         subclass), and building that is a much larger, separate change. */
+      globalThis.__kotobaCustomElementDefinitions = {};
+      globalThis.__kotobaCustomElementWhenDefinedCallbacks = {};
+      function __kotobaValidCustomElementName(name) {
+        // Mirrors browser.compat.webcomponent/valid-name? and
+        // reserved-names (Clojure-side registry model, unused by this
+        // shim) -- keep both in sync if either's rules change.
+        if (typeof name !== 'string' || name.indexOf('-') < 0) return false;
+        if (name.slice(0, 3).toLowerCase() === 'xml') return false;
+        var reserved = {
+          'annotation-xml': true, 'color-profile': true, 'font-face': true,
+          'font-face-src': true, 'font-face-uri': true, 'font-face-format': true,
+          'font-face-name': true, 'missing-glyph': true
+        };
+        return !Object.prototype.hasOwnProperty.call(reserved, name);
+      }
+      globalThis.customElements = {
+        define: function(name, constructor, options) {
+          var key = String(name);
+          if (!__kotobaValidCustomElementName(key)) {
+            throw new TypeError('customElements.define(): \"' + key + '\" is not a valid custom element name');
+          }
+          if (typeof constructor !== 'function') {
+            throw new TypeError('customElements.define(): constructor must be a function');
+          }
+          if (Object.prototype.hasOwnProperty.call(globalThis.__kotobaCustomElementDefinitions, key)) {
+            throw new TypeError('customElements.define(): a custom element with name \"' + key + '\" is already defined');
+          }
+          for (var existingName in globalThis.__kotobaCustomElementDefinitions) {
+            if (Object.prototype.hasOwnProperty.call(globalThis.__kotobaCustomElementDefinitions, existingName) &&
+                globalThis.__kotobaCustomElementDefinitions[existingName].constructor === constructor) {
+              throw new TypeError('customElements.define(): this constructor has already been used to define \"' + existingName + '\"');
+            }
+          }
+          var observedAttributes = constructor.observedAttributes ? constructor.observedAttributes.slice() : [];
+          globalThis.__kotobaCustomElementDefinitions[key] = {
+            name: key,
+            constructor: constructor,
+            observedAttributes: observedAttributes
+          };
+          var pending = globalThis.__kotobaCustomElementWhenDefinedCallbacks[key];
+          if (pending) {
+            delete globalThis.__kotobaCustomElementWhenDefinedCallbacks[key];
+            for (var i = 0; i < pending.length; i++) pending[i]();
+          }
+        },
+        get: function(name) {
+          var entry = globalThis.__kotobaCustomElementDefinitions[String(name)];
+          return entry ? entry.constructor : undefined;
+        },
+        whenDefined: function(name) {
+          var key = String(name);
+          var deferred = __kotobaMakeDeferred();
+          if (Object.prototype.hasOwnProperty.call(globalThis.__kotobaCustomElementDefinitions, key)) {
+            deferred.resolve(undefined);
+          } else if (!__kotobaValidCustomElementName(key)) {
+            deferred.reject(new TypeError('whenDefined(): \"' + key + '\" is not a valid custom element name'));
+          } else {
+            globalThis.__kotobaCustomElementWhenDefinedCallbacks[key] = globalThis.__kotobaCustomElementWhenDefinedCallbacks[key] || [];
+            globalThis.__kotobaCustomElementWhenDefinedCallbacks[key].push(function() { deferred.resolve(undefined); });
+          }
+          return deferred.promise;
+        }
+      };
       function __kotobaGlobalEventKey(target, type) {
         return String(target) + ':' + String(type);
       }
