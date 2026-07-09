@@ -489,6 +489,33 @@
                                     "              observer.targets.push(entry);\n"
                                     "            }")))))
 
+(deftest quickjs-wasm-webapi-shim-mutation-observer-honors-attribute-filter
+  ;; Real spec: MutationObserverInit.attributeFilter restricts
+  ;; attribute-change notifications to only the named attributes --
+  ;; observe(el, {attributes: true, attributeFilter: ['data-state']})
+  ;; must fire ONLY for data-state changes, not class/style/etc. observe()
+  ;; previously accepted attributeFilter but never stored it, and the
+  ;; dispatch filter in __kotobaQueueMutation had no attributeFilter check
+  ;; at all -- confirmed via a real Node.js harness before touching source
+  ;; that a 'class' mutation was wrongly delivered to an observer whose
+  ;; attributeFilter was ['data-state']. Also implements the real spec's
+  ;; companion rule: if attributeFilter (or attributeOldValue) is present
+  ;; and attributes itself is omitted, attributes is implicitly true --
+  ;; otherwise the natural, idiomatic observe(el, {attributeFilter: [...]})
+  ;; call (with no explicit attributes: true) would silently observe
+  ;; nothing at all.
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "var attributesOption = options.attributes;"))
+    (is (str/includes? source (str "if (attributesOption === undefined &&\n"
+                                    "                (options.attributeFilter != null || options.attributeOldValue != null)) {\n"
+                                    "              attributesOption = true;\n"
+                                    "            }")))
+    (is (str/includes? source (str "attributeFilter: Array.isArray(options.attributeFilter)\n"
+                                    "                  ? options.attributeFilter.map(String)\n"
+                                    "                  : null")))
+    (is (str/includes? source (str "if (record.type === 'attributes' && options.attributeFilter &&\n"
+                                    "                options.attributeFilter.indexOf(record.attributeName) < 0) continue;")))))
+
 (deftest quickjs-wasm-webapi-shim-exposes-custom-elements-registry
   ;; webapi/webapi-surface's :window list has always declared :customElements
   ;; as supported (compat_test.clj's webapi-surface-includes-* tests only

@@ -138,3 +138,56 @@
                   (is false (str "QuickJS WASM engine initialization / page load failed: "
                                  (or (.-message err) err)))
                   (done))))))
+
+(deftest quickjs-real-mutation-observer-attribute-filter-restricts-notifications-test
+  (async done
+    (-> (run-page-and-read-title!
+         (str "<main><div id=\"x\">old</div>"
+              "<script>"
+              "var mo = new MutationObserver(function() {});"
+              "var target = document.getElementById('x');"
+              "mo.observe(target, {attributes: true, attributeFilter: ['data-state']});"
+              "target.setAttribute('class', 'ignored');"
+              "target.setAttribute('data-state', 'active');"
+              "target.setAttribute('style', 'color: red');"
+              "var records = mo.takeRecords();"
+              "var names = [];"
+              "for (var i = 0; i < records.length; i++) { names.push(records[i].attributeName); }"
+              "document.title = 'records=' + records.length + '|names=' + names.join(',');"
+              "</script></main>"))
+        (.then (fn [title]
+                 (println "quickjs real MutationObserver attributeFilter ->" (pr-str title))
+                 (is (= "records=1|names=data-state" title)
+                     (str "expected attributeFilter: ['data-state'] to restrict notifications "
+                          "to ONLY data-state changes -- class and style must be silently "
+                          "dropped, matching real spec, got document.title = " (pr-str title)))
+                 (done)))
+        (.catch (fn [err]
+                  (is false (str "QuickJS WASM engine initialization / page load failed: "
+                                 (or (.-message err) err)))
+                  (done))))))
+
+(deftest quickjs-real-mutation-observer-attribute-filter-without-explicit-attributes-still-observes-test
+  (async done
+    (-> (run-page-and-read-title!
+         (str "<main><div id=\"x\">old</div>"
+              "<script>"
+              "var mo = new MutationObserver(function() {});"
+              "var target = document.getElementById('x');"
+              "mo.observe(target, {attributeFilter: ['data-x']});"
+              "target.setAttribute('data-x', '1');"
+              "var records = mo.takeRecords();"
+              "document.title = 'records=' + records.length;"
+              "</script></main>"))
+        (.then (fn [title]
+                 (println "quickjs real MutationObserver attributeFilter with no explicit attributes ->" (pr-str title))
+                 (is (= "records=1" title)
+                     (str "expected observe(el, {attributeFilter: [...]}) with NO explicit "
+                          "attributes: true to still implicitly observe attributes (matching "
+                          "real spec's implicit-attributes-true rule), not silently observe "
+                          "nothing at all, got document.title = " (pr-str title)))
+                 (done)))
+        (.catch (fn [err]
+                  (is false (str "QuickJS WASM engine initialization / page load failed: "
+                                 (or (.-message err) err)))
+                  (done))))))

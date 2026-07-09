@@ -290,6 +290,8 @@
               (record.type === 'childList' && options.childList) ||
               (record.type === 'characterData' && options.characterData);
             if (!observesType) continue;
+            if (record.type === 'attributes' && options.attributeFilter &&
+                options.attributeFilter.indexOf(record.attributeName) < 0) continue;
             if (record.targetId !== target.nodeId && !(options.subtree && __kotobaObserverContains(record.targetId, target.nodeId))) continue;
             var next = __kotobaMutationRecord(record);
             if (record.type === 'attributes' && !options.attributeOldValue) next.oldValue = null;
@@ -2988,15 +2990,34 @@
             if (!target || !target.__kotobaRef) throw new TypeError('MutationObserver target must be a Node');
             options = options || {};
             var nodeId = __kotobaRefNodeId(target.__kotobaRef);
+            // Real spec: if attributeFilter or attributeOldValue is present
+            // and attributes itself is omitted, attributes is implicitly
+            // true -- otherwise observe(el, {attributeFilter: [...]}) (the
+            // natural, idiomatic way to request only specific attributes)
+            // would silently observe nothing at all.
+            var attributesOption = options.attributes;
+            if (attributesOption === undefined &&
+                (options.attributeFilter != null || options.attributeOldValue != null)) {
+              attributesOption = true;
+            }
             var entry = {
               nodeId: nodeId,
               options: {
-                attributes: Boolean(options.attributes),
+                attributes: Boolean(attributesOption),
                 childList: Boolean(options.childList),
                 characterData: Boolean(options.characterData),
                 subtree: Boolean(options.subtree),
                 attributeOldValue: Boolean(options.attributeOldValue),
-                characterDataOldValue: Boolean(options.characterDataOldValue)
+                characterDataOldValue: Boolean(options.characterDataOldValue),
+                // Real spec: attributeFilter restricts attribute-change
+                // notifications to only the named attributes (e.g. class
+                // changes must NOT fire an observer whose attributeFilter
+                // is ['data-state']) -- previously accepted but never
+                // stored, so __kotobaQueueMutation's dispatch below had no
+                // way to honor it at all.
+                attributeFilter: Array.isArray(options.attributeFilter)
+                  ? options.attributeFilter.map(String)
+                  : null
               }
             };
             // Real MutationObserver.observe() called AGAIN on a node
