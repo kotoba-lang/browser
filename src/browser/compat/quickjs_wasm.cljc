@@ -3487,18 +3487,69 @@
       globalThis.URL = function(input, base) {
         var href = __kotobaResolveUrl(input, base);
         var parts = __kotobaSplitUrl(href);
-        this.href = href;
         this.protocol = parts.protocol;
         this.host = parts.authority;
         var hostParts = parts.authority.split(':');
         this.hostname = hostParts[0] || '';
         this.port = hostParts.length > 1 ? hostParts.slice(1).join(':') : '';
         this.pathname = parts.pathname || '/';
-        this.search = parts.search;
         this.hash = parts.hash;
         this.origin = parts.authority ? parts.protocol + '//' + parts.authority : 'null';
-        this.searchParams = new globalThis.URLSearchParams(this.search);
+        this.searchParams = new globalThis.URLSearchParams(parts.search);
       };
+      /* Real spec: url.searchParams is a LIVE view -- mutating it (via
+         append/set/delete/sort) re-serializes into url.search/url.href,
+         and assigning url.search re-parses into url.searchParams.
+         Previously href/search/searchParams were three independent plain
+         data properties, each captured once at construction time and
+         never reconciled again: url.searchParams.set(...) left url.href/
+         url.search silently stale, and assigning url.search never touched
+         url.searchParams at all -- a real, extremely common idiom
+         (url.searchParams.append(...); fetch(url)) silently used stale
+         data. Fixed by making `search` a live getter/setter DERIVED FROM
+         searchParams (so every mutating URLSearchParams method reflects
+         automatically -- no per-method onChange wiring needed, the getter
+         just recomputes on each read), and `href` a live getter composed
+         from the current protocol/host/pathname/search/hash at read time
+         (which, as a free side effect, also makes a plain field
+         reassignment like url.pathname = '...' show up in url.href,
+         previously ALSO silently stale -- protocol/host/hostname/port
+         remain independent, unlinked plain fields, matching this engine's
+         existing, deliberately narrower URL model). href's setter fully
+         re-parses and replaces every field, mirroring the constructor --
+         required so url.href = '...' (which worked, if narrowly, before
+         this change) does not regress into a silent no-op now that href
+         is an accessor rather than a plain writable property. */
+      Object.defineProperty(globalThis.URL.prototype, 'search', {
+        get: function() {
+          var serialized = this.searchParams.toString();
+          return serialized.length ? '?' + serialized : '';
+        },
+        set: function(value) {
+          this.searchParams = new globalThis.URLSearchParams(value == null ? '' : String(value));
+        },
+        enumerable: true,
+        configurable: true
+      });
+      Object.defineProperty(globalThis.URL.prototype, 'href', {
+        get: function() {
+          return this.protocol + '//' + this.host + this.pathname + this.search + this.hash;
+        },
+        set: function(value) {
+          var parts = __kotobaSplitUrl(String(value));
+          this.protocol = parts.protocol;
+          this.host = parts.authority;
+          var hostParts = parts.authority.split(':');
+          this.hostname = hostParts[0] || '';
+          this.port = hostParts.length > 1 ? hostParts.slice(1).join(':') : '';
+          this.pathname = parts.pathname || '/';
+          this.hash = parts.hash;
+          this.origin = parts.authority ? parts.protocol + '//' + parts.authority : 'null';
+          this.searchParams = new globalThis.URLSearchParams(parts.search);
+        },
+        enumerable: true,
+        configurable: true
+      });
       globalThis.URL.prototype.toString = function() {
         return this.href;
       };

@@ -874,7 +874,31 @@
     (is (str/includes? source "globalThis.URLSearchParams.prototype.toString = function()"))
     (is (str/includes? source "function __kotobaResolveUrl(input, base)"))
     (is (str/includes? source "globalThis.URL = function(input, base)"))
-    (is (str/includes? source "this.searchParams = new globalThis.URLSearchParams(this.search)"))))
+    (is (str/includes? source "this.searchParams = new globalThis.URLSearchParams(parts.search)"))))
+
+(deftest quickjs-wasm-webapi-shim-url-search-and-href-are-live-getters-tied-to-search-params
+  ;; Real spec: url.searchParams is a LIVE view -- mutating it re-serializes
+  ;; into url.search/url.href, and assigning url.search re-parses into
+  ;; url.searchParams. Previously href/search/searchParams were three
+  ;; independent plain data properties, each captured once at construction
+  ;; and never reconciled again -- url.searchParams.set(...) left url.href/
+  ;; url.search silently stale, and assigning url.search never touched
+  ;; url.searchParams at all. Confirmed via a real Node.js harness (not
+  ;; just static comparison) before fixing: 9 scenarios including the
+  ;; searchParams->href/search direction, the search->searchParams
+  ;; direction, an empty-search no-trailing-'?' case, a full href= reparse,
+  ;; and the free side effect that url.pathname = '...' (an unrelated
+  ;; plain field) now also shows up in url.href once href became a getter
+  ;; that reads current field values at access time instead of a value
+  ;; frozen at construction.
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "Object.defineProperty(globalThis.URL.prototype, 'search', {"))
+    (is (str/includes? source "var serialized = this.searchParams.toString();"))
+    (is (str/includes? source "return serialized.length ? '?' + serialized : '';"))
+    (is (str/includes? source "this.searchParams = new globalThis.URLSearchParams(value == null ? '' : String(value));"))
+    (is (str/includes? source "Object.defineProperty(globalThis.URL.prototype, 'href', {"))
+    (is (str/includes? source "return this.protocol + '//' + this.host + this.pathname + this.search + this.hash;"))
+    (is (not (str/includes? source "this.href = href;")))))
 
 (deftest quickjs-wasm-webapi-shim-search-params-set-overwrites-the-first-matching-pair-in-place
   ;; Real spec: URLSearchParams.prototype.set() overwrites the FIRST
