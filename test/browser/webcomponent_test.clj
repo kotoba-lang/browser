@@ -1,6 +1,10 @@
 (ns browser.webcomponent-test
-  (:require [browser.compat.webcomponent :as webcomponent]
+  (:require [browser.compat.quickjs :as quickjs]
+            [browser.compat.webcomponent :as webcomponent]
             [clojure.test :refer [deftest is]]))
+
+(def ^:private test-adapter
+  (quickjs/new-adapter {:origin "https://app.example" :profile-id "work"}))
 
 (deftest valid-name-requires-a-hyphen
   (is (webcomponent/valid-name? "my-widget"))
@@ -108,3 +112,57 @@
     (is (some? (webcomponent/definition registry "my-widget")))
     (is (some? (webcomponent/definition registry "my-other-widget")))
     (is (nil? (:custom-elements/error registry)))))
+
+(deftest upgrade-tree-does-not-upgrade-the-same-node-twice-in-one-call
+  ;; Real spec: an element is upgraded EXACTLY ONCE per its lifetime.
+  ;; empty-registry has always modeled a :custom-elements/upgraded set for
+  ;; exactly this purpose, but nothing ever read or wrote it -- confirmed
+  ;; via direct REPL evaluation before touching source that passing the
+  ;; SAME node twice in one upgrade-tree call fired two duplicate
+  ;; connected-callback requests.
+  (let [registry (webcomponent/define (webcomponent/empty-registry) "my-widget" {:constructor/id "c1"})
+        node {:node/id 42 :tag "my-widget"}
+        result (webcomponent/upgrade-tree test-adapter registry [node node])]
+    (is (= 1 (count (:requests result)))
+        "the same node appearing twice must only upgrade once")
+    (is (= [42] (:custom-elements/upgraded (:registry result)))
+        "the upgraded node id must be recorded exactly once")))
+
+(deftest upgrade-tree-upgrades-two-distinct-nodes-of-the-same-tag-independently
+  ;; Regression guard: the dedup fix must not falsely skip genuinely
+  ;; distinct nodes that merely share a tag/definition.
+  (let [registry (webcomponent/define (webcomponent/empty-registry) "my-widget" {:constructor/id "c1"})
+        node-a {:node/id 1 :tag "my-widget"}
+        node-b {:node/id 2 :tag "my-widget"}
+        result (webcomponent/upgrade-tree test-adapter registry [node-a node-b])]
+    (is (= 2 (count (:requests result))))
+    (is (= [1 2] (:custom-elements/upgraded (:registry result))))))
+
+(deftest upgrade-tree-does-not-re-upgrade-across-two-separate-calls-when-the-registry-is-threaded-through
+  ;; The actual real-world case this bug report is about: incremental
+  ;; parsing re-walking a subtree that already contains a previously-
+  ;; upgraded custom element (a second upgrade-tree call, not just a
+  ;; duplicate within one call). Only dedupes when the CALLER threads the
+  ;; returned registry forward -- a caller that discards it and passes
+  ;; the original, un-upgraded registry again will still (correctly, per
+  ;; real DOM semantics for a genuinely-reparsed/reconstructed node) fire
+  ;; again, since this registry model has no independent way to know the
+  ;; node itself hasn't changed.
+  (let [registry (webcomponent/define (webcomponent/empty-registry) "my-widget" {:constructor/id "c1"})
+        node {:node/id 42 :tag "my-widget"}
+        first-call (webcomponent/upgrade-tree test-adapter registry [node])
+        second-call (webcomponent/upgrade-tree test-adapter (:registry first-call) [node])]
+    (is (= 1 (count (:requests first-call))))
+    (is (= 0 (count (:requests second-call)))
+        "re-walking the same node with the registry threaded through must not re-upgrade it")))
+
+(deftest upgrade-tree-still-no-ops-for-a-node-with-no-matching-definition
+  ;; Regression guard: existing behavior (no definition -> no request) is
+  ;; unchanged by the dedup fix.
+  (let [registry (webcomponent/empty-registry)
+        node {:node/id 99 :tag "unregistered-tag"}
+        result (webcomponent/upgrade-tree test-adapter registry [node])]
+    (is (= 0 (count (:requests result))))
+    (is (= [] (:custom-elements/upgraded (:registry result)))))
+  (is (nil? (webcomponent/upgrade-request test-adapter (webcomponent/empty-registry) {:node/id 99 :tag "unregistered-tag"}))
+      "upgrade-request itself must still return nil directly, not just via upgrade-tree's wrapper"))

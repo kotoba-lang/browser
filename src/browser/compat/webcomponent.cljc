@@ -71,13 +71,28 @@
   (get-in registry [:custom-elements/definitions name]))
 
 (defn upgrade-request
+  "Real spec: an element is upgraded (constructed, connectedCallback
+   fired) EXACTLY ONCE per its lifetime -- re-walking a tree that already
+   contains a previously-upgraded custom element (e.g. incremental
+   parsing re-processing an overlapping subtree) must not re-fire
+   connectedCallback. `empty-registry` has always modeled a
+   `:custom-elements/upgraded` set for exactly this purpose, but nothing
+   ever read or wrote it -- this permanently-dead bookkeeping field meant
+   nothing prevented sending a duplicate connected-callback request for
+   the same node. Returns nil (no request) both when the tag has no
+   definition (existing behavior) and when the node is already upgraded.
+   Read-only with respect to `registry` -- `upgrade-tree` below is
+   responsible for threading the updated `:custom-elements/upgraded` set
+   forward once a request actually fires."
   [adapter registry node]
-  (when-let [definition (definition registry (:tag node))]
-    (compat/request adapter :js/call
-                    {:js/call :custom-element/connected-callback
-                     :constructor/id (:constructor/id definition)
-                     :node/id (:node/id node)
-                     :tag (:tag node)})))
+  (when (and (definition registry (:tag node))
+             (not (contains? (set (:custom-elements/upgraded registry)) (:node/id node))))
+    (let [definition (definition registry (:tag node))]
+      (compat/request adapter :js/call
+                      {:js/call :custom-element/connected-callback
+                       :constructor/id (:constructor/id definition)
+                       :node/id (:node/id node)
+                       :tag (:tag node)}))))
 
 (defn attribute-changed-request
   [adapter registry node attr old-value new-value]
@@ -93,5 +108,23 @@
                        :new-value new-value}))))
 
 (defn upgrade-tree
+  "Real spec (see `upgrade-request`'s own docstring): upgrading is a
+   once-per-lifetime, tree-wide operation, so this must thread the
+   registry's `:custom-elements/upgraded` set forward as it walks --
+   previously `(vec (keep #(upgrade-request adapter registry %) nodes))`
+   called `upgrade-request` against the SAME, never-updated `registry` for
+   every node, so two nodes sharing a `:node/id` (or two separate
+   `upgrade-tree` calls over an overlapping subtree, using the registry
+   this fn returns) both fired duplicate connected-callback requests.
+   Returns `{:requests [...] :registry registry'}` -- a shape change from
+   the previous bare vector, safe since this module has zero external
+   callers outside its own tests (confirmed dead code, kept in sync with
+   its live JS sibling)."
   [adapter registry nodes]
-  (vec (keep #(upgrade-request adapter registry %) nodes)))
+  (reduce (fn [{:keys [registry requests]} node]
+            (if-let [request (upgrade-request adapter registry node)]
+              {:registry (update registry :custom-elements/upgraded conj (:node/id node))
+               :requests (conj requests request)}
+              {:registry registry :requests requests}))
+          {:registry registry :requests []}
+          nodes))
