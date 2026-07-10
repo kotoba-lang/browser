@@ -2000,3 +2000,39 @@
     (is (str/includes? source "case 'is':"))
     (is (str/includes? source "case 'where':"))
     (is (str/includes? source "if (!__kotobaMatchesAnyInGroup(node, __kotobaParseSelectorGroup(pseudo.arg))) return false;"))))
+
+;; ---- :has() in the JS-facing selector engine -- previously entirely
+;; absent (confirmed via grep -- zero `case 'has'` matches), even though
+;; the sibling cssom.core already implements it correctly for real CSS
+;; styling. Deliberately deferred from the prior :not/:is/:where cycle,
+;; confirmed then to be architecturally distinct: a genuinely new
+;; DOWNWARD tree walk into node's own subtree/children (reusing this
+;; file's own existing __kotobaDescendantNodeIds/__kotobaChildElements
+;; helpers, which already have the exact same shape as cssom.core's
+;; descendant-node-ids), not a simple self-recursive boolean combinator
+;; like :not/:is/:where. Mirrors cssom.core's parse-has-item/
+;; has-arg-child-match?/has-arg-descendant-match?/has-group-matches?
+;; exactly: a leading '>' on a comma-separated item marks the direct-
+;; child-only form (':has(> img)'), otherwise the item matches ANY
+;; descendant anywhere in the subtree (':has(.badge)'); the comma list
+;; itself is an OR, mirroring :is()/:where()'s identical per-group
+;; `some` semantics. No document-nil guard needed here (unlike
+;; cssom.core's 2-arity matches-simple?): this whole engine already
+;; resolves every node lookup through the global __kotobaSnapshot, so
+;; there is no documentless call path to guard against. Confirmed via a
+;; real Node.js harness (8 scenarios, including the direct-child form
+;; correctly NOT falling back to a deeper descendant match) before
+;; touching source. ----
+
+(deftest quickjs-wasm-webapi-shim-selector-engine-supports-has-pseudo-class
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "function __kotobaParseHasItem(item)"))
+    (is (str/includes? source "var directChildMatch = /^>\\s*(.*)$/.exec(trimmed);"))
+    (is (str/includes? source "function __kotobaParseHasGroup(arg)"))
+    (is (str/includes? source "function __kotobaHasArgChildMatch(node, compound)"))
+    (is (str/includes? source "var childIds = __kotobaChildElements(node['node/id']);"))
+    (is (str/includes? source "function __kotobaHasArgDescendantMatch(node, compound)"))
+    (is (str/includes? source "var descendantIds = __kotobaDescendantNodeIds(node);"))
+    (is (str/includes? source "function __kotobaHasGroupMatches(node, group)"))
+    (is (str/includes? source "case 'has':"))
+    (is (str/includes? source "if (!__kotobaHasGroupMatches(node, __kotobaParseHasGroup(pseudo.arg))) return false;"))))

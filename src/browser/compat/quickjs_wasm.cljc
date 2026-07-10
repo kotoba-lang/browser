@@ -1301,6 +1301,55 @@
         }
         return false;
       }
+      function __kotobaParseHasItem(item) {
+        // Mirrors cssom.core/parse-has-item exactly: a leading '>'
+        // marks the direct-child form (':has(> img)'), stripped before
+        // parsing the rest as a single compound selector; otherwise the
+        // whole item is the (far more common) descendant-anywhere form.
+        var trimmed = String(item).trim();
+        var directChildMatch = /^>\\s*(.*)$/.exec(trimmed);
+        if (directChildMatch) {
+          return { selector: __kotobaParseSimpleSelector(directChildMatch[1]), directChild: true };
+        }
+        return { selector: __kotobaParseSimpleSelector(trimmed), directChild: false };
+      }
+      function __kotobaParseHasGroup(arg) {
+        return __kotobaSplitSelectorList(arg).map(__kotobaParseHasItem);
+      }
+      function __kotobaHasArgChildMatch(node, compound) {
+        // Mirrors cssom.core/has-arg-child-match? -- ONLY node's direct
+        // element children, never a deeper descendant.
+        var childIds = __kotobaChildElements(node['node/id']);
+        for (var i = 0; i < childIds.length; i++) {
+          if (__kotobaMatchesSimple(__kotobaNodeById(childIds[i]), compound)) return true;
+        }
+        return false;
+      }
+      function __kotobaHasArgDescendantMatch(node, compound) {
+        // Mirrors cssom.core/has-arg-descendant-match? -- ANY descendant
+        // anywhere in node's subtree (never node itself), reusing the
+        // same full subtree walk __kotobaDescendantNodeIds already
+        // provides for other purposes elsewhere in this file.
+        var descendantIds = __kotobaDescendantNodeIds(node);
+        for (var i = 0; i < descendantIds.length; i++) {
+          if (__kotobaMatchesSimple(__kotobaNodeById(descendantIds[i]), compound)) return true;
+        }
+        return false;
+      }
+      function __kotobaHasGroupMatches(node, group) {
+        // Mirrors cssom.core/has-group-matches? exactly: :has()'s own
+        // comma-separated list is an OR (mirrors :is()/:where()'s
+        // identical per-group `some` semantics) -- dispatched per item
+        // to the direct-child or descendant-anywhere walk above.
+        for (var i = 0; i < group.length; i++) {
+          var item = group[i];
+          var matched = item.directChild
+            ? __kotobaHasArgChildMatch(node, item.selector)
+            : __kotobaHasArgDescendantMatch(node, item.selector);
+          if (matched) return true;
+        }
+        return false;
+      }
       function __kotobaMatchesSimple(node, simple) {
         if (!node || node['node/type'] !== 'element') return false;
         if (simple.tag && String(node.tag || '').toLowerCase() !== simple.tag) return false;
@@ -1526,6 +1575,23 @@
               // matches() check) -- the node must match AT LEAST ONE
               // selector in the comma-separated group.
               if (!__kotobaMatchesAnyInGroup(node, __kotobaParseSelectorGroup(pseudo.arg))) return false;
+              break;
+            case 'has':
+              // Previously entirely absent (confirmed via grep -- zero
+              // matches), even though the sibling cssom.core already
+              // implements this correctly for real CSS styling.
+              // Architecturally distinct from :not/:is/:where above --
+              // deliberately deferred to a separate cycle when those
+              // were ported -- a genuinely new DOWNWARD tree walk (into
+              // node's own subtree/children) rather than a simple
+              // self-recursive boolean combinator. No document-nil
+              // guard needed here (unlike cssom.core's 2-arity
+              // matches-simple?, which unconditionally returns false
+              // when document is nil): this whole engine already
+              // resolves every node lookup through the global
+              // __kotobaSnapshot, so there is no documentless call path
+              // to guard against.
+              if (!__kotobaHasGroupMatches(node, __kotobaParseHasGroup(pseudo.arg))) return false;
               break;
             default:
               return false;
