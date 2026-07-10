@@ -1971,3 +1971,32 @@
     (is (str/includes? fn-source "} else if (ch === ')') {"))
     (is (str/includes? fn-source "parenDepth = Math.max(0, parenDepth - 1);"))
     (is (str/includes? fn-source "} else if (ch === ',' && bracketDepth === 0 && parenDepth === 0) {"))))
+
+;; ---- :not() / :is() / :where() in the JS-facing selector engine --
+;; previously entirely absent (confirmed via grep -- zero `case 'not'`/
+;; `'is'`/`'where'` matches), even though the sibling cssom.core already
+;; implements all three correctly for real CSS styling via parse-group/
+;; matches-simple?. Mirrors cssom's exact semantics: each comma-
+;; separated argument item is parsed as a single COMPOUND selector (no
+;; combinators inside the parens -- cssom's own documented, deliberate
+;; scope limit); :not() requires the node match NONE of the group,
+;; :is()/:where() require AT LEAST ONE (matching-identical -- they
+;; differ only in cascade specificity, meaningless for a boolean
+;; matches() check). Multiple occurrences on one compound (e.g.
+;; :not(.a):not(.b)) are handled for free by this file's own existing
+;; per-pseudo loop in __kotobaMatchesSimple, which already requires
+;; every pseudos[] entry to independently pass -- exactly cssom's own
+;; "every group" semantics, no extra grouping logic needed. Confirmed
+;; via a real Node.js harness (12 scenarios, including comma lists and
+;; nested :is(#id)/:not(#id)) before touching source. ----
+
+(deftest quickjs-wasm-webapi-shim-selector-engine-supports-not-is-where-pseudo-classes
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "function __kotobaParseSelectorGroup(arg)"))
+    (is (str/includes? source "return __kotobaSplitSelectorList(arg).map(__kotobaParseSimpleSelector);"))
+    (is (str/includes? source "function __kotobaMatchesAnyInGroup(node, group)"))
+    (is (str/includes? source "case 'not':"))
+    (is (str/includes? source "if (__kotobaMatchesAnyInGroup(node, __kotobaParseSelectorGroup(pseudo.arg))) return false;"))
+    (is (str/includes? source "case 'is':"))
+    (is (str/includes? source "case 'where':"))
+    (is (str/includes? source "if (!__kotobaMatchesAnyInGroup(node, __kotobaParseSelectorGroup(pseudo.arg))) return false;"))))

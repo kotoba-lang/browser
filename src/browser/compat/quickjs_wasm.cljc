@@ -1286,6 +1286,21 @@
         }
         return false;
       }
+      function __kotobaParseSelectorGroup(arg) {
+        // Mirrors cssom.core/parse-group exactly: each comma-separated
+        // item in a functional pseudo-class argument (e.g. the
+        // ':is(.a, .b)' inside ':not()'/':is()'/':where()') is parsed as
+        // a single COMPOUND selector, not a combinator chain -- reuses
+        // the same paren/bracket-depth-aware splitter as top-level
+        // selector lists, since the argument syntax is identical.
+        return __kotobaSplitSelectorList(arg).map(__kotobaParseSimpleSelector);
+      }
+      function __kotobaMatchesAnyInGroup(node, group) {
+        for (var i = 0; i < group.length; i++) {
+          if (__kotobaMatchesSimple(node, group[i])) return true;
+        }
+        return false;
+      }
       function __kotobaMatchesSimple(node, simple) {
         if (!node || node['node/type'] !== 'element') return false;
         if (simple.tag && String(node.tag || '').toLowerCase() !== simple.tag) return false;
@@ -1488,6 +1503,29 @@
               // returned an empty/false result, regardless of the
               // element's own or inherited lang.
               if (!__kotobaLangPseudoMatches(node, pseudo.arg)) return false;
+              break;
+            case 'not':
+              // Previously entirely absent (confirmed via grep -- zero
+              // matches), even though the sibling cssom.core already
+              // implements this correctly for real CSS styling. Mirrors
+              // cssom.core's parse-group/matches-simple? exactly: the
+              // comma-separated argument is a group of compound
+              // selectors (no combinators inside the parens, matching
+              // cssom's own documented, deliberate scope limit); the
+              // node must match NONE of them.
+              if (__kotobaMatchesAnyInGroup(node, __kotobaParseSelectorGroup(pseudo.arg))) return false;
+              break;
+            case 'is':
+            case 'where':
+              // Previously entirely absent (confirmed via grep -- zero
+              // matches), even though the sibling cssom.core already
+              // implements this correctly for real CSS styling. Mirrors
+              // cssom.core's matches-simple? exactly: :is()/:where() are
+              // matching-identical (they differ only in specificity, a
+              // pure cascade concern with no meaning for a boolean
+              // matches() check) -- the node must match AT LEAST ONE
+              // selector in the comma-separated group.
+              if (!__kotobaMatchesAnyInGroup(node, __kotobaParseSelectorGroup(pseudo.arg))) return false;
               break;
             default:
               return false;
