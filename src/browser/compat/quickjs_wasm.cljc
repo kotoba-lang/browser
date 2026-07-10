@@ -1024,6 +1024,7 @@
         var tokens = [];
         var start = 0;
         var bracketDepth = 0;
+        var parenDepth = 0;
         var quoteChar = null;
         function appendToken(end) {
           var token = text.slice(start, end).trim();
@@ -1040,11 +1041,22 @@
             bracketDepth += 1;
           } else if (ch === ']') {
             bracketDepth = Math.max(0, bracketDepth - 1);
-          } else if (ch === '>' && bracketDepth === 0) {
+          } else if (ch === '(') {
+            // Previously untracked -- a functional pseudo-class argument
+            // containing whitespace (e.g. \":lang(de, fr)\" with a space
+            // after the comma, or \":nth-child(2n + 1)\" with spaces
+            // around the operator) was silently split into multiple
+            // combinator-joined simple selectors, breaking the whole
+            // selector rather than matching it as one functional
+            // argument. Mirrors bracketDepth's own established tracking.
+            parenDepth += 1;
+          } else if (ch === ')') {
+            parenDepth = Math.max(0, parenDepth - 1);
+          } else if (ch === '>' && bracketDepth === 0 && parenDepth === 0) {
             appendToken(i);
             tokens.push('>');
             start = i + 1;
-          } else if (/\\s/.test(ch) && bracketDepth === 0) {
+          } else if (/\\s/.test(ch) && bracketDepth === 0 && parenDepth === 0) {
             appendToken(i);
             start = i + 1;
           }
@@ -1073,6 +1085,7 @@
         var selectors = [];
         var start = 0;
         var bracketDepth = 0;
+        var parenDepth = 0;
         var quoteChar = null;
         for (var i = 0; i < text.length; i++) {
           var ch = text[i];
@@ -1085,7 +1098,18 @@
             bracketDepth += 1;
           } else if (ch === ']') {
             bracketDepth = Math.max(0, bracketDepth - 1);
-          } else if (ch === ',' && bracketDepth === 0) {
+          } else if (ch === '(') {
+            // Previously untracked, same class of bug as
+            // __kotobaSelectorTokens' own parenDepth fix above -- a
+            // comma INSIDE a functional pseudo-class argument (e.g.
+            // \":lang(de, fr)\") was wrongly treated as a top-level
+            // selector-LIST separator, splitting one selector into two
+            // malformed halves (\":lang(de\" and \"fr)\") that could
+            // never match anything.
+            parenDepth += 1;
+          } else if (ch === ')') {
+            parenDepth = Math.max(0, parenDepth - 1);
+          } else if (ch === ',' && bracketDepth === 0 && parenDepth === 0) {
             var selector = text.slice(start, i).trim();
             if (selector) selectors.push(selector);
             start = i + 1;
@@ -1198,6 +1222,69 @@
           if (__kotobaChildCountsAsContent(children[i])) return false;
         }
         return true;
+      }
+      function __kotobaOwnLangAttr(node) {
+        var lang = __kotobaAttr(node, 'lang');
+        return lang != null && String(lang).trim() !== '' ? String(lang).trim() : null;
+      }
+      function __kotobaComputedLang(node) {
+        // Mirrors cssom.core/computed-lang exactly: real CSS
+        // inheritance -- the nearest non-blank lang attribute on node
+        // itself or an ancestor wins; a blank lang=\"\" attribute does
+        // NOT count as \"own\" (falls through to the inherited value,
+        // matching own-lang-attr's own blank guard).
+        var current = node;
+        while (current) {
+          var own = __kotobaOwnLangAttr(current);
+          if (own != null) return own;
+          current = current['parent/id'] != null ? __kotobaNodeById(current['parent/id']) : null;
+        }
+        return null;
+      }
+      function __kotobaLangTagSubtags(value) {
+        return String(value).toLowerCase().split('-').filter(function(s) { return s !== ''; });
+      }
+      function __kotobaLangRangeMatchesTag(range, tag) {
+        // Mirrors cssom.core/lang-range-matches-tag? exactly: a real
+        // BCP-47-ish whole-subtag-prefix match, case-insensitive --
+        // :lang(en) matches en/en-US but NOT eng (a raw string prefix
+        // would wrongly match that).
+        var rangeSubtags = __kotobaLangTagSubtags(range);
+        var tagSubtags = __kotobaLangTagSubtags(tag);
+        if (rangeSubtags.length === 0 || rangeSubtags.length > tagSubtags.length) return false;
+        for (var i = 0; i < rangeSubtags.length; i++) {
+          if (rangeSubtags[i] !== tagSubtags[i]) return false;
+        }
+        return true;
+      }
+      function __kotobaUnquoteLangRange(value) {
+        var trimmed = String(value).trim();
+        if (trimmed.length >= 2) {
+          var first = trimmed.charAt(0);
+          var last = trimmed.charAt(trimmed.length - 1);
+          if ((first === '\"' && last === '\"') || (first === \"'\" && last === \"'\")) {
+            return trimmed.slice(1, -1);
+          }
+        }
+        return trimmed;
+      }
+      function __kotobaParseLangRanges(arg) {
+        // Mirrors cssom.core/parse-lang-ranges exactly: comma-separated
+        // ranges (:lang(en, fr) matches if ANY range matches), each
+        // trimmed and quote-stripped independently -- the pseudo-
+        // argument regex itself only trims, never unquotes, matching
+        // cssom's own parser/matcher division of responsibility.
+        if (arg == null) return [];
+        return String(arg).split(',').map(__kotobaUnquoteLangRange).filter(function(s) { return s !== ''; });
+      }
+      function __kotobaLangPseudoMatches(node, arg) {
+        var tag = __kotobaComputedLang(node);
+        if (tag == null) return false;
+        var ranges = __kotobaParseLangRanges(arg);
+        for (var i = 0; i < ranges.length; i++) {
+          if (__kotobaLangRangeMatchesTag(ranges[i], tag)) return true;
+        }
+        return false;
       }
       function __kotobaMatchesSimple(node, simple) {
         if (!node || node['node/type'] !== 'element') return false;
@@ -1381,6 +1468,26 @@
               // the element actually had zero children of any node
               // type.
               if (!__kotobaEmptyPseudoMatches(node)) return false;
+              break;
+            case 'root':
+              // Previously entirely absent (confirmed via grep -- zero
+              // matches), even though the sibling cssom.core already
+              // implements this correctly for real CSS styling. Mirrors
+              // cssom.core's own plain identity check: the candidate
+              // node's own id compared against the snapshot's root id,
+              // no helper function needed.
+              if (!globalThis.__kotobaSnapshot || node['node/id'] !== globalThis.__kotobaSnapshot.root) return false;
+              break;
+            case 'lang':
+              // Previously entirely absent (confirmed via grep -- zero
+              // matches), even though the sibling cssom.core already
+              // implements this correctly for real CSS styling
+              // (own-lang-attr / computed-lang / lang-range-matches-tag?
+              // / parse-lang-ranges / lang-pseudo-matches?). Any
+              // selector using it via a script-facing query always
+              // returned an empty/false result, regardless of the
+              // element's own or inherited lang.
+              if (!__kotobaLangPseudoMatches(node, pseudo.arg)) return false;
               break;
             default:
               return false;

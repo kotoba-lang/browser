@@ -1896,3 +1896,78 @@
         "the FormData constructor loop must special-case <select> instead of falling through to the generic single-value append")
     (is (str/includes? ctor-source "var selectedValues = __kotobaSelectValues(node);"))
     (is (str/includes? ctor-source "for (var si = 0; si < selectedValues.length; si++) this.append(name, selectedValues[si]);"))))
+
+;; ---- :root / :lang() pseudo-classes -- previously entirely absent from
+;; the JS-facing selector engine's __kotobaMatchesSimple switch (confirmed
+;; via grep -- zero `case 'root'`/`case 'lang'` matches), even though the
+;; sibling cssom.core (the real CSS styling engine) already implements
+;; both correctly. Mirrors cssom.core's own semantics exactly: :root is a
+;; plain identity check against the document's synthetic snapshot root
+;; (no helper needed); :lang() walks up via real CSS inheritance
+;; (own-or-nearest-ancestor lang, blank lang="" does NOT count as "own"),
+;; then matches via a whole-subtag-prefix comparison (case-insensitive,
+;; so :lang(en) matches en/en-US but NOT eng), across a comma-separated,
+;; quote-stripped, per-item list of ranges (:lang(en, fr) matches if ANY
+;; range matches). Confirmed via a real Node.js harness (14 scenarios,
+;; including the eng-must-not-match-en negative case and the blank-
+;; lang-falls-through-to-inherited nuance) before touching source. ----
+
+(deftest quickjs-wasm-webapi-shim-selector-engine-supports-root-and-lang-pseudo-classes
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "function __kotobaOwnLangAttr(node)"))
+    (is (str/includes? source "function __kotobaComputedLang(node)"))
+    (is (str/includes? source "function __kotobaLangTagSubtags(value)"))
+    (is (str/includes? source "function __kotobaLangRangeMatchesTag(range, tag)"))
+    (is (str/includes? source "function __kotobaUnquoteLangRange(value)"))
+    (is (str/includes? source "function __kotobaParseLangRanges(arg)"))
+    (is (str/includes? source "function __kotobaLangPseudoMatches(node, arg)"))
+    (is (str/includes? source "case 'root':"))
+    (is (str/includes? source "if (!globalThis.__kotobaSnapshot || node['node/id'] !== globalThis.__kotobaSnapshot.root) return false;"))
+    (is (str/includes? source "case 'lang':"))
+    (is (str/includes? source "if (!__kotobaLangPseudoMatches(node, pseudo.arg)) return false;"))
+    (is (str/includes? source "current = current['parent/id'] != null ? __kotobaNodeById(current['parent/id']) : null;")
+        "computed-lang ancestor walk must prefer the direct parent/id property over the slower __kotobaParentNode scan")
+    (is (str/includes? source "if (rangeSubtags.length === 0 || rangeSubtags.length > tagSubtags.length) return false;")
+        "must be a whole-subtag-prefix match, not a raw string prefix (en must not match eng)")))
+
+;; ---- Selector tokenizer paren-depth tracking -- discovered while
+;; verifying :lang()'s own comma-separated-ranges argument end to end
+;; through matches()/querySelectorAll() (a real Node.js harness proved
+;; ':lang(de, fr)' silently split into two bogus combinator-joined
+;; simple selectors -- ':lang(de,' and 'fr)' -- neither of which could
+;; ever match anything). __kotobaSelectorTokens tracked bracketDepth for
+;; [attr] selectors but never tracked paren depth, so ANY whitespace
+;; inside a functional pseudo-class argument (not just :lang()'s own
+;; comma lists -- also e.g. ':nth-child(2n + 1)' with spaces around the
+;; operator) was wrongly treated as a top-level combinator boundary. ----
+
+(deftest quickjs-wasm-webapi-shim-selector-tokenizer-tracks-paren-depth
+  (let [source quickjs-wasm/webapi-shim-source]
+    (is (str/includes? source "var parenDepth = 0;"))
+    (is (str/includes? source "} else if (ch === '(') {"))
+    (is (str/includes? source "parenDepth += 1;"))
+    (is (str/includes? source "} else if (ch === ')') {"))
+    (is (str/includes? source "parenDepth = Math.max(0, parenDepth - 1);"))
+    (is (str/includes? source "} else if (ch === '>' && bracketDepth === 0 && parenDepth === 0) {"))
+    (is (str/includes? source "} else if (/\\s/.test(ch) && bracketDepth === 0 && parenDepth === 0) {"))))
+
+;; ---- A sibling instance of the exact same paren-depth bug, found by
+;; the same real-QuickJS round-trip failure -- __kotobaSplitSelectorList
+;; (the top-level comma-separated SELECTOR LIST splitter used by
+;; matches()/querySelector(), a distinct function from the tokenizer
+;; above) ALSO never tracked paren depth, so a comma inside a functional
+;; pseudo-class argument (e.g. \":lang(de, fr)\") was wrongly treated as
+;; a selector-list boundary -- splitting one selector into two malformed
+;; halves that could never match. Confirmed via a real Node.js harness
+;; (6 scenarios) before touching source. ----
+
+(deftest quickjs-wasm-webapi-shim-selector-list-splitter-tracks-paren-depth
+  (let [source quickjs-wasm/webapi-shim-source
+        fn-idx (.indexOf source "function __kotobaSplitSelectorList(")
+        fn-source (subs source fn-idx (+ fn-idx 1400))]
+    (is (str/includes? fn-source "var parenDepth = 0;"))
+    (is (str/includes? fn-source "} else if (ch === '(') {"))
+    (is (str/includes? fn-source "parenDepth += 1;"))
+    (is (str/includes? fn-source "} else if (ch === ')') {"))
+    (is (str/includes? fn-source "parenDepth = Math.max(0, parenDepth - 1);"))
+    (is (str/includes? fn-source "} else if (ch === ',' && bracketDepth === 0 && parenDepth === 0) {"))))
