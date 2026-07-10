@@ -978,14 +978,32 @@
       }
       function __kotobaParseSimpleSelector(selector) {
         selector = String(selector || '').trim();
-        var attrPattern = /\\[\\s*([A-Za-z_][-A-Za-z0-9_]*)\\s*(?:(~=|\\|=|\\^=|\\$=|\\*=|=)\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\]\\s]+)))?\\s*\\]/g;
+        // Trailing group 6 ([iIsS]) is the CSS Selectors Level 4
+        // case-sensitivity flag (e.g. '[type=\"text\" i]') -- previously
+        // absent entirely, so any selector using it failed to match the
+        // whole attribute clause (the ']' never followed the value
+        // directly) and the constraint was silently dropped instead of
+        // merely case-folded. Mirrors cssom.core's parse-attribute-
+        // selector exactly: the flag is nested INSIDE the operator+value
+        // optional group (a bare presence selector like '[disabled]' has
+        // no flag position at all), and REQUIRES at least one real
+        // whitespace char ('\\s+', not '\\s*') before it so an unquoted
+        // value's own trailing 'i'/'s' character (e.g. '[data-x=abcs]')
+        // can never be misread as a whitespace-less flag.
+        var attrPattern = /\\[\\s*([A-Za-z_][-A-Za-z0-9_]*)\\s*(?:(~=|\\|=|\\^=|\\$=|\\*=|=)\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\]\\s]+))(?:\\s+([iIsS]))?)?\\s*\\]/g;
         var attrs = [];
         var attrMatch;
         while ((attrMatch = attrPattern.exec(selector)) !== null) {
           attrs.push({
             name: attrMatch[1],
             operator: attrMatch[2] || null,
-            value: attrMatch[3] || attrMatch[4] || attrMatch[5] || null
+            value: attrMatch[3] || attrMatch[4] || attrMatch[5] || null,
+            // Mirrors cssom.core's :attr/case-insensitive? exactly: true
+            // only for i/I -- s/S is the explicit, already-default
+            // case-SENSITIVE behavior and needs no special handling
+            // beyond parsing successfully (which the regex above alone
+            // now does).
+            caseInsensitive: attrMatch[6] === 'i' || attrMatch[6] === 'I'
           });
         }
         var withoutAttrs = selector.replace(attrPattern, '');
@@ -1364,6 +1382,10 @@
           if (actual == null) return false;
           actual = String(actual);
           var expected = String(attr.value == null ? '' : attr.value);
+          if (attr.caseInsensitive) {
+            actual = actual.toLowerCase();
+            expected = expected.toLowerCase();
+          }
           switch (attr.operator) {
             case null:
               break;

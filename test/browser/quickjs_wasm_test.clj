@@ -2036,3 +2036,29 @@
     (is (str/includes? source "function __kotobaHasGroupMatches(node, group)"))
     (is (str/includes? source "case 'has':"))
     (is (str/includes? source "if (!__kotobaHasGroupMatches(node, __kotobaParseHasGroup(pseudo.arg))) return false;"))))
+
+;; ---- Attribute selector case-insensitivity flag ([attr=val i]) -- the
+;; attrPattern regex previously had no flag capture group at all and
+;; required ']' immediately after the value, so '[type="text" i]' failed
+;; to match the whole attribute clause -- the constraint was silently
+;; DROPPED entirely (matching any value), not merely case-folded. Mirrors
+;; cssom.core's parse-attribute-selector exactly: the flag is nested
+;; INSIDE the operator+value optional group (a bare '[disabled]'
+;; presence selector has no flag position at all) and requires at least
+;; one real whitespace char ('\s+', not '\s*') before it so an unquoted
+;; value's own trailing 'i'/'s' character (e.g. '[data-x=abcs]') can
+;; never be misread as a whitespace-less flag. true only for i/I -- s/S
+;; is the explicit, already-default case-SENSITIVE behavior. Applies to
+;; every operator uniformly (=, ~=, ^=, $=, *=, |=), not just '='.
+;; Confirmed via a real Node.js harness (14 scenarios, including the
+;; abcs false-positive guard) before touching source. ----
+
+(deftest quickjs-wasm-webapi-shim-attribute-selector-supports-case-insensitivity-flag
+  (let [source quickjs-wasm/webapi-shim-source
+        fn-idx (.indexOf source "function __kotobaParseSimpleSelector(selector)")
+        fn-source (subs source fn-idx (+ fn-idx 2400))]
+    (is (str/includes? fn-source "(?:\\s+([iIsS]))?)?\\s*\\]/g;"))
+    (is (str/includes? fn-source "caseInsensitive: attrMatch[6] === 'i' || attrMatch[6] === 'I'"))
+    (is (str/includes? source "if (attr.caseInsensitive) {"))
+    (is (str/includes? source "actual = actual.toLowerCase();"))
+    (is (str/includes? source "expected = expected.toLowerCase();"))))
