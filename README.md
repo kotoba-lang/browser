@@ -82,6 +82,12 @@ Surface input is reduced through data actions such as `:app/launch`,
 into one pointer/keyboard vocabulary before entering the WASM guest, preserving
 pointer metadata such as `pointerId`, `pointerType`, `isPrimary`, and pressure
 when the host supplies it.
+
+`browser.desktop-backend` is the versioned, OS-neutral boundary for using this
+surface as the aiueos desktop. It snapshots the existing retained draw ops into
+atomic frames, routes normalized host input back through `browser.input`, and
+emits clipboard/file-picker effects only after an explicit permission-broker
+decision. See [ADR 0002](docs/adr/0002-browser-desktop-backend.md).
 `browser.document-input` applies the same canonical text, selection, keyboard
 editing, IME composition, pointer hover/down/up/cancel, and select-change events
 to document-scoped form controls, dispatching `keydown`/`keyup` listeners,
