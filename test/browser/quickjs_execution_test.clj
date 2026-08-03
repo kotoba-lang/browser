@@ -1783,7 +1783,14 @@
                                        :value "color: red; padding: 4px"}]})})
         state (execution/evaluate! state {:source "document.querySelector('#note').setAttribute('style', 'color: red')"})]
     (is (= [true] (mapv :ok? (:capability/results state))))
-    (is (= {:color "red" :padding 4}
+    (is (= {:color "red" :padding 4
+                            ;; `padding: 4px` also expands to its four
+                            ;; per-side longhands since kotoba-lang/cssom
+                            ;; gained a per-side box model (real CSS's
+                            ;; 1-to-4 value rule), which is what makes the
+                            ;; UA stylesheet's one-axis rules expressible.
+                            :padding-top 4 :padding-right 4
+                            :padding-bottom 4 :padding-left 4}
            (get-in state [:document :nodes note :attrs :style-inline])))
     (is (= "red" (get-in state [:document :nodes note :attrs :style/color])))
     (is (= 4 (get-in state [:document :nodes note :attrs :style/padding])))))

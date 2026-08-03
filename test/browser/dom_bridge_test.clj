@@ -463,7 +463,14 @@
                                                            :attr "style"})
         removed-attrs (get-in removed [:document :nodes note :attrs])]
     (is (= "color: red; padding: 4px" (:style attrs)))
-    (is (= {:color "red" :padding 4} (:style-inline attrs)))
+    (is (= {:color "red" :padding 4
+                            ;; `padding: 4px` also expands to its four
+                            ;; per-side longhands since kotoba-lang/cssom
+                            ;; gained a per-side box model (real CSS's
+                            ;; 1-to-4 value rule), which is what makes the
+                            ;; UA stylesheet's one-axis rules expressible.
+                            :padding-top 4 :padding-right 4
+                            :padding-bottom 4 :padding-left 4} (:style-inline attrs)))
     (is (= "red" (:style/color attrs)))
     (is (= 4 (:style/padding attrs)))
     (is (not (contains? removed-attrs :style)))
@@ -495,7 +502,14 @@
                                                            :node/id note
                                                            :attr "style"})
         removed-attrs (get-in removed [:document :nodes note :attrs])]
-    (is (= {:color "red" :padding 4} (:style-inline attrs))
+    (is (= {:color "red" :padding 4
+                            ;; `padding: 4px` also expands to its four
+                            ;; per-side longhands since kotoba-lang/cssom
+                            ;; gained a per-side box model (real CSS's
+                            ;; 1-to-4 value rule), which is what makes the
+                            ;; UA stylesheet's one-axis rules expressible.
+                            :padding-top 4 :padding-right 4
+                            :padding-bottom 4 :padding-left 4} (:style-inline attrs))
         "the real, uncorrupted values -- not \"red !important\"")
     (is (= #{:color} (:style-inline-important attrs)))
     (is (not (contains? removed-attrs :style-inline-important)))))

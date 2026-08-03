@@ -4381,7 +4381,14 @@
                                            :result :ok
                                            :results [{:result :ok}]})
         attrs (get-in s [:browser.session/page :browser/document :nodes note :attrs])]
-    (is (= {:color "red" :padding 4} (:style-inline attrs)))
+    (is (= {:color "red" :padding 4
+                            ;; `padding: 4px` also expands to its four
+                            ;; per-side longhands since kotoba-lang/cssom
+                            ;; gained a per-side box model (real CSS's
+                            ;; 1-to-4 value rule), which is what makes the
+                            ;; UA stylesheet's one-axis rules expressible.
+                            :padding-top 4 :padding-right 4
+                            :padding-bottom 4 :padding-left 4} (:style-inline attrs)))
     (is (= "blue" (:style/color attrs)) "author important still wins over inline normal after script style mutation")
     (is (= 4 (:style/padding attrs)))
     (is (= 6 (:style/margin attrs)))))
