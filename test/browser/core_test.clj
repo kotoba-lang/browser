@@ -157,7 +157,11 @@
                                     ops))
         borders (filter :border? ops)]
     (is (= 14 (:x visible-node)) "document/main padding plus margin offsets the node box")
-    (is (= 120 (:w visible-node)))
+    (is (= 140 (:w visible-node))
+        "`width: 120px; padding: 10px` is 140px wide: kotoba-lang/cssom now
+         reads a declared width as the CONTENT width (real CSS's default
+         `box-sizing: content-box`) instead of the border box. This read
+         120 while the engine had that backwards")
     (is (= "#114477" (:color visible-text)))
     (is (= 18 (:font-size visible-text)))
     (is (= 4 (count borders)))
@@ -180,7 +184,9 @@
                                      (= panel (:id %)))
                                (:browser/draw-ops page)))]
     (is (= "#ddeeff" (:color rect)))
-    (is (= 120 (:w node-op)))))
+    (is (= 128 (:w node-op))
+        "`width: 120px; padding: 4px` is 128px wide -- content-box, as
+         above")))
 
 (deftest css-flex-layout-projects-row-and-column-into-draw-ops
   (let [page (browser/load-html
