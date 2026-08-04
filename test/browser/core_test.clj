@@ -142,11 +142,21 @@
     (is (= 1 (:w caret-op)))))
 
 (deftest css-box-and-text-styles-project-into-draw-ops
+  ;; The fixtures below say `border-style: solid` where they used to say
+  ;; only `border-width: 2px`. That is not a cosmetic edit: a bare
+  ;; `border-width` draws NOTHING in a real browser, because the used
+  ;; border width resolves through `border-style`, whose initial value is
+  ;; `none`. Measured in Chrome, `<div style="border-width: 1px">` reports
+  ;; `border-top-width: 0px`. kotoba-lang/cssom used to honour the bare
+  ;; width, so these tests were asserting four border rects that no browser
+  ;; would paint -- they passed against the engine and would have failed
+  ;; against the thing the engine is imitating. Declaring the style keeps
+  ;; each test testing borders, which is what it was for.
   (let [page (browser/load-html
               {:url "kotoba://box"
                :viewport [320 240]
                :html "<main><p id=\"visible\" class=\"box\">Visible</p><p id=\"hidden\">Hidden</p></main>"
-               :css ".box { color: #114477; font-size: 18px; width: 120px; margin: 6px; padding: 8px; border-width: 2px; border-color: #ff0000; background: #eeeeee } #hidden { display: none }"})
+               :css ".box { color: #114477; font-size: 18px; width: 120px; margin: 6px; padding: 8px; border-style: solid; border-width: 2px; border-color: #ff0000; background: #eeeeee } #hidden { display: none }"})
         ops (:browser/draw-ops page)
         visible-node (first (filter #(and (= :node (:draw/op %))
                                           (= :p (:tag %))
@@ -284,7 +294,7 @@
               {:url "kotoba://sizing"
                :viewport [320 240]
                :html "<main><section id=\"min\"></section><section id=\"max\"></section><section id=\"border\"><span id=\"child\"></span></section></main>"
-               :css "#min { width: 40px; min-width: 70px; padding: 4px; border-width: 2px } #max { width: 120px; max-width: 80px } #border { box-sizing: border-box; width: 80px; padding: 10px; border-width: 2px } #child { display: block; width: 56px; height: 10px }"})
+               :css "#min { width: 40px; min-width: 70px; padding: 4px; border-style: solid; border-width: 2px } #max { width: 120px; max-width: 80px } #border { box-sizing: border-box; width: 80px; padding: 10px; border-style: solid; border-width: 2px } #child { display: block; width: 56px; height: 10px }"})
         document (:browser/document page)
         ops (:browser/draw-ops page)
         by-selector (fn [selector]
@@ -418,7 +428,7 @@
 (deftest refreshed-page-recomputes-css-and-clears-stale-computed-style
   (let [page (browser/load-html
               {:url "kotoba://mutate"
-               :css ".note { color: blue; margin: 6px } .active { border-width: 2px }"
+               :css ".note { color: blue; margin: 6px } .active { border-style: solid; border-width: 2px }"
                :html "<main><p id=\"note\" class=\"note active\" style=\"padding: 3px\">Note</p></main>"})
         document (:browser/document page)
         note (bridge/query-selector document "#note")
