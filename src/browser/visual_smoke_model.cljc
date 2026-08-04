@@ -30,9 +30,18 @@
 ;; overflow at all, emitted no clip, and the "scroll clipped content" case
 ;; this page exists to exercise was never once exercised -- unnoticed
 ;; because nothing here asserted on the ops.
+;;
+;; The section's `height` went 28px -> 20px on 2026-08-04, and the clip it
+;; produces is unchanged at 28: cssom.layout's block axis now applies
+;; `box-sizing: content-box` the way the inline axis already did, so a
+;; declared height is the CONTENT height and this section's own 4px padding
+;; adds outside it (20 + 4 + 4 = 28). That is what a real browser reports
+;; for the same markup -- measured in Brave, `div{height:100px;padding:10px}`
+;; is 120px tall. The number here moved so that the FIXTURE keeps meaning
+;; what it was written to mean: a 28px clip with taller content inside it.
 (def page
   {:url "kotoba://smoke"
-   :html "<main style=\"background: #ffffff; padding: 16px\"><h1>Browser document</h1><p style=\"color: #2057a7\">kotoba:dom committed</p><section scroll-top=\"8\" style=\"overflow: auto; height: 28px; width: 220px; background: #eef3ff; padding: 4px\"><p>Scroll clipped content</p></section></main>"})
+   :html "<main style=\"background: #ffffff; padding: 16px\"><h1>Browser document</h1><p style=\"color: #2057a7\">kotoba:dom committed</p><section scroll-top=\"8\" style=\"overflow: auto; height: 20px; width: 220px; background: #eef3ff; padding: 4px\"><p>Scroll clipped content</p></section></main>"})
 
 (defn surface-model
   []
