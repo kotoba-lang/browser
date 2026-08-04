@@ -6,7 +6,16 @@
    points and generated JS modules exist (and are non-trivially sized, and
    contain the markers a real shadow-cljs compile of `browser.smoke` /
    `browser.smoke-webgpu` would emit) after compilation, rather than
-   driving an actual browser."
+   driving an actual browser.
+
+   What this therefore does NOT check: anything the smoke page renders. A
+   bundle of the right size with the right symbols in it can still paint a
+   blank frame, and for as long as this was the only \"visual smoke\" it
+   painted a wrong one — invisible heading text, and a scrolling section
+   that emitted no clip (see browser.visual-smoke-model-test, which asserts
+   on the draw ops and is where a render regression is actually caught).
+   Keep the two apart: this gate answers \"did it build\",
+   visual-smoke-model-test answers \"did it draw the right thing\"."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]))
 

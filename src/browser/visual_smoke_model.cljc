@@ -21,9 +21,18 @@
    [:p "WASM-only UI surface"]
    [:p "Rendered through kotoba:dom WebGL host"]])
 
+;; `overflow` is CSS and `scroll-top` is a runtime attribute, and the two
+;; must be written that way round: cssom.layout reads `:overflow` only out
+;; of the style map (its own comment: "exclusively a CSS property in real
+;; HTML/CSS -- nothing sets it as an attribute"), while `scroll-top` really
+;; is host state and really is read as an attribute. This fixture carried
+;; `overflow="auto"` as an ATTRIBUTE until 2026-08-04, so the engine saw no
+;; overflow at all, emitted no clip, and the "scroll clipped content" case
+;; this page exists to exercise was never once exercised -- unnoticed
+;; because nothing here asserted on the ops.
 (def page
   {:url "kotoba://smoke"
-   :html "<main style=\"background: #ffffff; padding: 16px\"><h1>Browser document</h1><p style=\"color: #2057a7\">kotoba:dom committed</p><section overflow=\"auto\" scroll-top=\"8\" style=\"height: 28px; width: 220px; background: #eef3ff; padding: 4px\"><p>Scroll clipped content</p></section></main>"})
+   :html "<main style=\"background: #ffffff; padding: 16px\"><h1>Browser document</h1><p style=\"color: #2057a7\">kotoba:dom committed</p><section scroll-top=\"8\" style=\"overflow: auto; height: 28px; width: 220px; background: #eef3ff; padding: 4px\"><p>Scroll clipped content</p></section></main>"})
 
 (defn surface-model
   []
