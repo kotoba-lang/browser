@@ -86,7 +86,8 @@
       (is (= (select-keys section [:x :y :w :h])
              (select-keys push [:x :y :w :h])))
       (is (= 28 (:h push))
-          "the fixture's declared height — a clip taller than this clips nothing"))
+          "the fixture's section BORDER box (20px declared height + its own
+           4px padding on each side) — a clip taller than this clips nothing"))
     (testing "the clipped content is taller than the clip, so the case is a real one"
       (let [inner (->> ops
                        (filter #(and (= :rect (:draw/op %)) (= :p (:tag %))))
