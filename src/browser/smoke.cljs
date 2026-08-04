@@ -25,10 +25,17 @@
   (let [gl-canvas (.getElementById js/document "kotoba-gl")
         text-canvas (.getElementById js/document "kotoba-text")
         [width height] model/viewport
+        ;; The theme goes to the HOST as well as the session. The session's
+        ;; copy reaches browser.core's page render; the host's copy reaches
+        ;; the only code that actually paints pixels, which until dom-gpu
+        ;; gained a :theme hook had no way to be told anything and used
+        ;; cssom.layout's dark app-chrome default. That is why this page's
+        ;; <h1> painted #e6ebf5 on its own #ffffff background.
         host (webgl/create-host! {:gl-canvas gl-canvas
                                   :text-canvas text-canvas
                                   :width width
-                                  :height height})
+                                  :height height
+                                  :theme model/theme})
         s (session/new-session {:host host
                                 :viewport model/viewport
                                 :theme model/theme
