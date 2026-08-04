@@ -20,6 +20,7 @@
             [browser.visual-smoke-model :as model]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [kotoba.wasm.dom :as dom]
             [kotoba.wasm.host :as host]))
 
 (defn- smoke-session []
@@ -36,7 +37,7 @@
 
 (deftest smoke-model-is-cljc-and-committable
   (let [[s recorded] (smoke-session)
-        text (-> s :browser.session/page :browser/document kotoba.wasm.dom/text-content)]
+        text (-> s :browser.session/page :browser/document dom/text-content)]
     (is (= [760 460] model/viewport))
     (is (str/includes? text "Browser document"))
     (is (str/includes? text "kotoba:dom committed"))
