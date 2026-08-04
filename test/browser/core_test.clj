@@ -1,7 +1,7 @@
 (ns browser.core-test
   (:require [browser.core :as browser]
             [browser.dom-bridge :as bridge]
-            [clojure.test :refer [deftest is]]
+            [clojure.test :refer [deftest is testing]]
             [kotoba.wasm.abi :as abi]
             [kotoba.wasm.dom :as dom]))
 
@@ -513,3 +513,42 @@
         refreshed (browser/refresh-page page {})]
     (is (= "#000000" (box-color refreshed))
         "refresh-page must still evaluate prefers-color-scheme against the real dark color-scheme")))
+
+(deftest document-style-elements-are-applied-test
+  (testing "a page that carries its own <style> is styled by it"
+    ;; Before 2026-08-04 `load-html` took CSS only out-of-band, so a
+    ;; self-contained page loaded with zero rules and laid out on defaults.
+    ;; Measured on kobo's console: 467 draw ops, :browser/css-rules empty,
+    ;; the entire design system unread inside a <style> element.
+    (let [r (browser/load-html
+             {:url "kotoba://t"
+              :html (str "<html><head><style>.a{color:#ff0000}</style></head>"
+                         "<body><p class=\"a\">hi</p></body></html>")})]
+      (is (= 1 (count (:browser/css-rules r))))
+      (is (= "#ff0000"
+             (some #(when (= "hi" (:text %)) (:color %)) (:browser/draw-ops r))))))
+
+  (testing "several <style> elements all count, in document order"
+    (let [r (browser/load-html
+             {:url "kotoba://t"
+              :html (str "<html><head><style>.a{color:#ff0000}</style>"
+                         "<style>.b{color:#00ff00}</style></head>"
+                         "<body><p class=\"b\">hi</p></body></html>")})]
+      (is (= 2 (count (:browser/css-rules r))))
+      (is (= "#00ff00"
+             (some #(when (= "hi" (:text %)) (:color %)) (:browser/draw-ops r))))))
+
+  (testing "the document's own rules win over out-of-band :css at equal specificity"
+    (let [r (browser/load-html
+             {:url "kotoba://t"
+              :css ".a{color:#0000ff}"
+              :html "<html><head><style>.a{color:#ff0000}</style></head><body><p class=\"a\">hi</p></body></html>"})]
+      (is (= "#ff0000"
+             (some #(when (= "hi" (:text %)) (:color %)) (:browser/draw-ops r))))))
+
+  (testing "a page with no <style> still loads, and out-of-band :css still works"
+    (is (empty? (:browser/css-rules
+                 (browser/load-html {:url "kotoba://t" :html "<p>x</p>"}))))
+    (is (= 1 (count (:browser/css-rules
+                     (browser/load-html {:url "kotoba://t" :css ".a{color:red}"
+                                         :html "<p>x</p>"})))))))
