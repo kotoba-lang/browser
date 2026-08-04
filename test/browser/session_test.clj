@@ -4341,7 +4341,7 @@
 (deftest script-document-state-recomputes-css-and-clears-stale-style
   (let [h (host/recording-host)
         page (browser/load-html {:url "kotoba://mutate"
-                                 :css ".note { color: blue; margin: 6px } .active { border-width: 2px }"
+                                 :css ".note { color: blue; margin: 6px } .active { border-style: solid; border-width: 2px }"
                                  :html "<main><p id=\"note\" class=\"note active\" style=\"padding: 3px\">Note</p></main>"})
         note (bridge/query-selector (:browser/document page) "#note")
         s (session/new-session {:host h
