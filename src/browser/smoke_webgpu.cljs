@@ -22,7 +22,10 @@
     (-> (webgpu/create-host! {:gpu-canvas gpu-canvas
                               :text-canvas text-canvas
                               :width width
-                              :height height})
+                              :height height
+                              ;; see browser.smoke for why the host needs
+                              ;; the theme and not only the session.
+                              :theme model/theme})
         (.then
          (fn [host]
            (let [s (session/new-session {:host host
