@@ -8,6 +8,35 @@
             [htmldom.core :as html]
             [kotoba.wasm.dom :as dom]))
 
+(def light-page-theme
+  "The default theme for a WEB PAGE, as opposed to an app surface.
+
+   `cssom.layout/default-theme` is a DARK theme (`:fg \"#e6ebf5\"` on
+   `:bg \"#121724\"`) because cssom came out of kotoba-lang/wasm-ui, where
+   it painted application chrome. A web page is a different thing: with no
+   author `color` and no author `background`, every real browser paints
+   black text on a white canvas — that is the UA stylesheet's `CanvasText`
+   on `Canvas` in the default light color-scheme, and it is what the
+   conformance oracle reports for a bare document.
+
+   Rendering pages with the app-surface default made any page that sets its
+   own light background — i.e. most of the web — paint near-white text on
+   it. The repo's own visual smoke page was exactly that case: a `<main>`
+   with `background: #ffffff` whose `<h1>` painted `#e6ebf5`, invisible,
+   for as long as the smoke existed, because nothing asserted on a single
+   painted op (see visual_smoke_model_test).
+
+   A page that asks for `color-scheme: dark` still gets the dark theme; an
+   explicit `:theme` from the embedder still wins over both."
+  (assoc layout/default-theme :fg "#000000" :bg "#ffffff"))
+
+(defn- page-theme
+  [theme color-scheme]
+  (or theme
+      (if (= "dark" (some-> color-scheme name))
+        layout/default-theme
+        light-page-theme)))
+
 (defn render-document
   [{:keys [document css-rules viewport theme color-scheme] :or {viewport [800 600]}}]
   (let [document (cond-> document
@@ -16,7 +45,7 @@
         [ops document] (dom/consume-ops document)
         tree (dom/tree document)
         draw-ops (layout/draw-ops tree {:width (first viewport)
-                                        :theme theme})]
+                                        :theme (page-theme theme color-scheme)})]
     {:browser/document document
      :browser/tree tree
      :browser/title (dom-bridge/document-title document)
