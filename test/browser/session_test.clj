@@ -716,6 +716,89 @@
                                                             :y y})]
     (is (= overlay (-> clicked :browser.session/history last :node/id)))))
 
+;; ---- an element's BOX is not always where it is clicked ----
+;;
+;; cssom.layout attaches a `:hit` rect list to a `:node` op wherever a
+;; browser's reported box and its hit region are different rectangles.
+;; The clearest of the three is a WRAPPED inline box: measured in Brave,
+;; the <b> of `<p style="width:200px">alpha beta gamma <b>delta epsilon
+;; </b> zeta eta</p>` has client rects [119,1,33.7,18] and [0,22,46.8,18]
+;; and a bounding rect of [0,1,152.7,39], and `elementFromPoint(80,4)` --
+;; inside that union, inside neither fragment -- answers `p`. node-at
+;; read only the box, so a click on that ragged corner fired the link's
+;; handler where a real browser fires the paragraph's.
+
+(deftest document-click-uses-a-nodes-hit-region-not-its-box
+  (let [h (host/recording-host)
+        loaded (-> (session/new-session {:host h})
+                   (session/load-html!
+                    {:url "kotoba://hit-region"
+                     :html "<main><p id=\"para\" style=\"width: 200px\">alpha beta gamma <a id=\"lnk\" href=\"#\">delta epsilon</a> zeta eta</p></main>"}))
+        document (get-in loaded [:browser.session/page :browser/document])
+        para (bridge/query-selector document "#para")
+        lnk (bridge/query-selector document "#lnk")
+        document (-> document
+                     (dom/add-event-listener para "click" 91)
+                     (dom/add-event-listener lnk "click" 92))
+        loaded (session/commit-document! loaded document)
+        op (some #(when (and (= :node (:draw/op %)) (= lnk (:id %))) %)
+                 (get-in loaded [:browser.session/page :browser/draw-ops]))
+        hit (:hit op)
+        click-at (fn [x y]
+                   (-> loaded
+                       (session/apply-document-input-event!
+                        {:event/type :pointer/click :x x :y y})
+                       :browser.session/history last :node/id))
+        ;; the ragged corner: the union's left half on the FIRST line,
+        ;; which the second fragment covers a row lower and the first
+        ;; fragment starts to the right of
+        [f1 f2] hit]
+    (is (= 2 (count hit))
+        "sanity: the link really did wrap, so its box is a union of two")
+    (is (= lnk (click-at (+ (:x f1) 2) (+ (:y f1) 2))) "inside the first fragment")
+    (is (= lnk (click-at (+ (:x f2) 2) (+ (:y f2) 2))) "inside the second")
+    (is (= para (click-at (+ (:x f2) 2) (+ (:y f1) 2)))
+        "inside the union and inside NEITHER fragment: the paragraph, which
+         is what elementFromPoint answers there -- this used to be the
+         link")))
+
+(deftest document-click-passes-through-a-node-that-is-not-a-hit-candidate
+  ;; `:hit []` -- what a <tr>/<tbody> carries. Measured in Brave with
+  ;; `background` on the <tbody> AND both <tr>s and `border-spacing: 6px`
+  ;; opening real gaps, `elementsFromPoint` over every point of that table
+  ;; returns `td, table` inside a cell and `table` alone everywhere else:
+  ;; a row's painted background IS hit, as the table.
+  (let [h (host/recording-host)
+        loaded (-> (session/new-session {:host h})
+                   (session/load-html!
+                    {:url "kotoba://hit-row"
+                     :html "<main><table id=\"tbl\"><tr id=\"row\"><td>a</td><td>b</td></tr></table></main>"}))
+        document (get-in loaded [:browser.session/page :browser/document])
+        tbl (bridge/query-selector document "#tbl")
+        row (bridge/query-selector document "#row")
+        document (-> document
+                     (dom/add-event-listener tbl "click" 93)
+                     (dom/add-event-listener row "click" 94))
+        loaded (session/commit-document! loaded document)
+        ops (get-in loaded [:browser.session/page :browser/draw-ops])
+        row-op (some #(when (and (= :node (:draw/op %)) (= row (:id %))) %) ops)
+        cells (filterv #(and (= :node (:draw/op %)) (= :td (:tag %))) ops)
+        ;; the border-spacing gap BETWEEN the two cells: inside the row's
+        ;; box, inside no cell -- which is exactly where the corpus's two
+        ;; table cases sampled and got `tbody` back
+        gap-x (/ (+ (+ (:x (first cells)) (:w (first cells)))
+                    (:x (second cells)))
+                 2)
+        clicked (session/apply-document-input-event!
+                 loaded {:event/type :pointer/click
+                         :x gap-x
+                         :y (+ (:y row-op) 1)})]
+    (is (= [] (:hit row-op)) "the row declares itself no hit candidate")
+    (is (every? #(not (<= (:x %) gap-x (+ (:x %) (:w %)))) cells)
+        "sanity: the sampled point really is in no cell")
+    (is (= tbl (-> clicked :browser.session/history last :node/id))
+        "so the click belongs to the table, not the row whose box covers it")))
+
 (deftest document-click-hit-test-keeps-transparent-overlay-targetable
   (let [h (host/recording-host)
         loaded (-> (session/new-session {:host h})
