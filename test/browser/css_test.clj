@@ -133,9 +133,22 @@
     (is (nil? (get-in (attrs "hidden-required") [:style/border-color])))
     (is (nil? (get-in (attrs "hidden-required") [:style/height])))
     (is (nil? (get-in (attrs "hidden-required") [:style/width])))
-    (is (nil? (get-in (attrs "file-required") [:style/padding])))
+    ;; `nil` was the proxy this test used for "the :required/:invalid rule
+    ;; did not match", and it stopped being a safe one on 2026-08-06, when
+    ;; cssom's UA stylesheet grew
+    ;; `input[type="file"] { height: 27px; padding: 0 }` -- measured in
+    ;; Brave 151, a file input is 27 tall with no padding, where this
+    ;; engine gave it a text field's 21 and its 1px/2px. So these two ask
+    ;; the question the test is actually about: not "did anything write
+    ;; this property" but "did the AUTHOR's rule write it". The other two
+    ;; stay `nil` because no UA rule touches them.
+    (is (not= 4 (get-in (attrs "file-required") [:style/padding]))
+        "a file input with a value is :valid, so `input:required
+         { padding: 4px }` must not apply -- the 0 here is the UA sheet's")
     (is (nil? (get-in (attrs "file-required") [:style/border-color])))
-    (is (nil? (get-in (attrs "file-required") [:style/height])))
+    (is (not= 24 (get-in (attrs "file-required") [:style/height]))
+        "...and neither does `input:invalid { height: 24px }`; the 27 is
+         the UA sheet's own box")
     (is (nil? (get-in (attrs "file-required") [:style/width])))
     (is (nil? (get-in (attrs "readonly-required") [:style/border-color])))
     (is (nil? (get-in (attrs "readonly-required") [:style/height])))
