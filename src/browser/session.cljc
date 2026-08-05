@@ -1383,12 +1383,37 @@
                                                :action-count (count actions)})
         (persist!))))
 
-(defn- point-in-node?
-  [x y op]
+(defn- point-in-rect?
+  [x y r]
   (and (number? x)
        (number? y)
-       (<= (:x op) x (+ (:x op) (:w op)))
-       (<= (:y op) y (+ (:y op) (:h op)))))
+       (<= (:x r) x (+ (:x r) (:w r)))
+       (<= (:y r) y (+ (:y r) (:h r)))))
+
+(defn- point-in-node?
+  "Whether a click at (x,y) lands on this `:node` op.
+
+   Its BOX, unless it declares a HIT REGION. cssom.layout attaches `:hit`
+   -- a vector of rects, `[]` meaning `not a hit-test candidate` -- to
+   every op whose box and hit region are different rectangles, which a
+   browser's own two APIs say they sometimes are: `getBoundingClientRect`
+   on a WRAPPED inline box is the union of its fragments while
+   `elementFromPoint` inside that union and outside every fragment
+   answers the containing block; a block whose lines OVERFLOW it reports
+   the clamped box and is hit outside it, per line; and a table row or
+   row group is never hit at all, painted background or not (all three
+   measured in Brave -- see cssom.layout's ns docstring).
+
+   Reading it rather than re-deriving it is the point: where an element
+   is clicked is the layout engine's answer, and this used to route a
+   click on the ragged edge of a two-line link to the link, a click on a
+   paragraph's overflowing text to nothing, and a click in a table's
+   border-spacing gap to the `<tr>`. A clip rect is a separate op stream
+   and is still applied on top by node-at, exactly as before."
+  [x y op]
+  (if-let [hit (:hit op)]
+    (boolean (some #(point-in-rect? x y %) hit))
+    (point-in-rect? x y op)))
 
 (defn- intersect-rect [a b]
   (let [x0 (max (:x a) (:x b))
@@ -1441,8 +1466,12 @@
                           ;; swallowed clicks meant for whatever's visibly
                           ;; underneath it.
                           (not (contains? #{"hidden" "collapse"} (:visibility op)))
+                          ;; point-in-RECT, not point-in-node: a clip is a
+                          ;; plain rectangle with no hit region of its own,
+                          ;; and it applies to whichever region the node
+                          ;; just matched on.
                           (if-let [clip (:hit/clip op)]
-                            (point-in-node? x y clip)
+                            (point-in-rect? x y clip)
                             true)
                           (pred op))
                  (:id op))))))
