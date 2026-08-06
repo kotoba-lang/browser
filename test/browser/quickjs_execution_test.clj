@@ -2214,6 +2214,7 @@
         required (bridge/query-selector (:browser/document page) "#required")
         readonly-required (bridge/query-selector (:browser/document page) "#readonly-required")
         readonly (bridge/query-selector (:browser/document page) "#readonly")
+        file-required (bridge/query-selector (:browser/document page) "#file-required")
         select-disabled-selected (bridge/query-selector (:browser/document page) "#select-disabled-selected")
         select-optgroup-disabled (bridge/query-selector (:browser/document page) "#select-optgroup-disabled")
         optgroup-locked (bridge/query-selector (:browser/document page) "#optgroup-locked")
@@ -2307,12 +2308,47 @@
                                        :selector "#select-multiple-empty:valid"}
                                       {:capability :dom/query
                                        :dom/query :query-selector
-                                       :selector "input:hover"}]})})
+                                       :selector "input:hover"}
+                                      ;; The control for the two read-*
+                                      ;; answers that moved: a `readonly`
+                                      ;; text field is `:read-only` on both
+                                      ;; sides of the change, which is what
+                                      ;; says the predicate was rewritten
+                                      ;; and not merely inverted.
+                                      {:capability :dom/query
+                                       :dom/query :query-selector
+                                       :selector "#readonly:read-only"}]})})
         state (execution/evaluate! state {:source "document.querySelector('input:checked')"})]
     (is (= :ok (:result state)))
-    (is (= [checked disabled checked required checked readonly checked required checked fieldset-disabled legend-enabled nil nil nil readonly-required nil nil nil nil select-disabled-selected nil optgroup-locked select-optgroup-disabled nil select-multiple-empty nil nil]
+    ;; Four of the twenty-seven answers changed on 2026-08-06, and all four
+    ;; are cssom's form-state pseudo-classes being corrected against a real
+    ;; browser rather than this suite's expectations moving. Round
+    ;; fifty-one measured the whole table, wrote the fix and REVERTED it
+    ;; because this vector (and `dom_bridge_test`'s
+    ;; `query-selector-supports-form-state-pseudo-classes`, which carries
+    ;; the same reasons per assertion) pinned the old answers. Read out of
+    ;; a real headless Brave 151.1.93.129 over CDP, one probe page per
+    ;; probe, through `Element.matches()`:
+    ;;
+    ;;   position | selector             | was              | is now
+    ;;   ---------|----------------------|------------------|------------------
+    ;;   4        | `input:required`     | `required`       | `file-required`
+    ;;   6        | `input:read-only`    | `readonly`       | `checked`
+    ;;   7        | `input:read-write`   | `checked`        | `required`
+    ;;   13       | `#file-required:required` | `nil`       | `file-required`
+    ;;
+    ;; - `<input type="file" required>` IS `:required` in Brave; cssom
+    ;;   declined it via `validation-barred-control?`, which really bars
+    ;;   only `type="hidden"` (measured: a hidden input is `:optional` even
+    ;;   with the attribute). It precedes `#required` here, so the first
+    ;;   `input:required` match moves.
+    ;; - `<input type="checkbox">` is `:read-only` and NOT `:read-write` in
+    ;;   Brave -- `readonly` applies to twelve text-entry types and a
+    ;;   checkbox is not one. It is the first input in this markup, which
+    ;;   is why both read-* answers move together.
+    (is (= [checked disabled checked file-required checked checked required required checked fieldset-disabled legend-enabled nil file-required nil readonly-required nil nil nil nil select-disabled-selected nil optgroup-locked select-optgroup-disabled nil select-multiple-empty nil nil readonly]
            (mapv :result (:capability/results state))))
-    (is (= (repeat 27 true) (mapv :ok? (:capability/results state))))))
+    (is (= (repeat 28 true) (mapv :ok? (:capability/results state))))))
 
 (deftest quickjs-dom-query-uses-shared-selector-groups
   (let [page (browser/load-html {:url "kotoba://quickjs"

@@ -124,15 +124,51 @@
     (is (= "disabled" (get-in document [:nodes disabled :attrs :id])))
     (is (= "checked" (get-in document [:nodes enabled :attrs :id])))
     (is (= "checked" (get-in document [:nodes checked :attrs :id])))
-    (is (= "required" (get-in document [:nodes required :attrs :id])))
-    (is (= "checked" (get-in document [:nodes optional :attrs :id])))
-    (is (= "readonly" (get-in document [:nodes readonly :attrs :id])))
-    (is (= "checked" (get-in document [:nodes readwrite :attrs :id])))
+    ;; ---- Four answers below changed on 2026-08-06, and every one of them
+    ;; was this suite asserting a browser behaviour that does not exist.
+    ;; cssom's `:read-only`/`:read-write` were two LISTS where real CSS has
+    ;; one predicate and its complement, and `:required`/`:optional` were
+    ;; declining a whole input type. Round fifty-one measured the table,
+    ;; wrote the fix and REVERTED it because these assertions pinned the
+    ;; old answers; this is the round that lands both halves. Each number
+    ;; below is `Element.matches()` read out of a real headless Brave
+    ;; 151.1.93.129 over CDP, one probe page per probe.
+    (is (= "file-required" (get-in document [:nodes required :attrs :id]))
+        ;; Was `"required"`. Measured: `<input type="file" required>` matches
+        ;; `input:required` in Brave -- cssom used to decline it via
+        ;; `validation-barred-control?`, which really bars only
+        ;; `type="hidden"` (measured: `<input type=hidden required>` is
+        ;; `:optional` even with the attribute). The file input precedes
+        ;; `#required` in this markup, so the FIRST match moves.
+        "a required file input is :required, and comes first here")
+    (is (= "disabled" (get-in document [:nodes optional :attrs :id]))
+        ;; Was `"checked"`. Measured: `<input disabled>` matches
+        ;; `input:optional`. Disabling a control takes it out of constraint
+        ;; validation, which is why `:valid`/`:invalid`/`:in-range` keep
+        ;; their disabled test -- but it does not stop it being optional.
+        "a disabled input is :optional, and is the first input here")
+    (is (= "disabled" (get-in document [:nodes readonly :attrs :id]))
+        ;; Was `"readonly"`. Measured: `<input disabled>` matches
+        ;; `input:read-only` -- `:read-only` is `(not :read-write)` over
+        ;; EVERY element, not a second list of controls, so a disabled
+        ;; field (which cannot be typed into) is in it.
+        "a disabled input is :read-only, and is the first input here")
+    (is (= "required" (get-in document [:nodes readwrite :attrs :id]))
+        ;; Was `"checked"` -- i.e. this asserted that a CHECKBOX is
+        ;; `:read-write`. Measured: `<input type="checkbox">` matches
+        ;; `input:read-only` in Brave and not `input:read-write`. The
+        ;; `readonly` attribute applies to twelve text-entry types and a
+        ;; checkbox is not one of them; cssom used to ask "is it an
+        ;; <input> that is not hidden/file", which is every checkbox.
+        "a checkbox is :read-only, so the first :read-write input is #required")
     (is (= "required" (get-in document [:nodes invalid :attrs :id])))
     (is (= "checked" (get-in document [:nodes valid :attrs :id])))
     (is (= "focused" (get-in document [:nodes focus :attrs :id])))
     (is (nil? hidden-readwrite))
-    (is (nil? file-required))
+    (is (= "file-required" (get-in document [:nodes file-required :attrs :id]))
+        ;; Was `nil`. The same measurement as the first one above, asked of
+        ;; the node directly rather than through document order.
+        "Brave reports <input type=file required> as :required")
     (is (nil? file-readwrite))
     (is (= "readonly-number" (get-in document [:nodes readonly-number :attrs :id])))
     (is (= "readonly-required" (get-in document [:nodes readonly-required :attrs :id])))

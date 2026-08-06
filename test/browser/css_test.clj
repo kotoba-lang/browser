@@ -142,9 +142,20 @@
     ;; the question the test is actually about: not "did anything write
     ;; this property" but "did the AUTHOR's rule write it". The other two
     ;; stay `nil` because no UA rule touches them.
-    (is (not= 4 (get-in (attrs "file-required") [:style/padding]))
-        "a file input with a value is :valid, so `input:required
-         { padding: 4px }` must not apply -- the 0 here is the UA sheet's")
+    (is (= 4 (get-in (attrs "file-required") [:style/padding]))
+        ;; Was `(not= 4 ...)`, with the reason "a file input with a value
+        ;; is :valid, so `input:required` must not apply" -- which conflates
+        ;; two pseudo-classes: `:required` asks about the ATTRIBUTE, not
+        ;; about validity. Measured in Brave 151.1.93.129 over CDP on
+        ;; 2026-08-06, one probe page per probe:
+        ;; `<input type="file" required>` matches `input:required` (and
+        ;; `input:invalid` as well). cssom declined BOTH via
+        ;; `validation-barred-control?`; the `:required` half is corrected
+        ;; now, so the author's 4px reaches it. Only `type="hidden"` is
+        ;; really barred -- measured, `<input type=hidden required>` is
+        ;; `:optional` even with the attribute, which is the assertion
+        ;; three lines up and is unchanged.
+        "Brave reports <input type=file required> as :required")
     (is (nil? (get-in (attrs "file-required") [:style/border-color])))
     (is (not= 24 (get-in (attrs "file-required") [:style/height]))
         "...and neither does `input:invalid { height: 24px }`; the 27 is
