@@ -59,3 +59,36 @@
     (is (contains? (:runtime/imports python) :net/fetch))
     (is (= #{:clock/monotonic :log/write} (:runtime/imports lua)))
     (is (= #{:runtime/eval :runtime/call} (:runtime/exports scheme)))))
+
+(deftest two-javascript-runtimes-and-they-differ-where-it-matters
+  ;; The registry now names two JavaScript engines. The point of the second is
+  ;; not that it exists but WHAT it asks the host for.
+  (let [reg (runtime/registry)
+        js (into {} (filter (fn [[_ rt]] (= :javascript (:runtime/lang rt))) reg))]
+    (is (= #{:quickjs :ecma262} (set (keys js)))
+        "both JavaScript runtimes are registered")
+
+    (let [q (:quickjs reg)
+          e (:ecma262 reg)]
+      (is (= :quickjs-ng (:runtime/engine q)))
+      (is (= :kotoba-ecma262 (:runtime/engine e)))
+
+      ;; The measured difference. `kotoba -M check` on the engine reports
+      ;; `:effects #{}`, and the descriptor is not allowed to claim otherwise:
+      ;; it evaluates JavaScript and returns a value, asking for nothing.
+      (is (= #{} (:runtime/imports e))
+          "the Kotoba engine imports nothing")
+      (is (= #{} (:runtime/effects e))
+          "the Kotoba engine declares no effects")
+
+      ;; QuickJS reaches the DOM, the network and storage because
+      ;; browser.compat.webapi maps those capabilities onto it. That mapping
+      ;; sits ABOVE a runtime, so the same wiring would add the same imports
+      ;; here without changing the engine.
+      (is (contains? (:runtime/imports q) :dom/query))
+      (is (contains? (:runtime/imports q) :net/fetch))
+      (is (seq (:runtime/effects q)))
+
+      ;; Both are still subject to every rule the first test asserts.
+      (is (:runtime/no-ambient-access e))
+      (is (runtime/valid-manifest? (runtime/component-manifest e))))))
