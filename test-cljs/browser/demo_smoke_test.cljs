@@ -295,14 +295,38 @@
   its handler writes through `document.getElementById(...)` rather than
   `document.title`. Which of those matters is not known.
 
-  ⚠ AND the suite still does not COMPLETE after this namespace. Three things
-  that were holding the Node event loop have been found and released -- the
-  socket the guest opened, the connections the server had already accepted
-  (`.close` does not drop those), and the deadline's own timer (`Promise.race`
-  does not stop the loser) -- and it still sits idle at 0% CPU with zero TCP
-  handles and never reaches `Ran N tests`. Whatever remains has not been
-  identified. Do not read the three fixes as having fixed that: they are each
-  correct on their own terms, and the run still hangs.
+  ⚠ MEASURE THE MACHINE BEFORE BLAMING THE TEST. Measured 2026-08-29: this
+  test appeared to hang, and most of that was FOUR COPIES OF THE SUITE RUNNING
+  AT ONCE. `scripts/resource-guard.mjs` serialises the BUILD, not the test run
+  that follows it, so a retry loop that waits on the guard still launches
+  overlapping runs. Of the four, one held the listening server and did the
+  work; the other three sat at 0% CPU with no server, stalled before their
+  first `println`, having lost the race for it.
+
+  That explains the symptoms that had been read as a hang: silence before any
+  output, 0% CPU, no TCP handles, and a WebSocket echo that never arrived
+  (there was no server of one's own to echo it). Five successive diagnoses --
+  idle, syscall-blocked, promise recursion, heavy layout, an unsettling flow
+  -- were each drawn from whichever process state was caught, and the state
+  differed per copy.
+
+  What is still a real weakness, independent of that: `start-demo-server!`
+  stalls SILENTLY when it cannot serve. A test that cannot start its own
+  server should say so, not wait. That is worth fixing and is not fixed here.
+
+  A second measurement error of the same family, worth naming because it is
+  cheap to repeat: a `pgrep -f` for the node test bundle, taking the first
+  match, matches
+  the SHELL WRAPPER (`sh -c npm run compile:node-test && node ...`) before it
+  the node process. Several readings of `0% CPU, therefore idle` were
+  readings of the wrapper. Ask for the process you mean -- the real one is the
+  leaf, and it was at 80% CPU while the wrapper sat at 0%.
+
+  Three things that genuinely were holding the Node event loop have been found
+  and released -- the socket the guest opened, the connections the server had
+  already accepted (`.close` does not drop those), and the deadline's own
+  timer (`Promise.race` does not stop the loser). Each is correct on its own
+  terms; none of them was the cause of the apparent hang.
 
   Named once so the wait and the assertion cannot drift apart."
   "WebSocket proof: real echo round-trip -> \"hello from the real kotoba-lang/browser demo\"")
