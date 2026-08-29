@@ -143,6 +143,37 @@
     (is (= [] unknown))
     (is (= "before" (text-of document "out")))))
 
+(deftest parse-effects-reads-a-timer
+  (is (= [{:effect/op :set-timeout :element/id "#window"
+           :timeout/ms 250 :handler/n 0}]
+         (ecma262/parse-effects "10:setTimeout7:#window8:3:2501:0"))))
+
+;; A timer is collected, not run: the guest has no clock, and firing is this
+;; side's decision -- through the same entry point the listeners use.
+(deftest apply-effects-collects-timers
+  (let [{:keys [timers unknown document]}
+        (ecma262/apply-effects (doc) (ecma262/parse-effects "10:setTimeout7:#window8:3:2501:0"))]
+    (is (= 1 (count timers)))
+    (is (= 250 (:timeout/ms (first timers))))
+    (is (= 0 (:handler/n (first timers))))
+    (is (= [] unknown))
+    (is (= "before" (text-of document "out")))))
+
+(deftest parse-effects-reads-a-request
+  (is (= [{:effect/op :fetch :element/id "#window"
+           :request/url "/api/data" :handler/n 0}]
+         (ecma262/parse-effects "5:fetch7:#window14:9:/api/data1:0"))))
+
+;; A request is collected, not performed: the guest cannot reach the network,
+;; and this side decides whether to.
+(deftest apply-effects-collects-requests
+  (let [{:keys [requests unknown]}
+        (ecma262/apply-effects (doc) (ecma262/parse-effects "5:fetch7:#window14:9:/api/data1:0"))]
+    (is (= 1 (count requests)))
+    (is (= "/api/data" (:request/url (first requests))))
+    (is (= 0 (:handler/n (first requests))))
+    (is (= [] unknown))))
+
 (deftest apply-effects-reports-an-op-this-host-does-not-implement
   (let [{:keys [unknown]}
         (ecma262/apply-effects (doc) (ecma262/parse-effects "9:innerHTML3:out4:<b>x"))]

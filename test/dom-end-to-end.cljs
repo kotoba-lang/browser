@@ -108,7 +108,24 @@
       (check "a console.log is collected" ["hello"] logs)
       (check "and neither was reported unknown" [] unknown))
 
-    ;; 7. an element the snapshot never named is not addressable
+    ;; 7. a request: registered here, performed by the host, then fired back
+    ;;    with the response -- the loop the whole effect model exists for
+    (let [src (str "var r = document.getElementById('out');"
+                   "fetch('/api/data').then(function (body) { r.textContent = body; });")
+          {:keys [requests document unknown]}
+          (ecma262/apply-effects doc (ecma262/parse-effects ((aget m "eval-dom") src snap)))]
+      (check "a fetch is one collected request" 1 (count requests))
+      (check "and it carries the url" "/api/data" (:request/url (first requests)))
+      (check "and registering it changes nothing" "before" (text-of document "out"))
+      ;; The host would really fetch here. What matters is that the response
+      ;; reaches the handler the guest registered.
+      (let [n (:handler/n (first requests))
+            fired ((aget m "eval-dom-event-arg") src snap (js/BigInt n) "the body")
+            {:keys [document]} (ecma262/apply-effects doc (ecma262/parse-effects fired))]
+        (check "and the response reaches the document" "the body"
+               (text-of document "out"))))
+
+    ;; 8. an element the snapshot never named is not addressable
     (let [v ((aget m "eval-dom-value") "document.getElementById('nope') ? 'found' : 'missing'" snap)]
       (check "an element with no id is not reachable" "missing" v))))
 

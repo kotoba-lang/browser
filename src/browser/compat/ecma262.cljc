@@ -113,6 +113,30 @@
                           :attribute/name attr
                           :effect/value v})
 
+                       (= op "fetch")
+                       (let [[url j] (or (read-field value 0)
+                                         (throw (ex-info "malformed fetch: bad url"
+                                                         {:value value})))
+                             [n _] (or (read-field value j)
+                                       (throw (ex-info "malformed fetch: bad request number"
+                                                       {:value value})))]
+                         {:effect/op :fetch
+                          :element/id id
+                          :request/url url
+                          :handler/n (parse-long n)})
+
+                       (= op "setTimeout")
+                       (let [[ms j] (or (read-field value 0)
+                                        (throw (ex-info "malformed setTimeout: bad delay"
+                                                        {:value value})))
+                             [n _] (or (read-field value j)
+                                       (throw (ex-info "malformed setTimeout: bad handler number"
+                                                       {:value value})))]
+                         {:effect/op :set-timeout
+                          :element/id id
+                          :timeout/ms (parse-long ms)
+                          :handler/n (parse-long n)})
+
                        (= op "addEventListener")
                        (let [[type j] (or (read-field value 0)
                                           (throw (ex-info "malformed registration: bad type"
@@ -149,7 +173,8 @@
 (defn apply-effects
   "Replay the log against a real document.
 
-  Returns {:document d :listeners [...] :logs [...] :unknown [...]}. An effect
+  Returns {:document d :listeners [...] :timers [...] :requests [...] :logs [...]
+  :unknown [...]}. An effect
   this host does not implement is REPORTED, never dropped: a log the host
   silently ignored is indistinguishable from a script that did nothing, which
   is the failure this codebase keeps finding in its own gates."
@@ -169,6 +194,18 @@
        (= op :console-log)
        (update acc :logs conj value)
 
+       ;; A timer, like a listener, is COLLECTED. Firing it is this side's
+       ;; decision -- the guest has no clock -- and it fires through the same
+       ;; `eval-dom-event` the listeners use, because they share one registry.
+       (= op :set-timeout)
+       (update acc :timers conj fx)
+
+       ;; A request, like a timer, is COLLECTED. The guest cannot reach the
+       ;; network; this side performs it and then fires the handler with the
+       ;; response through `eval-dom-event-arg`.
+       (= op :fetch)
+       (update acc :requests conj fx)
+
        :else
        (if-let [node-id (dom-bridge/get-element-by-id (:document acc) id)]
        (case op
@@ -186,5 +223,5 @@
 
          (update acc :unknown conj fx))
          (update acc :unknown conj (assoc fx :reason :no-such-element)))))
-   {:document document :listeners [] :logs [] :unknown []}
+   {:document document :listeners [] :timers [] :requests [] :logs [] :unknown []}
    effects))

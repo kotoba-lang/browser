@@ -122,7 +122,16 @@
    "document.title = 'Kotoba';"
    "console.log('hello');"
    "console.log('a', 'b');"
-   "var t = document.title; document.title = 'New'; t"])
+   "var t = document.title; document.title = 'New'; t"
+   ;; setTimeout -- a registration, not a clock
+   "setTimeout(function () { }, 250);"
+   "setTimeout(function () { }, 5)"
+   "var a = setTimeout(function () { }, 1); var b = setTimeout(function () { }, 2); a + '/' + b"
+   ;; fetch -- a registration, not a network call
+   "fetch('/api/data');"
+   "fetch('/one'); fetch('/two');"
+   "fetch('/x').then(function (b) { });"
+   "typeof fetch('/x').then(function (b) { })"])
 
 (def known-dom-divergences
   "Same contract as `known-divergences`: asserted exactly, in both directions."
@@ -175,6 +184,18 @@
        "  get: function () { return " (js/JSON.stringify document-title) "; },"
        "  set: function (v) { __fx += __f('title') + __f('#document') + __f(String(v)); }"
        "});"
+       "var __handlers2 = [];"
+       "function setTimeout(fn, ms) {"
+       "  var n = __handlers2.length; __handlers2.push(fn);"
+       "  __fx += __f('setTimeout') + __f('#window') + __f(__f(String(ms)) + __f(String(n)));"
+       "  return n;"
+       "}"
+       "var __reqs = [];"
+       "function fetch(url) {"
+       "  var n = __reqs.length; __reqs.push(null);"
+       "  __fx += __f('fetch') + __f('#window') + __f(__f(url) + __f(String(n)));"
+       "  return { then: function (fn) { __reqs[n] = fn; return this; } };"
+       "}"
        "var console = { log: function () {"
        "  var a = Array.prototype.slice.call(arguments).map(String).join(' ');"
        "  __fx += __f('log') + __f('#console') + __f(a);"
