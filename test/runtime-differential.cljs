@@ -90,6 +90,12 @@
    "btn" ""
    "out" "before"})
 
+(def dom-attrs
+  "element id -> its attributes. Only elements listed above can carry any."
+  {"btn" {"title" "press me" "class" "primary"}})
+
+(def document-title "the page title both engines start from" "Hello")
+
 (def dom-cases
   ["document.getElementById('ws-proof').textContent = 'done';"
    "var el = document.getElementById('ws-proof'); el.textContent = 'via a variable';"
@@ -103,19 +109,41 @@
    "document.getElementById('nope') ? 'found' : 'missing'"
    "var el = document.getElementById('result'); el.textContent = 'new'; el.textContent"
    "1 + 1"
-   "var el = document.getElementById('ws-proof'); el.textContent = 'x' + (1 + 2);"])
+   "var el = document.getElementById('ws-proof'); el.textContent = 'x' + (1 + 2);"
+   ;; attributes, both directions
+   "document.getElementById('btn').getAttribute('title')"
+   "document.getElementById('btn').getAttribute('nope')"
+   "document.getElementById('btn').getAttribute('title') + '/' + document.getElementById('btn').getAttribute('class')"
+   "document.getElementById('btn').setAttribute('class', 'on');"
+   "var b = document.getElementById('btn'); b.setAttribute('title', 'new'); b.getAttribute('title')"
+   "document.getElementById('out').getAttribute('title')"
+   ;; the page itself and the log -- neither is an element
+   "document.title"
+   "document.title = 'Kotoba';"
+   "console.log('hello');"
+   "console.log('a', 'b');"
+   "var t = document.title; document.title = 'New'; t"])
 
 (def known-dom-divergences
   "Same contract as `known-divergences`: asserted exactly, in both directions."
   {})
 
-(defn- entry
-  "The engine's own length-prefixed entry format, built on the host side."
-  [region id text]
-  (str id "=s" (count text) ":" text region))
+(defn- field [name type body]
+  (str name "=" type (count body) ":" body))
+
+(defn- node-region
+  "The engine's node shape: text, then attributes under `@name`."
+  [id text]
+  (reduce-kv (fn [r k v] (str (field (str "@" k) "s" v) r))
+             (field "textContent" "s" text)
+             (get dom-attrs id {})))
 
 (defn- snapshot-region []
-  (reduce-kv entry "" dom-snapshot))
+  ;; `#document` is the reserved id the engine uses for the page itself.
+  (str (field "#document" "o" (field "title" "s" document-title))
+       (reduce-kv (fn [region id text]
+                    (str (field id "o" (node-region id text)) region))
+                  "" dom-snapshot)))
 
 (def ^:private quickjs-dom-shim
   "A `document` for quickjs-ng that records what a real setter would have done,
@@ -125,14 +153,31 @@
   (str "var __snap = " (js/JSON.stringify (clj->js dom-snapshot)) ";"
        "var __fx = '';"
        "function __f(v) { var s = String(v); return s.length + ':' + s; }"
+       "var __attrs = " (js/JSON.stringify (clj->js dom-attrs)) ";"
        "var document = { getElementById: function (id) {"
        "  if (!Object.prototype.hasOwnProperty.call(__snap, id)) { return null; }"
-       "  var o = {};"
+       "  var o = {"
+       "    getAttribute: function (n) {"
+       "      var a = __attrs[id] || {};"
+       "      return Object.prototype.hasOwnProperty.call(a, n) ? a[n] : null;"
+       "    },"
+       "    setAttribute: function (n, v) {"
+       "      __fx += __f('setAttribute') + __f(id) + __f(__f(n) + __f(String(v)));"
+       "    }"
+       "  };"
        "  Object.defineProperty(o, 'textContent', {"
        "    get: function () { return __snap[id]; },"
        "    set: function (v) { __fx += __f('textContent') + __f(id) + __f(String(v)); }"
        "  });"
        "  return o;"
+       "}, title: " (js/JSON.stringify document-title) " };"
+       "Object.defineProperty(document, 'title', {"
+       "  get: function () { return " (js/JSON.stringify document-title) "; },"
+       "  set: function (v) { __fx += __f('title') + __f('#document') + __f(String(v)); }"
+       "});"
+       "var console = { log: function () {"
+       "  var a = Array.prototype.slice.call(arguments).map(String).join(' ');"
+       "  __fx += __f('log') + __f('#console') + __f(a);"
        "} };"))
 
 (defn- quickjs-dom-answers [QJS]

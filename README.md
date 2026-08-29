@@ -401,13 +401,17 @@ tested separately against a real document, so a bug in one half cannot hide in
 the other.
 
 ```bash
-nbb test/runtime-differential.cljs    # 0 agree, 1 diverge, 2 could not answer
-
-# the whole loop once -- real document, real engine, real host half --
-# so a change to the wire format cannot leave both suites green
-nbb --classpath "src:../htmldom/src:../cssom/src:../dom-gpu/src:../org-w3-aria/src" \
-    test/dom-end-to-end.cljs
+npm run test:ecma262-differential   # 0 agree, 1 diverge, 2 could not answer
+npm run test:ecma262-end-to-end     # real document -> real engine -> real host
 ```
+
+Neither is part of `npm run check`, and deliberately so: both need the sibling
+`org-ecma-international-262` checkout built, and a check that cannot run must
+not be able to fail a run that was never asking for it. They exit **2** rather
+than 0 when the artifact is missing — "could not answer" is not agreement.
+
+They are also not fleet gates, for the reason `root-permit-index` is not one:
+the fleet ships a single repo's tree, and this measurement needs two.
 
 Runtime component manifests are validated as WASM-only, no-ambient-access
 manifests with explicit imports, exports, memory, and fuel limits.

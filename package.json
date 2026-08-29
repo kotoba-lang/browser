@@ -11,6 +11,8 @@
     "demo:browser-demo": "npm run compile:browser-demo && npm run serve:browser-demo",
     "test:cljs": "npm run compile:node-test && node target/node-tests.js",
     "test:clj": "clojure -M:test",
+    "test:ecma262-differential": "nbb test/runtime-differential.cljs",
+    "test:ecma262-end-to-end": "nbb --classpath \"src:../htmldom/src:../cssom/src:../dom-gpu/src:../org-w3-aria/src\" test/dom-end-to-end.cljs",
     "compile:smoke": "shadow-cljs compile visual-smoke",
     "compile:webgpu-smoke": "shadow-cljs compile webgpu-smoke",
     "smoke:visual": "npm run compile:smoke && clojure -M:smoke visual",

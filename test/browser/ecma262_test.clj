@@ -27,9 +27,10 @@
 
 (deftest snapshot-names-every-element-that-has-an-id
   (let [region (ecma262/snapshot (doc))]
-    (is (str/includes? region "ws-proof=s7:pending"))
-    (is (str/includes? region "out=s6:before"))
-    (is (str/includes? region "btn=s2:go"))
+    (is (str/includes? region "textContent=s7:pending"))
+    (is (str/includes? region "textContent=s6:before"))
+    (is (str/includes? region "textContent=s2:go"))
+    (is (str/includes? region "ws-proof=o"))
     ;; An element without an id is not addressable from a page script, so it
     ;; has no place in a snapshot keyed by id.
     (is (not (str/includes? region "no id at all")))))
@@ -97,6 +98,51 @@
     (is (= 1 (count unknown)))
     (is (= :no-such-element (:reason (first unknown))))))
 
+(deftest snapshot-carries-attributes-under-an-at-sign
+  (let [region (ecma262/snapshot
+                (html/parse-into-document
+                 "<html><body><div id=\"a\" title=\"hi\" class=\"c\">t</div></body></html>"))]
+    (is (str/includes? region "@title=s2:hi"))
+    (is (str/includes? region "@class=s1:c"))
+    ;; The id is how the engine addressed the element; repeating it inside
+    ;; would let a page script read it back as an attribute of itself.
+    (is (not (str/includes? region "@id=")))))
+
+(deftest parse-effects-reads-a-set-attribute
+  (is (= [{:effect/op :set-attribute :element/id "a"
+           :attribute/name "class" :effect/value "on"}]
+         (ecma262/parse-effects "12:setAttribute1:a11:5:class2:on"))))
+
+(deftest apply-effects-sets-a-real-attribute
+  (let [{:keys [document unknown]}
+        (ecma262/apply-effects (doc) (ecma262/parse-effects "12:setAttribute3:out14:5:title5:hello"))]
+    (is (= [] unknown))
+    (is (= "hello" (get-in (dom-bridge/node-snapshot
+                            document (dom-bridge/get-element-by-id document "out"))
+                           [:attrs :title])))))
+
+(deftest parse-effects-reads-a-title-and-a-log
+  (is (= [{:effect/op :set-title :element/id "#document" :effect/value "New"}]
+         (ecma262/parse-effects "5:title9:#document3:New")))
+  (is (= [{:effect/op :console-log :element/id "#console" :effect/value "hi"}]
+         (ecma262/parse-effects "3:log8:#console2:hi"))))
+
+(deftest apply-effects-sets-the-real-document-title
+  (let [{:keys [document unknown]}
+        (ecma262/apply-effects (doc) (ecma262/parse-effects "5:title9:#document3:New"))]
+    (is (= [] unknown))
+    (is (= "New" (dom-bridge/document-title document)))))
+
+;; A log is collected, not applied: whether anything is listening is the
+;; host's decision, and dropping it silently would be the same failure as
+;; dropping an unknown op.
+(deftest apply-effects-collects-console-logs
+  (let [{:keys [logs document unknown]}
+        (ecma262/apply-effects (doc) (ecma262/parse-effects "3:log8:#console2:hi"))]
+    (is (= ["hi"] logs))
+    (is (= [] unknown))
+    (is (= "before" (text-of document "out")))))
+
 (deftest apply-effects-reports-an-op-this-host-does-not-implement
   (let [{:keys [unknown]}
         (ecma262/apply-effects (doc) (ecma262/parse-effects "9:innerHTML3:out4:<b>x"))]
@@ -110,6 +156,6 @@
         region (ecma262/snapshot d)
         {:keys [document]} (ecma262/apply-effects
                             d (ecma262/parse-effects "11:textContent3:out5:after"))]
-    (is (str/includes? region "out=s6:before"))
+    (is (str/includes? region "textContent=s6:before"))
     (is (= "after" (text-of document "out")))
-    (is (str/includes? (ecma262/snapshot document) "out=s5:after"))))
+    (is (str/includes? (ecma262/snapshot document) "textContent=s5:after"))))

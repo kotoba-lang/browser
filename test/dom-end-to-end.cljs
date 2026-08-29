@@ -81,7 +81,34 @@
             {:keys [document]} (ecma262/apply-effects doc (ecma262/parse-effects fired))]
         (check "firing it reaches the document" "fired" (text-of document "out"))))
 
-    ;; 5. an element the snapshot never named is not addressable
+    ;; 5. attributes, both directions
+    (let [d2 (html/parse-into-document
+              "<html><body><div id=\"a\" title=\"hi\">t</div></body></html>")
+          snap2 (ecma262/snapshot d2)]
+      (check "the guest reads a real attribute" "hi"
+             ((aget m "eval-dom-value")
+              "document.getElementById('a').getAttribute('title')" snap2))
+      (check "a missing attribute is null" "null"
+             ((aget m "eval-dom-value")
+              "document.getElementById('a').getAttribute('nope')" snap2))
+      (let [log ((aget m "eval-dom")
+                 "document.getElementById('a').setAttribute('class', 'on');" snap2)
+            {:keys [document unknown]} (ecma262/apply-effects d2 (ecma262/parse-effects log))]
+        (check "a setAttribute reaches the real document" "on"
+               (get-in (dom-bridge/node-snapshot
+                        document (dom-bridge/get-element-by-id document "a"))
+                       [:attrs :class]))
+        (check "and nothing was left unapplied" [] unknown)))
+
+    ;; 6. the page itself and the log -- neither is an element
+    (let [log ((aget m "eval-dom") "document.title = 'Kotoba'; console.log('hello');" snap)
+          {:keys [document logs unknown]} (ecma262/apply-effects doc (ecma262/parse-effects log))]
+      (check "a title write reaches the real document" "Kotoba"
+             (dom-bridge/document-title document))
+      (check "a console.log is collected" ["hello"] logs)
+      (check "and neither was reported unknown" [] unknown))
+
+    ;; 7. an element the snapshot never named is not addressable
     (let [v ((aget m "eval-dom-value") "document.getElementById('nope') ? 'found' : 'missing'" snap)]
       (check "an element with no id is not reachable" "missing" v))))
 
