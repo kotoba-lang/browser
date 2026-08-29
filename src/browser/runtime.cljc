@@ -100,6 +100,34 @@
                :capabilities #{:browser/web-compat}
                :effects #{:dom-read :dom-write :network :persistent-write}}))
 
+;; The second JavaScript runtime, and the one that is not a foreign binary:
+;; `kotoba-lang/org-ecma-international-262` is an ECMA-262 interpreter written
+;; in Kotoba and compiled by amu to wasm32. QuickJS is a C program compiled by
+;; emcc; this is the same shape with the C replaced by Kotoba.
+;;
+;; Its `:imports` and `:effects` are EMPTY, and that is a measured fact rather
+;; than an aspiration: `kotoba -M check` on the engine reports `:effects #{}`.
+;; It evaluates JavaScript and returns a value; it asks the host for nothing.
+;; The DOM, fetch, storage and timers that the QuickJS descriptor imports are
+;; supplied by `browser.compat.webapi`'s capability mapping, which sits ABOVE
+;; a runtime rather than inside one -- so wiring them to this engine adds
+;; imports here, and does not change the engine.
+;;
+;; Registering it does not make it the default. Root ADR-2608291400's gate G4
+;; holds that until the same page script has been run through both and shown
+;; to agree.
+(defn ecma262
+  []
+  (descriptor {:id :browser.runtime/ecma262
+               :lang :javascript
+               :engine :kotoba-ecma262
+               :imports #{}
+               :exports #{:js/evaluate}
+               :capabilities #{}
+               :effects #{}
+               :source :kotoba
+               :artifact :wasm32-browser}))
+
 (defn python
   []
   (descriptor {:id :browser.runtime/python
@@ -134,6 +162,7 @@
 (defn registry
   []
   {:quickjs (quickjs)
+   :ecma262 (ecma262)
    :python (python)
    :lua (lua)
    :scheme (scheme)})
