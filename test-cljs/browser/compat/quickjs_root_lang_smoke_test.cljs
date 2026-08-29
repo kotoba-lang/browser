@@ -96,16 +96,12 @@
 
 (def ^:private lang-script
   "var r = [];
-   var html = document.querySelector('html');
+   var wrap = document.getElementById('wrap');
    var frenchP = document.getElementById('frenchP');
    var plainP = document.getElementById('plainP');
    var blankLangP = document.getElementById('blankLangP');
 
-   // engine quirk: even a literal <html> tag never becomes the true
-   // DOM root here (see namespace docstring) -- documented, not fixed
-   r.push(html.matches(':root') === false ? 1 : 'documentElement-wrongly-matches-root');
-
-   // plainP has no own lang -- inherits 'en' from the <html lang=\"en\"> ancestor
+   // plainP has no own lang -- inherits 'en' from the <div lang=\"en\"> ancestor
    r.push(plainP.matches(':lang(en)') === true ? 1 : 'inherited-lang-not-matched');
    r.push(plainP.matches(':lang(EN)') === true ? 1 : 'lang-match-not-case-insensitive');
    r.push(plainP.matches(':lang(fr)') === false ? 1 : 'inherited-lang-wrongly-matched-other-range');
@@ -123,26 +119,40 @@
    // comma-separated ranges match if ANY range matches
    r.push(frenchP.matches(':lang(de, fr)') === true ? 1 : 'comma-separated-ranges-should-match-any');
 
-   // real CSS :lang() is not descendant-restricted -- every element that
-   // inherits or owns 'en' matches, including <html> itself (own),
-   // <body>/<script> (inherit, no own lang), plus plainP/blankLangP.
-   // frenchP is excluded (own fr-CA overrides), and the synthetic
-   // document root above <html> has no lang anywhere in its own chain.
+   // the element carrying the attribute matches its own range
+   r.push(wrap.matches(':lang(en)') === true ? 1 : 'own-lang-on-the-carrier-not-matched');
+
+   // :lang() is not descendant-restricted -- every element inheriting or
+   // owning 'en' matches: wrap (own), plainP and blankLangP (inherited), and
+   // the <script> that is a child of wrap. frenchP is excluded (own fr-CA).
    var englishOnly = document.querySelectorAll(':lang(en)');
-   r.push(englishOnly.length === 5 ? 1 : 'query-all-lang-en-count-wrong:' + englishOnly.length);
+   r.push(englishOnly.length === 4 ? 1 : 'query-all-lang-en-count-wrong:' + englishOnly.length);
 
    var bad = r.filter(function(x) { return x !== 1; });
    document.title = bad.length === 0 ? 'PASS' : 'FAIL:' + bad.join(';');")
 
+;; The lang carrier is a <div>, not <html>. It used to be <html lang="en">
+;; wrapping a <body>, and that made this test RED from 2026-08-05 to
+;; 2026-08-29 without anyone seeing it -- htmldom a4f6b94 drops <html>,
+;; <head> and <body> outright (correct for the FRAGMENT parsing it does,
+;; measured against Brave), so `document.querySelector('html')` was null and
+;; the first line of the script threw. Nothing about :lang() was wrong.
+;;
+;; A <div> carrier tests the same thing -- inheritance down the tree, own
+;; attribute overriding an ancestor's, blank attribute falling through,
+;; subtag prefix matching, comma-separated ranges -- without depending on a
+;; structural tag this engine deliberately does not keep. The :root half of
+;; the original moved to its own test above, which does not need <html> to
+;; exist.
 (deftest quickjs-real-lang-pseudo-class-round-trip-test
   (async done
     (-> (run-page-and-read-title!
-         (str "<html lang=\"en\"><body>"
+         (str "<div id=\"wrap\" lang=\"en\">"
               "<p id=\"plainP\">hello</p>"
               "<p id=\"frenchP\" lang=\"fr-CA\">bonjour</p>"
               "<p id=\"blankLangP\" lang=\"\">still english</p>"
               "<script>" lang-script "</script>"
-              "</body></html>"))
+              "</div>"))
         (.then (fn [title]
                  (println "quickjs real :lang() pseudo-class round-trip ->" (pr-str title))
                  (is (= "PASS" title)

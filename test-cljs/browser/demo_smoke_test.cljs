@@ -331,7 +331,8 @@
           session-atom (atom nil)
           fail! (fn [err]
                   (is false (str "browser.demo real WS/Worker/fetch smoke test failed: "
-                                 (or (.-message err) err))))
+                                 (or (.-message err) err)
+                                 (if-let [d (ex-data err)] (str " ex-data=" (pr-str d)) ""))))
           cleanup! (fn []
                      (dispose-engine! @session-atom)
                      (when-let [server @server-atom] (stop-demo-server! server))
@@ -451,7 +452,8 @@
           session-atom (atom nil)
           fail! (fn [err]
                   (is false (str "browser.demo real generated-content smoke test failed: "
-                                 (or (.-message err) err))))
+                                 (or (.-message err) err)
+                                 (if-let [d (ex-data err)] (str " ex-data=" (pr-str d)) ""))))
           cleanup! (fn []
                      (dispose-engine! @session-atom)
                      (when-let [server @server-atom] (stop-demo-server! server))
