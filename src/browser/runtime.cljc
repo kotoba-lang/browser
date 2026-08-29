@@ -117,6 +117,21 @@
 ;; holds that until the same page script has been run through both and shown
 ;; to agree.
 (defn ecma262
+  "The JavaScript engine written in Kotoba and compiled by amu
+  (`kotoba-lang/org-ecma-international-262`), offered as a second
+  `:javascript` runtime beside `quickjs`.
+
+  `:imports #{}` is not an omission and not a limitation waiting to be lifted.
+  The engine reaches the document by RETURNING an effect log the host replays,
+  not by calling out -- so there is nothing to import, and `kotoba -M check`
+  answers `:effects #{}` even with `document` bound. Compare `quickjs` above,
+  which needs twelve imports because it performs its own writes.
+
+  What that costs, honestly: the guest cannot see its own writes (reads answer
+  from the snapshot the host injected), and the only host object it knows is
+  `document.getElementById`. Both are measured, in both directions, by
+  `test/runtime-differential.cljs` against the quickjs build this would
+  replace."
   []
   (descriptor {:id :browser.runtime/ecma262
                :lang :javascript

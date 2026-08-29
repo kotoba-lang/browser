@@ -374,6 +374,41 @@ or timer access.
 `browser.runtime` defines the generic descriptor shape and placeholder descriptors
 for QuickJS/QuickJS-NG, Python, Lua, and Scheme. `browser.compat.quickjs` is now a
 thin browser/Web API adapter over that generic runtime descriptor.
+
+### A second JavaScript runtime, with no imports
+
+`browser.runtime/ecma262` names a JavaScript engine written in Kotoba and
+compiled by amu (`kotoba-lang/org-ecma-international-262`). It declares
+`:imports #{}` -- not as an omission, but because it reaches the document by
+**returning** an effect log the host replays rather than by calling out:
+
+```text
+document --snapshot--> engine --effect log--> browser.compat.ecma262 --> document'
+```
+
+`kotoba -M check` answers `:effects #{}` for that engine even with `document`
+bound, which is what the rule at the top of this section asks for taken to its
+end: the authority to change the page never leaves this side of the line.
+`addEventListener` fits the same shape -- the registration comes back with a
+handler number, and firing is a second call into the guest.
+
+Whether the two engines agree is measured rather than assumed:
+`test/runtime-differential.cljs` drives both over the same sources -- language,
+DOM writes, and events -- and asserts its recorded divergences exactly, so a
+divergence that appears and one that disappears both fail the run. The host
+half (`browser.compat.ecma262`: build the snapshot, read the log, apply it) is
+tested separately against a real document, so a bug in one half cannot hide in
+the other.
+
+```bash
+nbb test/runtime-differential.cljs    # 0 agree, 1 diverge, 2 could not answer
+
+# the whole loop once -- real document, real engine, real host half --
+# so a change to the wire format cannot leave both suites green
+nbb --classpath "src:../htmldom/src:../cssom/src:../dom-gpu/src:../org-w3-aria/src" \
+    test/dom-end-to-end.cljs
+```
+
 Runtime component manifests are validated as WASM-only, no-ambient-access
 manifests with explicit imports, exports, memory, and fuel limits.
 `browser.compat.quickjs-binary` adds the first binary integration point: it loads
