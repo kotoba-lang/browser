@@ -26,7 +26,7 @@
   (:require ["net" :as net]
             ["crypto" :as crypto]
             [cljs.test :refer [deftest is async]]
-            [clojure.string :as str]
+            [kotoba.lang.text :as str]
             [browser.compat.quickjs-runner :as quickjs-runner]
             [browser.net.websocket :as ws]
             [browser.origin :as origin]
@@ -57,7 +57,7 @@
               (let [colon (.indexOf line ":")]
                 (if (pos? colon)
                   (assoc headers
-                         (str/lower-case (str/trim (subs line 0 colon)))
+                         (str/lower (str/trim (subs line 0 colon)))
                          (str/trim (subs line (inc colon))))
                   headers)))
             {}

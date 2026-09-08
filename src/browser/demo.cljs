@@ -150,7 +150,7 @@
             [browser.profile :as profile]
             [browser.session :as session]
             [browser.storage :as storage]
-            [clojure.string :as str]
+            [kotoba.lang.text :as str]
             [kotoba.wasm.host :as host]
             [kotoba.wasm.host.webgl :as webgl]))
 

@@ -68,7 +68,7 @@
             ["http" :as http]
             ["crypto" :as crypto]
             [cljs.test :refer [deftest is async]]
-            [clojure.string :as str]
+            [kotoba.lang.text :as str]
             [browser.compat.quickjs-runner :as quickjs-runner]
             [browser.demo :as demo]
             [browser.dom-bridge :as dom-bridge]

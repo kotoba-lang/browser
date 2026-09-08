@@ -17,7 +17,7 @@
     1  a disagreement -- a NEW one, or a recorded one that has been fixed
     2  the harness could not answer (an engine is missing, or no case ran),
        which is NOT agreement and must never be read as one."
-  (:require [clojure.string :as str]
+  (:require [kotoba.lang.text :as str]
             ["node:fs" :as fs]
             ["node:path" :as path]))
 
