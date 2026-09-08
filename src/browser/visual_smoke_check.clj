@@ -17,7 +17,7 @@
    Keep the two apart: this gate answers \"did it build\",
    visual-smoke-model-test answers \"did it draw the right thing\"."
   (:require [clojure.java.io :as io]
-            [clojure.string :as str]))
+            [kotoba.lang.text :as str]))
 
 (def targets
   {"visual" [{:path "public/visual-smoke.html"

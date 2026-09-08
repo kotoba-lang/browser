@@ -33,7 +33,7 @@
 
       12:setAttribute1:a11:5:class2:on"
   (:require [browser.dom-bridge :as dom-bridge]
-            [clojure.string :as str]))
+            [kotoba.lang.text :as str]))
 
 (defn- entry
   "One `<name>=<type><len>:<body>` entry, prepended -- the engine reads

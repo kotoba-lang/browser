@@ -1,6 +1,6 @@
 (ns browser.surface-test
   (:require [browser.surface :as surface]
-            [clojure.string :as str]
+            [kotoba.lang.text :as str]
             [clojure.test :refer [deftest is]]))
 
 (deftest os-surface-renders-through-kotoba-dom

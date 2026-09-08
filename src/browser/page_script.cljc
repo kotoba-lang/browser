@@ -1,7 +1,7 @@
 (ns browser.page-script
   "Script discovery for kotoba browser pages."
   (:require [browser.origin :as origin]
-            [clojure.string :as str]))
+            [kotoba.lang.text :as str]))
 
 (def script-source-storage-key :quickjs.script/source)
 
@@ -23,7 +23,7 @@
       (= "" v)
       (and (string? v)
            (not (str/blank? v))
-           (not= "false" (str/lower-case v)))))
+           (not= "false" (str/lower v)))))
 
 (defn script-nodes
   [document]
@@ -63,7 +63,7 @@
    silently with no error at all. Confirmed via direct REPL reproduction
    before this fix."
   [script-node]
-  (let [type (some-> script-node :attrs :type str str/trim str/lower-case)]
+  (let [type (some-> script-node :attrs :type str str/trim str/lower)]
     (cond
       (str/blank? type) :classic
       (= "module" type) :module

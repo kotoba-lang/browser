@@ -23,7 +23,7 @@
    with `:status 0` and an `:error` keyword, matching the existing
    `browser.net` convention for non-HTTP outcomes (permission-denied and
    CORS-blocked responses already use `:status 0` + `:error`)."
-  (:require [clojure.string :as str]))
+  (:require [kotoba.lang.text :as str]))
 
 (def default-connect-timeout-ms
   "Default TCP connect timeout for the JVM HttpClient."
@@ -98,7 +98,7 @@
        (-> (java.net.http.HttpRequest/newBuilder (java.net.URI/create (str url)))
            (.timeout (java.time.Duration/ofMillis request-timeout-ms))
            (apply-headers headers)
-           (.method (str/upper-case (name (or method :get))) (body-publisher body))
+           (.method (str/upper (name (or method :get))) (body-publisher body))
            (.build)))
 
      (defn- response-headers
@@ -192,7 +192,7 @@
         drop-in fetch-fn (see namespace note above) -- a real caller would
         need to bridge this Promise back into the synchronous contract."
        [{:keys [url method headers body]}]
-       (-> (js/fetch url #js {:method (str/upper-case (name (or method :get)))
+       (-> (js/fetch url #js {:method (str/upper (name (or method :get)))
                               :headers (js-headers headers)
                               :body (when (some? body) body)
                               :redirect "manual"})

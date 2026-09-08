@@ -8,7 +8,7 @@
   separately so a bug in one cannot hide in the other."
   (:require [browser.compat.ecma262 :as ecma262]
             [browser.dom-bridge :as dom-bridge]
-            [clojure.string :as str]
+            [kotoba.lang.text :as str]
             [clojure.test :refer [deftest is]]
             [htmldom.core :as html]))
 

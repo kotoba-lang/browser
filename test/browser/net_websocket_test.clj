@@ -34,7 +34,7 @@
             [browser.net.websocket :as ws]
             [browser.origin :as origin]
             [browser.profile :as profile]
-            [clojure.string :as str]
+            [kotoba.lang.text :as str]
             [clojure.test :refer [deftest is]])
   (:import [java.io InputStream OutputStream]
            [java.net InetAddress ServerSocket Socket SocketException]
@@ -76,7 +76,7 @@
         (let [colon (.indexOf ^String line ":")]
           (recur (if (pos? colon)
                    (assoc headers
-                          (str/lower-case (str/trim (subs line 0 colon)))
+                          (str/lower (str/trim (subs line 0 colon)))
                           (str/trim (subs line (inc colon))))
                    headers)))))))
 

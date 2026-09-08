@@ -9,7 +9,7 @@
             [browser.devtools :as devtools]
             [browser.dom-bridge :as dom-bridge]
             [browser.session :as session]
-            [clojure.string :as str]
+            [kotoba.lang.text :as str]
             [clojure.test :refer [deftest is testing]]
             [kotoba.wasm.host :as host]))
 

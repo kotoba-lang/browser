@@ -6,7 +6,7 @@
   (:require [browser.origin :as origin]
             [browser.profile :as profile-model]
             [browser.storage :as storage]
-            [clojure.string :as str]))
+            [kotoba.lang.text :as str]))
 
 (def cache-key :http/cache)
 (def cache-variant-key :http/cache-variants)
@@ -20,7 +20,7 @@
 (def cookie-variant-key :http/cookie-variants)
 
 (defn- lower-name [x]
-  (str/lower-case (name x)))
+  (str/lower (name x)))
 
 (defn header
   [headers name]
@@ -39,7 +39,7 @@
                    (remove str/blank?)
                    (map (fn [attr]
                           (let [[ak av] (str/split attr #"=" 2)]
-                            [(str/lower-case (str/trim (or ak "")))
+                            [(str/lower (str/trim (or ak "")))
                              (some-> av str/trim)])))
                    (into {}))]
     (when (seq k)
@@ -49,7 +49,7 @@
        :http-only? (contains? attrs "httponly")
        :domain (some-> (get attrs "domain") str/trim)
        :path (some-> (get attrs "path") str/trim)
-       :same-site (some-> (get attrs "samesite") str/lower-case)
+       :same-site (some-> (get attrs "samesite") str/lower)
        :max-age (some-> (get attrs "max-age") str/trim)
        :expires (some-> (get attrs "expires") str/trim)})))
 
@@ -82,7 +82,7 @@
   (when expires
     (or (when-let [ms (expires-date-ms expires)]
           (<= ms (current-time-ms)))
-        (let [s (str/lower-case (str expires))]
+        (let [s (str/lower (str expires))]
           (or (str/includes? s "01 jan 1970")
               (str/includes? s "1 jan 1970")
               (str/includes? s "31 dec 1969"))))))
@@ -149,11 +149,11 @@
   (some-> (:authority (origin/parse-url url))
           (str/split #":")
           first
-          str/lower-case))
+          str/lower))
 
 (defn- normalize-cookie-domain
   [domain]
-  (let [domain (str/lower-case (str/trim (str domain)))]
+  (let [domain (str/lower (str/trim (str domain)))]
     (when (seq domain)
       (if (str/starts-with? domain ".")
         (subs domain 1)
@@ -273,7 +273,7 @@
    ;; relies on the (extremely common) Lax/default behavior would appear
    ;; logged out the instant a user arrives via any inbound cross-site
    ;; link, since every other real browser still sends it.
-   (let [same-site-kw (str/lower-case (str same-site))]
+   (let [same-site-kw (str/lower (str same-site))]
      (cond
        (= "none" same-site-kw) true
        (and top-level-navigation? (not= "strict" same-site-kw)) true
@@ -521,7 +521,7 @@
   ([page-url response-url response credentials?]
    (or (origin/same-origin? page-url response-url)
        (let [allow-origin (header (:headers response) "access-control-allow-origin")
-             allow-credentials? (= "true" (str/lower-case
+             allow-credentials? (= "true" (str/lower
                                            (str (header (:headers response)
                                                         "access-control-allow-credentials"))))
              page-origin (origin/origin page-url)]
@@ -541,7 +541,7 @@
 
 (defn- content-type-value
   [value]
-  (first (str/split (str/lower-case (str value)) #";")))
+  (first (str/split (str/lower (str value)) #";")))
 
 (defn- simple-header?
   [[k v]]
@@ -572,20 +572,20 @@
     (cond-> {:url (:url request)
              :method :options
              :headers {"origin" (origin/origin page-url)
-                       "access-control-request-method" (str/upper-case (name (or (:method request) :get)))}}
+                       "access-control-request-method" (str/upper (name (or (:method request) :get)))}}
       (seq header-names)
       (assoc-in [:headers "access-control-request-headers"] (str/join ", " header-names)))))
 
 (defn- token-list
   [value]
-  (->> (str/split (str/lower-case (str value)) #",")
+  (->> (str/split (str/lower (str value)) #",")
        (map str/trim)
        (remove str/blank?)
        set))
 
 (defn- preflight-allowed?
   [page-url request response credentials?]
-  (let [method (str/lower-case (name (or (:method request) :get)))
+  (let [method (str/lower (name (or (:method request) :get)))
         requested-headers (set (author-header-names (:headers request)))
         allowed-methods (token-list (header (:headers response) "access-control-allow-methods"))
         allowed-headers (token-list (header (:headers response) "access-control-allow-headers"))]
@@ -646,7 +646,7 @@
   [request response]
   (and (= :get (or (:method request) :get))
        (<= 200 (or (:status response) 0) 299)
-       (not (str/includes? (str/lower-case (str (header (:headers response) "cache-control")))
+       (not (str/includes? (str/lower (str (header (:headers response) "cache-control")))
                            "no-store"))))
 
 (defn permission-decision

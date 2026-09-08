@@ -18,7 +18,7 @@
    `browser.core/load-html` the session runs."
   (:require [browser.session :as session]
             [browser.visual-smoke-model :as model]
-            [clojure.string :as str]
+            [kotoba.lang.text :as str]
             [clojure.test :refer [deftest is testing]]
             [kotoba.wasm.dom :as dom]
             [kotoba.wasm.host :as host]))

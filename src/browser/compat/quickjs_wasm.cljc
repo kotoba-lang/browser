@@ -7,7 +7,7 @@
   (:require [browser.compat.quickjs-execution :as execution]
             [browser.runtime :as runtime]
             [browser.storage :as storage]
-            [clojure.string :as str]
+            [kotoba.lang.text :as str]
             [quickjs.binary :as binary]
             #?(:cljs ["quickjs-emscripten-core" :refer [newQuickJSWASMModuleFromVariant]])
             #?(:cljs ["@jitl/quickjs-singlefile-cjs-release-sync" :default quickjs-variant])))

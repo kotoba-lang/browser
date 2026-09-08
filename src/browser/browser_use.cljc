@@ -10,7 +10,7 @@
             [browser.session :as session]
             [browseruse.actions :as browser-use-actions]
             [browseruse.browser :as browser-use]
-            [clojure.string :as str]
+            [kotoba.lang.text :as str]
             [kotoba.wasm.host :as host]))
 
 (def interactive-tags #{:a :button :input :textarea :select})
@@ -37,7 +37,7 @@
       (= "" value)
       (and (string? value)
            (not (str/blank? value))
-           (not= "false" (str/lower-case value)))))
+           (not= "false" (str/lower value)))))
 
 (defn- blankish?
   [s]
@@ -72,11 +72,11 @@
 (defn- hidden-node?
   [node]
   (or (truthy? (get-in node [:attrs :hidden]))
-      (= "true" (str/lower-case (str (get-in node [:attrs :aria-hidden]))))
-      (= "none" (str/lower-case (str (style-value node :display))))
-      (contains? #{"presentation" "none"} (str/lower-case (str (get-in node [:attrs :role]))))
+      (= "true" (str/lower (str (get-in node [:attrs :aria-hidden]))))
+      (= "none" (str/lower (str (style-value node :display))))
+      (contains? #{"presentation" "none"} (str/lower (str (get-in node [:attrs :role]))))
       (and (= :input (:tag node))
-           (= "hidden" (str/lower-case (str (get-in node [:attrs :type])))))
+           (= "hidden" (str/lower (str (get-in node [:attrs :type])))))
       (decorative-image? node)))
 
 (defn- text-content
@@ -708,12 +708,12 @@
                   selector (assoc :selector {:ok (boolean selector-node)
                                              :node/id selector-node})
                   text (assoc :text {:ok (str/includes?
-                                          (str/lower-case visible-text)
-                                          (str/lower-case (str text)))
+                                          (str/lower visible-text)
+                                          (str/lower (str text)))
                                      :value visible-text})
                   url (assoc :url {:ok (str/includes?
-                                        (str/lower-case (str url-value))
-                                        (str/lower-case (str url)))
+                                        (str/lower (str url-value))
+                                        (str/lower (str url)))
                                    :value url-value}))
         ok? (case kind
               :hidden (and selector (or (not (boolean selector-node)) selector-hidden?))
@@ -749,13 +749,13 @@
                                                 :index index
                                                 :element index-element})
                    text (assoc :text {:ok (str/includes?
-                                           (str/lower-case visible-text)
-                                           (str/lower-case (str text)))
+                                           (str/lower visible-text)
+                                           (str/lower (str text)))
                                       :text text
                                       :value visible-text})
                    url (assoc :url {:ok (str/includes?
-                                         (str/lower-case (str url-value))
-                                         (str/lower-case (str url)))
+                                         (str/lower (str url-value))
+                                         (str/lower (str url)))
                                     :url url
                                     :value url-value}))
          ok? (if (seq matches)
@@ -1124,7 +1124,7 @@
   [session]
   (let [document (get-in session [:browser.session/page :browser/document])]
     (or (some (fn [node]
-                (let [overflow (str/lower-case
+                (let [overflow (str/lower
                                 (str (or (get-in node [:attrs :overflow])
                                          (get-in node [:attrs :style/overflow])
                                          "")))]

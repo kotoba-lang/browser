@@ -15,7 +15,7 @@
             [browser.script-engine :as script-engine]
             [browser.storage :as storage]
             [browser.surface :as surface]
-            [clojure.string :as str]
+            [kotoba.lang.text :as str]
             [kotoba.wasm.host :as host]))
 
 (def redirect-statuses #{301 302 303 307 308})
@@ -1008,14 +1008,14 @@
 
 (defn- submit-method
   [value]
-  (case (str/lower-case (str value))
+  (case (str/lower (str value))
     "post" :post
     "dialog" :dialog
     :get))
 
 (defn- submit-enctype
   [value]
-  (case (str/lower-case (str value))
+  (case (str/lower (str value))
     "text/plain" "text/plain"
     "multipart/form-data" "multipart/form-data"
     "application/x-www-form-urlencoded"))
@@ -1067,7 +1067,7 @@
    (safe-restrictive) rather than assuming same-origin, since \"unknown
    destination\" is not a case the spec's default policy ever actually faces."
   [page-url destination-url policy]
-  (case (str/lower-case (str policy))
+  (case (str/lower (str policy))
     "no-referrer" nil
     "origin" (origin/origin page-url)
     "unsafe-url" page-url
@@ -1191,11 +1191,11 @@
 
 (defn- current-target?
   [target]
-  (contains? #{"" "_self" "_top" "_parent"} (str/lower-case (str target))))
+  (contains? #{"" "_self" "_top" "_parent"} (str/lower (str target))))
 
 (defn- token-attr?
   [value token]
-  (contains? (set (str/split (str/lower-case (str value)) #"\s+"))
+  (contains? (set (str/split (str/lower (str value)) #"\s+"))
              token))
 
 (defn- link-noreferrer?
