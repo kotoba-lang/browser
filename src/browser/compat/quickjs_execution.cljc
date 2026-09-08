@@ -11,7 +11,7 @@
             [browser.origin :as origin]
             [browser.profile :as profile]
             [browser.runtime :as runtime]
-            [clojure.string :as str]))
+            [kotoba.lang.text :as str]))
 
 (defn invocation
   ([call payload]
@@ -265,7 +265,7 @@
 
 (defn- token-value?
   [value token]
-  (contains? (set (str/split (str/lower-case (str value)) #"[,\s]+"))
+  (contains? (set (str/split (str/lower (str value)) #"[,\s]+"))
              token))
 
 (defn- window-open-result
@@ -294,7 +294,7 @@
 
 (defn- permission-name
   [request]
-  (some-> (:permission/name request) str/lower-case))
+  (some-> (:permission/name request) str/lower))
 
 (defn- permission-query-result
   [state request]

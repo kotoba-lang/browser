@@ -6,7 +6,7 @@
   (:require [browser.dom-bridge :as dom-bridge]
             [browser.input :as input]
             [browser.text-edit :as text-edit]
-            [clojure.string :as str]
+            [kotoba.lang.text :as str]
             [kotoba.wasm.dom :as dom]))
 
 (def editable-tags #{:input :textarea})
@@ -37,7 +37,7 @@
       (= "" v)
       (and (string? v)
            (not (str/blank? v))
-           (not= "false" (str/lower-case v)))))
+           (not= "false" (str/lower v)))))
 
 (declare disabled-control?)
 (declare ancestor-form-id)
@@ -114,11 +114,11 @@
          (or (= :textarea (:tag node))
              (and (= :input (:tag node))
                   (contains? text-input-types
-                             (str/lower-case (str (or (get-in node [:attrs :type]) "")))))))))
+                             (str/lower (str (or (get-in node [:attrs :type]) "")))))))))
 
 (defn- input-type
   [node]
-  (str/lower-case (str (or (get-in node [:attrs :type]) ""))))
+  (str/lower (str (or (get-in node [:attrs :type]) ""))))
 
 (defn- hidden-input-control?
   [node]
@@ -186,7 +186,7 @@
   [document node-id]
   (let [node (get-in document [:nodes node-id])]
     (and (= :input (:tag node))
-         (= "checkbox" (str/lower-case (str (get-in node [:attrs :type])))))))
+         (= "checkbox" (str/lower (str (get-in node [:attrs :type])))))))
 
 (defn radio-control?
   [document node-id]
@@ -259,7 +259,7 @@
     (->> (:nodes document)
          (keep (fn [[id candidate]]
                  (when (and (= :input (:tag candidate))
-                            (= "radio" (str/lower-case (str (get-in candidate [:attrs :type]))))
+                            (= "radio" (str/lower (str (get-in candidate [:attrs :type]))))
                             (if named?
                               (and (= group-name (get-in candidate [:attrs :name]))
                                    (= group-form-id (ancestor-form-id document id)))
@@ -393,7 +393,7 @@
 (defn scrollable-node?
   [document node-id]
   (let [node (get-in document [:nodes node-id])
-        overflow (str/lower-case (str (or (style node :overflow)
+        overflow (str/lower (str (or (style node :overflow)
                                            (attr node :overflow)
                                            "")))]
     (contains? scrollable-overflows overflow)))
@@ -958,7 +958,7 @@
        (not (str/blank? value))
        (when-let [n (parse-number value)]
          (let [raw-step (:step attrs)]
-           (when-not (and raw-step (= "any" (str/lower-case (str raw-step))))
+           (when-not (and raw-step (= "any" (str/lower (str raw-step))))
              (let [parsed-step (parse-number raw-step)
                    step (if (and parsed-step (pos? parsed-step)) parsed-step 1.0)
                    base (or (parse-number (:min attrs)) 0.0)

@@ -1,7 +1,7 @@
 (ns browser.core
   "Kotoba-only browser R0 orchestration over the existing kotoba UI substrate."
   (:require [browser.dom-bridge :as dom-bridge]
-            [clojure.string]
+            [kotoba.lang.text]
             [browser.page-script :as page-script]
             [cssom.core :as css]
             [cssom.layout :as layout]
@@ -82,7 +82,7 @@
     (->> (:ops document)
          (keep (fn [[op id tag]] (when (and (= :dom/create-element op) (= :style tag)) id)))
          (mapcat (fn [id] (keep text-of (:children (get nodes id)))))
-         (clojure.string/join "\n"))))
+         (kotoba.lang.text/join "\n"))))
 
 (defn load-html
   [{:keys [url html css viewport theme color-scheme] :or {viewport [800 600]}}]

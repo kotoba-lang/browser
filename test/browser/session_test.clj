@@ -10,7 +10,7 @@
             [browser.session :as session]
             [browser.storage :as storage]
             [browser.surface :as surface]
-            [clojure.string :as str]
+            [kotoba.lang.text :as str]
             [clojure.test :refer [deftest is]]
             [kotoba.wasm.dom :as dom]
             [kotoba.wasm.host :as host]))

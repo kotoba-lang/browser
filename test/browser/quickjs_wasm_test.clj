@@ -3,7 +3,7 @@
             [browser.compat.quickjs-execution :as execution]
             [browser.profile :as profile]
             [browser.storage :as storage]
-            [clojure.string :as str]
+            [kotoba.lang.text :as str]
             [clojure.test :refer [deftest is]]))
 
 (deftest quickjs-wasm-descriptor-is-wasm-engine-boundary

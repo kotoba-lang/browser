@@ -40,7 +40,7 @@
    so that namespace never has to know or care which platform's real
    implementation it is talking to: `(websocket-fn {:op :connect ...})`,
    `{:op :send ...}`, `{:op :close ...}`, `{:op :drain ...}`."
-  (:require [clojure.string :as str]))
+  (:require [kotoba.lang.text :as str]))
 
 (def default-connect-timeout-ms
   "Default bound on how long a real WebSocket handshake (the initial TCP

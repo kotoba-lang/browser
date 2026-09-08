@@ -3,7 +3,7 @@
 
    This is not a WHATWG URL parser. It is a deterministic subset for
    scheme://authority/path style URLs plus kotoba internal URLs."
-  (:require [clojure.string :as str]))
+  (:require [kotoba.lang.text :as str]))
 
 (def default-ports
   "Per-scheme default port -- RFC 6454 origin comparison (and the
@@ -41,7 +41,7 @@
   (let [s (str url)
         [_ scheme rest] (re-matches #"^([A-Za-z][A-Za-z0-9+.-]*):(.*)$" s)]
     (if scheme
-      (let [scheme (str/lower-case scheme)]
+      (let [scheme (str/lower scheme)]
         (if (str/starts-with? rest "//")
           (let [without-slashes (subs rest 2)
                 slash (.indexOf without-slashes "/")
@@ -60,7 +60,7 @@
                 authority (if (neg? at)
                             authority-with-userinfo
                             (subs authority-with-userinfo (inc at)))
-                authority (strip-default-port scheme (str/lower-case authority))
+                authority (strip-default-port scheme (str/lower authority))
                 path (if (neg? slash) "/" (subs without-slashes slash))]
             {:url s
              :scheme scheme

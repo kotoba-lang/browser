@@ -1,7 +1,7 @@
 (ns browser.compat.webcomponent
   "Minimal Custom Elements registry model for compat JS adapters."
   (:require [browser.compat :as compat]
-            [clojure.string :as str]))
+            [kotoba.lang.text :as str]))
 
 (defn empty-registry
   []
@@ -33,7 +33,7 @@
        ;; Real spec: must not start with an ASCII case-insensitive match
        ;; for "xml" (reserved by the XML specification), not just a
        ;; lowercase-only "xml" prefix.
-       (not (str/starts-with? (str/lower-case name) "xml"))
+       (not (str/starts-with? (str/lower name) "xml"))
        (not (contains? reserved-names name))))
 
 (defn define
