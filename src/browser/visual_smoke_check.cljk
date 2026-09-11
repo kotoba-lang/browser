@@ -4,7 +4,7 @@
    substrate). Mirrors kotoba-lang/dom-gpu's scripts/wasm_ui_smoke.cljc:
    intentionally lightweight, verifying that the expected static entry
    points and generated JS modules exist (and are non-trivially sized, and
-   contain the markers a real shadow-cljs compile of `browser.smoke` /
+   contain the markers a real amu compile --target wasm32-browser of `browser.smoke` /
    `browser.smoke-webgpu` would emit) after compilation, rather than
    driving an actual browser.
 

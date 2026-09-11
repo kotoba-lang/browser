@@ -848,7 +848,7 @@ packages own concrete WebGL/WebGPU smoke bundles.
 
 ```sh
 cd orgs/kotoba-lang/browser
-clojure -M:test
+kbb -M:test
 ```
 
 The smoke content/model remains as CLJC data in

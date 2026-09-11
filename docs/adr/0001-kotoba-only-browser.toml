@@ -155,6 +155,6 @@ evidence = [
 ]
 
 [verification]
-browser_use = "clojure -M:test:browser-use:browser-use-test -d test-browser-use"
-browser = "clojure -M:test"
-wasm_ui = "cd ../wasm-ui && clojure -M:test"
+browser_use = "kbb -M:test:browser-use:browser-use-test -d test-browser-use"
+browser = "kbb -M:test"
+wasm_ui = "cd ../wasm-ui && kbb -M:test"
