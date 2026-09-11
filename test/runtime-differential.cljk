@@ -10,7 +10,7 @@
   This is the instrument `kotoba-lang/cssom` points at a real Blink browser,
   aimed at the runtime seam instead: the incumbent is the oracle.
 
-  Run:  nbb test/runtime-differential.cljk [path/to/ecma262.mjs]
+  Run:  kbb --backend sci test/runtime-differential.cljk [path/to/ecma262.mjs]
 
   Exit codes
     0  every case agrees, and the recorded divergences are exactly those below

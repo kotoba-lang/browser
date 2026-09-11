@@ -289,7 +289,7 @@ Verification command:
 
 ```sh
 cd orgs/kotoba-lang/browser
-clojure -M:test
+kbb -M:test
 ```
 
 ## Maturity Ladder
