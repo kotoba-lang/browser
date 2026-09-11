@@ -791,7 +791,7 @@
    Until this fn's own fix, `:css` was silently DROPPED here even though
    `browser.core/load-html` already accepted and cascaded one -- only
    `document-click-hit-test-prefers-higher-z-index-absolute-node` in
-   test/browser/session_test.clj ever passed a `:css` string through this
+   test/browser/session_test.cljk ever passed a `:css` string through this
    fn, and it kept passing anyway for a telling reason: it derives its
    click coordinates from the ACTUAL rendered box of the higher-z-index
    element rather than a hard-coded position, so it never actually

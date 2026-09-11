@@ -562,7 +562,7 @@
   ;; a caller invoking new-state directly, or below evaluate!/load-module!)
   ;; must keep today's default of 0, unaffected by this change -- mirrors
   ;; run-script-geolocation-defaults-to-zero-without-host-injection's
-  ;; precedent in test/browser/session_test.clj.
+  ;; precedent in test/browser/session_test.cljk.
   (let [adapter (quickjs/new-adapter {:origin "https://app.example"
                                       :profile-id "work"})
         received-payload (atom nil)

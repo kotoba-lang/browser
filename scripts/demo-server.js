@@ -3,7 +3,7 @@
 
 /**
  * Real, minimal local dev server for kotoba-lang/browser's own runnable
- * demo (public/browser-demo.html + src/browser/demo.cljs, shadow-cljs's
+ * demo (public/browser-demo.html + src/browser/demo.cljk, shadow-cljs's
  * :browser-demo build target).
  *
  * shadow-cljs's own devtools http server (see shadow-cljs.edn's
@@ -11,7 +11,7 @@
  * fine for the demo's original flexbox/grid/WebGL/document.title proof,
  * but this demo now ALSO proves real WebSocket networking, real Worker
  * execution, and real fetch() response delivery (see
- * src/browser/demo.cljs's `init!`) -- each of which needs a REAL server on
+ * src/browser/demo.cljk's `init!`) -- each of which needs a REAL server on
  * the other end for the compiled demo bundle's own real, native
  * `js/fetch`/`js/WebSocket` calls to talk to. This script is that server:
  * it serves the SAME static `public/` files shadow-cljs's devtools server
@@ -20,7 +20,7 @@
  *   GET  /worker.js       -- real JS source for `new Worker(...)` to
  *                            really fetch and really execute in a second
  *                            QuickJS context (mirrors
- *                            test-cljs/browser/compat/quickjs_worker_smoke_test.cljs's
+ *                            test-cljs/browser/compat/quickjs_worker_smoke_test.cljk's
  *                            worker-echo-server).
  *   GET  /api/fetch-data  -- a real plain-text body for `fetch(...)` to
  *                            really retrieve (mirrors
@@ -120,7 +120,7 @@ const server = http.createServer((req, res) => {
 // Real, minimal RFC6455 WebSocket echo server on /ws-echo, hand-rolled on
 // Node's built-in `net` (via the raw socket the 'upgrade' event hands us)
 // + `crypto` -- ports
-// test-cljs/browser/compat/quickjs_websocket_smoke_test.cljs's
+// test-cljs/browser/compat/quickjs_websocket_smoke_test.cljk's
 // websocket-echo-server algorithm (that file's own docstring explains why
 // this is hand-rolled rather than a dependency: RFC6455 in ~80 lines is a
 // small, well-understood surface, and this repo already avoids adding new

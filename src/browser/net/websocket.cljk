@@ -31,7 +31,7 @@
      documents for `fetch-async`. The real wait has to happen OUTSIDE this
      function, at the caller's own async boundary (a real `await`/
      `setTimeout` between running one `<script>` tag and the next) -- see
-     `test-cljs/browser/compat/quickjs_websocket_smoke_test.cljs` for how
+     `test-cljs/browser/compat/quickjs_websocket_smoke_test.cljk` for how
      that plays out in practice.
 
    Every function here is deliberately shaped to be called from
@@ -382,7 +382,7 @@
         before calling this MUST let real wall-clock time pass first via
         its own real async boundary (`js/Promise`/`setTimeout`) -- see this
         namespace's docstring and
-        `test-cljs/browser/compat/quickjs_websocket_smoke_test.cljs`."
+        `test-cljs/browser/compat/quickjs_websocket_smoke_test.cljk`."
        [{:keys [messages closed? close-info error]}]
        (let [drained @messages]
          (reset! messages [])

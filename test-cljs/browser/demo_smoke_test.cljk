@@ -2,7 +2,7 @@
   "Real, non-browser verification of `browser.demo`'s own WebSocket/Worker/
   fetch() proofs -- the exact real `sample-html`/`ws-script1-source`/
   `ws-script2-source`/`grant-demo-permissions`/`synchronous-fetch-fn`
-  functions `src/browser/demo.cljs`'s `init!` uses, imported directly (not
+  functions `src/browser/demo.cljk`'s `init!` uses, imported directly (not
   a re-typed copy), driven through the real `browser.session`/
   `browser.compat.quickjs-runner` pipeline against a REAL local Node server
   -- exactly the way `quickjs_websocket_smoke_test.cljs`/
@@ -80,7 +80,7 @@
 ;; A single, combined REAL local server: /worker.js + /api/fetch-data over
 ;; plain http, plus a real, minimal RFC6455 echo on /ws-echo over the same
 ;; port's raw 'upgrade' socket -- see namespace docstring. Ports
-;; test-cljs/browser/compat/quickjs_websocket_smoke_test.cljs's
+;; test-cljs/browser/compat/quickjs_websocket_smoke_test.cljk's
 ;; websocket-echo-server verbatim (same algorithm), combined with
 ;; quickjs_worker_smoke_test.cljs's/quickjs_fetch_smoke_test.cljs's plain
 ;; http handlers.

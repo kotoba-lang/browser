@@ -5,13 +5,13 @@
 
   The two halves are tested apart for good reasons -- `test/runtime-
   differential.cljs` checks that the ENGINE emits what a real engine would do,
-  and `test/browser/ecma262_test.clj` checks that the HOST applies a log
+  and `test/browser/ecma262_test.cljk` checks that the HOST applies a log
   correctly -- but apart is exactly where a format drift hides: change the log
   format on one side and both suites stay green while nothing works. This
   joins them, so the wire format is measured rather than assumed.
 
   Run:  nbb --classpath \"src:../htmldom/src:../cssom/src:../dom-gpu/src:../org-w3-aria/src\" \\
-          test/dom-end-to-end.cljs [path/to/ecma262.mjs]
+          test/dom-end-to-end.cljk [path/to/ecma262.mjs]
 
   Exit codes: 0 pass, 1 a mismatch, 2 the harness could not answer."
   (:require [browser.compat.ecma262 :as ecma262]

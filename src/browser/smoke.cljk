@@ -5,7 +5,7 @@
    Unlike `browser.demo` (the full-feature manual dev showcase: real QuickJS
    scripts, WebSocket/Worker/fetch, generated content, 1350px page), this is
    deliberately small: `browser.visual-smoke-model` (already proven against a
-   recording host in `test/browser/visual_smoke_model_test.clj`) drives a real
+   recording host in `test/browser/visual_smoke_model_test.cljk`) drives a real
    `browser.session` wired to a real `kotoba.wasm.host.webgl` host, with no
    script engine involved (`model/page`'s `:html` has no `<script>` tags, so
    `session/load-html!` never needs `ensure-script-engine!`)."

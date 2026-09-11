@@ -23,7 +23,7 @@
    QuickJS VM. The genuinely novel claim -- a worker's script REALLY
    executing inside a real, second, independent QuickJS context, and a
    real `self.onmessage`/`postMessage` round trip -- is proven only in
-   `test-cljs/browser/compat/quickjs_worker_smoke_test.cljs`, the one
+   `test-cljs/browser/compat/quickjs_worker_smoke_test.cljk`, the one
    platform where `quickjs-wasm`'s engine is real (see that namespace's
    own docstring for the JVM/real-engine split rationale)."
   (:require [browser.compat.quickjs :as quickjs]

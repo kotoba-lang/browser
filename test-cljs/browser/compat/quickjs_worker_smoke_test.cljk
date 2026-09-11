@@ -6,7 +6,7 @@
   with a real bidirectional `postMessage` round trip proven by a real,
   committed `document.title`.
 
-  ## Why this needed a JVM/CLJS split (see `test/browser/net_worker_test.clj`)
+  ## Why this needed a JVM/CLJS split (see `test/browser/net_worker_test.cljk`)
 
   Real Worker execution has two real halves: (1) really fetching the
   worker's script source (an ordinary `:fetch-fn` HTTP capability, no

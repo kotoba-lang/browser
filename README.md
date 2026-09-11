@@ -393,7 +393,7 @@ end: the authority to change the page never leaves this side of the line.
 handler number, and firing is a second call into the guest.
 
 Whether the two engines agree is measured rather than assumed:
-`test/runtime-differential.cljs` drives both over the same sources -- language,
+`test/runtime-differential.cljk` drives both over the same sources -- language,
 DOM writes, and events -- and asserts its recorded divergences exactly, so a
 divergence that appears and one that disappears both fail the run. The host
 half (`browser.compat.ecma262`: build the snapshot, read the log, apply it) is
@@ -852,5 +852,5 @@ clojure -M:test
 ```
 
 The smoke content/model remains as CLJC data in
-[browser.visual-smoke-model](/Users/junkawasaki/github/com-junkawasaki/orgs/kotoba-lang/browser/src/browser/visual_smoke_model.cljc)
+[browser.visual-smoke-model](/Users/junkawasaki/github/com-junkawasaki/orgs/kotoba-lang/browser/src/browser/visual_smoke_model.cljk)
 and is covered by `browser.visual-smoke-model-test`.

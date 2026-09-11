@@ -22,7 +22,7 @@
    call's returned thenable actually being resolved (or rejected) by the
    webapi shim's fetch delivery IIFE, across two real `<script>` tags -- is
    proven only in
-   `test-cljs/browser/compat/quickjs_fetch_smoke_test.cljs`, the one
+   `test-cljs/browser/compat/quickjs_fetch_smoke_test.cljk`, the one
    platform where `quickjs-wasm`'s engine is real (see that namespace's own
    docstring for the JVM/real-engine split rationale, mirroring
    `quickjs_worker_smoke_test.cljs`'s)."

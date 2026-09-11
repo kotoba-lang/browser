@@ -98,7 +98,7 @@
   `localStorage.setItem('probe', 'x')` in one `<script>` tag makes a LATER
   `<script>` tag's `localStorage.getItem('probe')` observably return `x`
   to JS (proven via `document.title` in
-  `test-cljs/browser/compat/quickjs_runtime_state_threading_smoke_test.cljs`,
+  `test-cljs/browser/compat/quickjs_runtime_state_threading_smoke_test.cljk`,
   not just a host-side `:capability/results` log entry). The snapshot is
   frozen at eval start, so a script that does
   `setItem('x', 'y'); getItem('x')` within the SAME `<script>` tag still
@@ -143,7 +143,7 @@
   whole script synchronously in one pass, and a real message arriving on a
   real socket at some future wall-clock moment cannot interrupt that pass.
   What IS genuinely provable, proven end to end in
-  `test-cljs/browser/compat/quickjs_websocket_smoke_test.cljs`: the SAME
+  `test-cljs/browser/compat/quickjs_websocket_smoke_test.cljk`: the SAME
   QuickJS `vm`/context object is reused across every script tag on a page
   (see `quickjs-wasm/ensure-context!`), so a `WebSocket` instance -- and its
   `.onmessage` property -- that a `<script>` tag created really is still
