@@ -130,7 +130,7 @@
   What that costs, honestly: the guest cannot see its own writes (reads answer
   from the snapshot the host injected), and the only host object it knows is
   `document.getElementById`. Both are measured, in both directions, by
-  `test/runtime-differential.cljs` against the quickjs build this would
+  `test/runtime-differential.cljk` against the quickjs build this would
   replace."
   []
   (descriptor {:id :browser.runtime/ecma262

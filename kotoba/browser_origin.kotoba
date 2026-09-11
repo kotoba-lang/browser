@@ -17,7 +17,7 @@
   ;; so string-code-point-at / string-substring can never trap on a
   ;; split UTF-8 code point.
   ;;
-  ;; parity: the fixtures in browser/test/browser/origin_test.clj
+  ;; parity: the fixtures in browser/test/browser/origin_test.cljk
   ;; (origin-normalizes-scheme-and-authority / same-origin-* /
   ;; parse-url-strips-userinfo / parse-url-normalizes-default-port /
   ;; parse-url-leaves-non-default-port) are reproduced in `main` below.

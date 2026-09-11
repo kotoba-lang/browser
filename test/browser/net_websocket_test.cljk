@@ -27,7 +27,7 @@
      that a later script evaluation would receive -- proving the wiring
      itself (not just the low-level client) moves real bytes, independent
      of the CLJS-only proof that a real `<script>` tag's callback actually
-     fires (see `test-cljs/browser/compat/quickjs_websocket_smoke_test.cljs`)."
+     fires (see `test-cljs/browser/compat/quickjs_websocket_smoke_test.cljk`)."
   (:require [browser.compat.quickjs :as quickjs]
             [browser.compat.quickjs-binding :as binding]
             [browser.compat.quickjs-execution :as execution]

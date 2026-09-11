@@ -37,7 +37,7 @@
     computation, real frame parsing/framing, echoes back whatever real text
     frame it receives) built on Node's built-in `net` + `crypto` modules
     (no new dependency) -- the Node-side analogue of
-    `test/browser/net_websocket_test.clj`'s JVM `java.net.ServerSocket`
+    `test/browser/net_websocket_test.cljk`'s JVM `java.net.ServerSocket`
     server, since the JDK server can't be reused from a Node process and
     vice versa.
   - The client side is `browser.net.websocket`'s REAL `:cljs` `websocket-fn`
@@ -62,7 +62,7 @@
 ;; ---------------------------------------------------------------------
 ;; A minimal, hand-rolled RFC6455 echo server on Node's built-in `net` +
 ;; `crypto` (no new dependency) -- the Node-side analogue of
-;; test/browser/net_websocket_test.clj's java.net.ServerSocket server.
+;; test/browser/net_websocket_test.cljk's java.net.ServerSocket server.
 ;; ---------------------------------------------------------------------
 
 (def ^:private websocket-magic "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")

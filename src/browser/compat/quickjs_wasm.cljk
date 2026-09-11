@@ -88,7 +88,7 @@
   result into a session as `quickjs-execution/new-state`'s `:worker-fn`
   (via `:browser.session/worker-fn`), exactly the way a caller constructs
   and injects a real `browser.net.websocket/websocket-fn` as
-  `:websocket-fn` -- see `test-cljs/browser/compat/quickjs_worker_smoke_test.cljs`."
+  `:websocket-fn` -- see `test-cljs/browser/compat/quickjs_worker_smoke_test.cljk`."
   [engine]
   (when (map? engine)
     (get-in engine [:quickjs.engine/meta :worker-fn])))

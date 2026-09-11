@@ -6,7 +6,7 @@
   `document.title` (this repo's established convention -- see
   `quickjs_websocket_smoke_test.cljs`/`quickjs_worker_smoke_test.cljs`).
 
-  ## Why this needed a JVM/CLJS split (see `test/browser/net_fetch_delivery_test.clj`)
+  ## Why this needed a JVM/CLJS split (see `test/browser/net_fetch_delivery_test.cljk`)
 
   Real fetch() delivery has two real halves: (1) really performing the HTTP
   call and eagerly capturing the real response host-side into

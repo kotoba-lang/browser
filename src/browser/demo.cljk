@@ -43,7 +43,7 @@
    underlying engine (browser.net.websocket, quickjs-wasm's real second-
    context Worker execution, and quickjs-wasm's __kotobaMakeDeferred-backed
    real fetch() delivery), each individually proven via isolated Node-based
-   CLJS smoke tests (test-cljs/browser/compat/quickjs_websocket_smoke_test.cljs,
+   CLJS smoke tests (test-cljs/browser/compat/quickjs_websocket_smoke_test.cljk,
    quickjs_worker_smoke_test.cljs, quickjs_fetch_smoke_test.cljs). This demo
    now exercises all three live, in a real browser tab, against a REAL small
    local server (scripts/demo-server.js -- serves the SAME static public/
@@ -1473,7 +1473,7 @@
    request actually targets (see `browser.origin/origin` -- WebSocket's
    `ws://` origin differs from Worker/fetch's `http://` origin even though
    all three point at the SAME real local server, since origin includes
-   scheme). Public (not `defn-`) so `test-cljs/browser/demo_smoke_test.cljs`
+   scheme). Public (not `defn-`) so `test-cljs/browser/demo_smoke_test.cljk`
    can drive this demo's exact real permission wiring against its own real
    local Node server, not a re-typed copy."
   [worker-url fetch-url ws-url]
@@ -1493,7 +1493,7 @@
    this repo's `:fetch-fn` contract is synchronous end-to-end while a real
    fetch is not. Public (not `defn-`), same reason as
    `grant-demo-permissions` above -- reused verbatim by
-   `test-cljs/browser/demo_smoke_test.cljs`, keyed by that test's own real,
+   `test-cljs/browser/demo_smoke_test.cljk`, keyed by that test's own real,
    Node-`http.get`-prefetched responses instead of `real-prefetch!`'s
    browser-`js/fetch` ones (only the real HTTP client differs -- see that
    test's own docstring)."

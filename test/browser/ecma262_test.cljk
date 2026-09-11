@@ -4,7 +4,7 @@
   What is checked here is the HOST: build a snapshot a real engine can read,
   read a log a real engine wrote, and apply it to a real htmldom document.
   Whether the engine emits the right log is checked elsewhere, against
-  quickjs-ng (`test/runtime-differential.cljs`) -- the two halves are measured
+  quickjs-ng (`test/runtime-differential.cljk`) -- the two halves are measured
   separately so a bug in one cannot hide in the other."
   (:require [browser.compat.ecma262 :as ecma262]
             [browser.dom-bridge :as dom-bridge]
