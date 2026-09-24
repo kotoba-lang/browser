@@ -1,7 +1,7 @@
 (ns browser.input-test
   (:require [browser.input :as input]
             [browser.surface :as surface]
-            [clojure.test :refer [deftest is]]))
+            [kotoba.test :refer [deftest is]]))
 
 (defn- window
   [surface window-id]

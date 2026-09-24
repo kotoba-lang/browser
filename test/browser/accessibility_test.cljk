@@ -8,7 +8,7 @@
             [browser.session :as session]
             [browser.surface :as surface]
             [kotoba.wasm.host :as host]
-            [clojure.test :refer [deftest is]]))
+            [kotoba.test :refer [deftest is]]))
 
 (defn- node-by-a11y-id
   [tree id]

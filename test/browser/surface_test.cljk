@@ -1,7 +1,7 @@
 (ns browser.surface-test
   (:require [browser.surface :as surface]
             [kotoba.lang.text :as str]
-            [clojure.test :refer [deftest is]]))
+            [kotoba.test :refer [deftest is]]))
 
 (deftest os-surface-renders-through-kotoba-dom
   (let [s (-> (surface/empty-surface {:title "Kotoba OS" :viewport [1024 768]})

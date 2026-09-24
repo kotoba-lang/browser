@@ -1,6 +1,6 @@
 (ns browser.origin-test
   (:require [browser.origin :as origin]
-            [clojure.test :refer [deftest is]]))
+            [kotoba.test :refer [deftest is]]))
 
 (deftest origin-normalizes-scheme-and-authority
   (is (= "https://example.com"

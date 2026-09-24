@@ -19,7 +19,7 @@
   (:require [browser.session :as session]
             [browser.visual-smoke-model :as model]
             [kotoba.lang.text :as str]
-            [clojure.test :refer [deftest is testing]]
+            [kotoba.test :refer [deftest is testing]]
             [kotoba.wasm.dom :as dom]
             [kotoba.wasm.host :as host]))
 

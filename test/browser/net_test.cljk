@@ -2,7 +2,7 @@
   (:require [browser.net :as net]
             [browser.profile :as profile]
             [browser.storage :as storage]
-            [clojure.test :refer [deftest is]]))
+            [kotoba.test :refer [deftest is]]))
 
 (deftest same-origin-fetch-stores-cookie-and-cache
   (let [p (-> (profile/new-profile {:id "default"})

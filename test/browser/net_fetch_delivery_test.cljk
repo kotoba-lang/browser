@@ -32,7 +32,7 @@
             [browser.net.http :as http]
             [browser.origin :as origin]
             [browser.profile :as profile]
-            [clojure.test :refer [deftest is]])
+            [kotoba.test :refer [deftest is]])
   (:import [com.sun.net.httpserver HttpExchange HttpHandler HttpServer]
            [java.net InetSocketAddress]))
 

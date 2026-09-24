@@ -35,7 +35,7 @@
             [browser.origin :as origin]
             [browser.profile :as profile]
             [kotoba.lang.text :as str]
-            [clojure.test :refer [deftest is]])
+            [kotoba.test :refer [deftest is]])
   (:import [java.io InputStream OutputStream]
            [java.net InetAddress ServerSocket Socket SocketException]
            [java.security MessageDigest]

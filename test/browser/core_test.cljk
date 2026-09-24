@@ -1,7 +1,7 @@
 (ns browser.core-test
   (:require [browser.core :as browser]
             [browser.dom-bridge :as bridge]
-            [clojure.test :refer [deftest is testing]]
+            [kotoba.test :refer [deftest is testing]]
             [kotoba.wasm.abi :as abi]
             [kotoba.wasm.dom :as dom]))
 

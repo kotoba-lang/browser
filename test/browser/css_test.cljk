@@ -4,7 +4,7 @@
    parsing/tokenizing/specificity) moved to kotoba-lang/cssom's own test
    suite (ADR-2607041700)."
   (:require [browser.core :as browser]
-            [clojure.test :refer [deftest is]]))
+            [kotoba.test :refer [deftest is]]))
 
 (deftest cascade-applies-tag-id-class-and-inline-precedence
   (let [page (browser/load-html

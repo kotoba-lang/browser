@@ -3,7 +3,7 @@
             [browser.audit :as audit]
             [browser.profile :as profile]
             [browser.storage :as storage]
-            [clojure.test :refer [deftest is]]))
+            [kotoba.test :refer [deftest is]]))
 
 (deftest storage-is-partitioned-by-profile-and-origin
   (let [acct (account/new-account {:id "local"})

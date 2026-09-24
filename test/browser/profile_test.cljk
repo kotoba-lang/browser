@@ -1,7 +1,7 @@
 (ns browser.profile-test
   (:require [browser.account :as account]
             [browser.profile :as profile]
-            [clojure.test :refer [deftest is]]))
+            [kotoba.test :refer [deftest is]]))
 
 (deftest account-carries-local-or-verified-identity
   (let [local (account/new-account {:handle "jun"})

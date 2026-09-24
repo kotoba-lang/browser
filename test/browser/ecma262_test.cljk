@@ -9,7 +9,7 @@
   (:require [browser.compat.ecma262 :as ecma262]
             [browser.dom-bridge :as dom-bridge]
             [kotoba.lang.text :as str]
-            [clojure.test :refer [deftest is]]
+            [kotoba.test :refer [deftest is]]
             [htmldom.core :as html]))
 
 (def ^:private page

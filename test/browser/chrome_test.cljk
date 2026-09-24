@@ -1,6 +1,6 @@
 (ns browser.chrome-test
   (:require [browser.chrome :as chrome]
-            [clojure.test :refer [deftest is]]))
+            [kotoba.test :refer [deftest is]]))
 
 (deftest url-bar-commit-produces-navigation-intent
   (let [c (-> (chrome/empty-chrome)

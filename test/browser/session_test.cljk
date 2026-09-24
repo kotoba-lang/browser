@@ -11,7 +11,7 @@
             [browser.storage :as storage]
             [browser.surface :as surface]
             [kotoba.lang.text :as str]
-            [clojure.test :refer [deftest is]]
+            [kotoba.test :refer [deftest is]]
             [kotoba.wasm.dom :as dom]
             [kotoba.wasm.host :as host]))
 

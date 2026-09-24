@@ -1,6 +1,6 @@
 (ns browser.text-edit-test
   (:require [browser.text-edit :as text-edit]
-            [clojure.test :refer [deftest is]]))
+            [kotoba.test :refer [deftest is]]))
 
 (deftest caret-selection-and-composition-edit-text
   (let [state (-> (text-edit/empty-state)
