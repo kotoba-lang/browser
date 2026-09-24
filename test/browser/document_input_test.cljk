@@ -2,7 +2,7 @@
   (:require [browser.core :as browser]
             [browser.document-input :as document-input]
             [browser.dom-bridge :as bridge]
-            [clojure.test :refer [deftest is]]
+            [kotoba.test :refer [deftest is]]
             [kotoba.wasm.dom :as dom]))
 
 (deftest text-input-updates-form-control-value-selection-and-dispatches

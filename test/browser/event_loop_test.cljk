@@ -1,6 +1,6 @@
 (ns browser.event-loop-test
   (:require [browser.event-loop :as loop]
-            [clojure.test :refer [deftest is]]))
+            [kotoba.test :refer [deftest is]]))
 
 (deftest microtasks-run-before-ready-timers
   (let [l (-> (loop/empty-loop)

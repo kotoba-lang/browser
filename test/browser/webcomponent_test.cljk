@@ -1,7 +1,7 @@
 (ns browser.webcomponent-test
   (:require [browser.compat.quickjs :as quickjs]
             [browser.compat.webcomponent :as webcomponent]
-            [clojure.test :refer [deftest is]]))
+            [kotoba.test :refer [deftest is]]))
 
 (def ^:private test-adapter
   (quickjs/new-adapter {:origin "https://app.example" :profile-id "work"}))

@@ -13,7 +13,7 @@
   (:require [browser.net :as net]
             [browser.net.http :as http]
             [browser.session :as session]
-            [clojure.test :refer [deftest is]]
+            [kotoba.test :refer [deftest is]]
             [kotoba.wasm.dom :as dom]
             [kotoba.wasm.host :as host])
   (:import [com.sun.net.httpserver HttpExchange HttpHandler HttpServer]

@@ -1,7 +1,7 @@
 (ns browser.quickjs-binary-test
   (:require [browser.compat.quickjs :as quickjs]
             [browser.compat.quickjs-binding :as binding]
-            [clojure.test :refer [deftest is]]
+            [kotoba.test :refer [deftest is]]
             [quickjs.binary :as binary]))
 
 (deftest quickjs-binary-loader-accepts-wasm-magic

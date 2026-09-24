@@ -1,7 +1,7 @@
 (ns browser.dom-bridge-test
   (:require [browser.core :as browser]
             [browser.dom-bridge :as bridge]
-            [clojure.test :refer [deftest is]]
+            [kotoba.test :refer [deftest is]]
             [kotoba.wasm.dom :as dom]))
 
 (deftest query-selector-uses-css-selector-subset

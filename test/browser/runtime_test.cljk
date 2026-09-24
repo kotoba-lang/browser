@@ -1,6 +1,6 @@
 (ns browser.runtime-test
   (:require [browser.runtime :as runtime]
-            [clojure.test :refer [deftest is]]))
+            [kotoba.test :refer [deftest is]]))
 
 (deftest runtime-descriptors-have-no-ambient-access
   (doseq [[id rt] (runtime/registry)]

@@ -1,6 +1,6 @@
 (ns browser.audit-test
   (:require [browser.audit :as audit]
-            [clojure.test :refer [deftest is]]))
+            [kotoba.test :refer [deftest is]]))
 
 (deftest audit-events-are-datom-shaped-and-replayable
   (let [a (-> (audit/empty-log)

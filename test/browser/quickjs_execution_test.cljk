@@ -10,7 +10,7 @@
             [browser.runtime :as runtime]
             [browser.session :as session]
             [browser.storage :as storage]
-            [clojure.test :refer [deftest is]]
+            [kotoba.test :refer [deftest is]]
             [kotoba.wasm.dom :as dom]
             [quickjs.binary :as binary]
             [kotoba.wasm.host :as host]))

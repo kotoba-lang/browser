@@ -6,7 +6,7 @@
             [browser.persistence-provider :as provider]
             [browser.profile :as profile]
             [browser.storage :as storage]
-            [clojure.test :refer [deftest is]]))
+            [kotoba.test :refer [deftest is]]))
 
 (defn- state []
   (let [acct (account/new-account {:id "local"})

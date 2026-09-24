@@ -10,7 +10,7 @@
             [browser.dom-bridge :as dom-bridge]
             [browser.session :as session]
             [kotoba.lang.text :as str]
-            [clojure.test :refer [deftest is testing]]
+            [kotoba.test :refer [deftest is testing]]
             [kotoba.wasm.host :as host]))
 
 (defn- sample-html []

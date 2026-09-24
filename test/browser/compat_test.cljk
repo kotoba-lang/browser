@@ -5,7 +5,7 @@
             [browser.compat.webapi :as webapi]
             [browser.compat.webcomponent :as wc]
             [browser.runtime :as runtime]
-            [clojure.test :refer [deftest is]]))
+            [kotoba.test :refer [deftest is]]))
 
 (deftest quickjs-adapter-is-wasm-capability-boundary
   (let [adapter (quickjs/new-adapter {:origin "https://Example.com/app"

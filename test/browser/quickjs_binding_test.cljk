@@ -1,7 +1,7 @@
 (ns browser.quickjs-binding-test
   (:require [browser.compat.quickjs :as quickjs]
             [browser.compat.quickjs-binding :as binding]
-            [clojure.test :refer [deftest is]]))
+            [kotoba.test :refer [deftest is]]))
 
 (deftest quickjs-binding-records-evaluate-and-module-load-requests
   (let [adapter (quickjs/new-adapter {:origin "https://example.com"

@@ -1,7 +1,7 @@
 (ns browser.desktop-backend-test
   (:require [browser.desktop-backend :as backend]
             [browser.surface :as surface]
-            [clojure.test :refer [deftest is testing]]))
+            [kotoba.test :refer [deftest is testing]]))
 
 (defn demo-surface []
   (-> (surface/empty-surface {:viewport [800 600]})

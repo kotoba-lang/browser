@@ -2,7 +2,7 @@
   (:require [browser.script-scheduler :as scheduler]
             [browser.script-engine :as script-engine]
             [browser.session :as session]
-            [clojure.test :refer [deftest is]]
+            [kotoba.test :refer [deftest is]]
             [kotoba.wasm.host :as host]))
 
 (deftest scheduler-starts-synchronous-engine-into-session-atom
