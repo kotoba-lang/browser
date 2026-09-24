@@ -3,7 +3,7 @@
             [browser.dom-bridge :as dom-bridge]
             [browseruse.browser :as browser-use]
             [browseruse.recipe :as recipe]
-            [clojure.edn :as edn]
+            [kotoba.lang.edn :as edn]
             [kotoba.lang.text :as str]
             [kotoba.test :refer [deftest is]]))
 

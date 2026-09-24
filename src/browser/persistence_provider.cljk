@@ -1,7 +1,7 @@
 (ns browser.persistence-provider
   "Concrete persistence provider bindings for browser snapshots."
   (:require [browser.persistence :as persistence]
-            #?(:clj [clojure.edn :as edn])))
+            #?(:clj [kotoba.lang.edn :as edn])))
 
 (defprotocol PersistenceProvider
   (save-snapshot! [provider snapshot])
