@@ -28,7 +28,7 @@
      itself (not just the low-level client) moves real bytes, independent
      of the CLJS-only proof that a real `<script>` tag's callback actually
      fires (see `test-cljs/browser/compat/quickjs_websocket_smoke_test.cljk`)."
-  (:require [browser.compat.quickjs :as quickjs]
+  (:require [kotoba.bytes :as kbytes] [browser.compat.quickjs :as quickjs]
             [browser.compat.quickjs-binding :as binding]
             [browser.compat.quickjs-execution :as execution]
             [browser.net.websocket :as ws]
@@ -38,8 +38,7 @@
             [kotoba.test :refer [deftest is]])
   (:import [java.io InputStream OutputStream]
            [java.net InetAddress ServerSocket Socket SocketException]
-           [java.security MessageDigest]
-           [java.util Base64]))
+           [java.security MessageDigest]))
 
 ;; ---------------------------------------------------------------------
 ;; A minimal, hand-rolled RFC6455 echo server (java.net.ServerSocket only
@@ -53,7 +52,7 @@
   [key]
   (let [digest (MessageDigest/getInstance "SHA-1")
         hashed (.digest digest (.getBytes (str key websocket-magic) "UTF-8"))]
-    (.encodeToString (Base64/getEncoder) hashed)))
+    (kbytes/base64-encode hashed)))
 
 (defn- read-line-ascii
   "Read one CRLF-terminated ASCII line from `in`, without the CRLF. Returns
