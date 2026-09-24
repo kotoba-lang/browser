@@ -26,7 +26,7 @@
    `test-cljs/browser/compat/quickjs_worker_smoke_test.cljk`, the one
    platform where `quickjs-wasm`'s engine is real (see that namespace's
    own docstring for the JVM/real-engine split rationale)."
-  (:require [browser.compat.quickjs :as quickjs]
+  (:require [kotoba.bytes :as kbytes] [browser.compat.quickjs :as quickjs]
             [browser.compat.quickjs-binding :as binding]
             [browser.compat.quickjs-execution :as execution]
             [browser.net.http :as http]
@@ -46,7 +46,7 @@
   (let [response-headers (.getResponseHeaders exchange)]
     (doseq [[k v] headers]
       (.add response-headers (str k) (str v))))
-  (let [bytes (.getBytes (or body "") "UTF-8")]
+  (let [bytes (kbytes/utf8-bytes (or body ""))]
     (if (zero? (alength bytes))
       (.sendResponseHeaders exchange status -1)
       (do (.sendResponseHeaders exchange status (alength bytes))

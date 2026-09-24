@@ -10,7 +10,7 @@
    - a real connection failure (closed port) surfacing as a response/error,
      never as an uncaught exception, both at the fetch-fn level and through
      the whole navigate! session."
-  (:require [browser.net :as net]
+  (:require [kotoba.bytes :as kbytes] [browser.net :as net]
             [browser.net.http :as http]
             [browser.session :as session]
             [kotoba.test :refer [deftest is]]
@@ -24,7 +24,7 @@
   (let [response-headers (.getResponseHeaders exchange)]
     (doseq [[k v] headers]
       (.add response-headers (str k) (str v))))
-  (let [bytes (.getBytes (or body "") "UTF-8")]
+  (let [bytes (kbytes/utf8-bytes (or body ""))]
     (if (zero? (alength bytes))
       (.sendResponseHeaders exchange status -1)
       (do (.sendResponseHeaders exchange status (alength bytes))

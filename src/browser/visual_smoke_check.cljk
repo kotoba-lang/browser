@@ -16,7 +16,7 @@
    on the draw ops and is where a render regression is actually caught).
    Keep the two apart: this gate answers \"did it build\",
    visual-smoke-model-test answers \"did it draw the right thing\"."
-  (:require [clojure.java.io :as io]
+  (:require [kotoba.io :as io]
             [kotoba.lang.text :as str]))
 
 (def targets
@@ -45,9 +45,9 @@
 (defn check-artifact!
   [{:keys [path min-bytes contains]}]
   (let [file (io/file path)]
-    (when-not (.exists file)
+    (when-not (io/exists? file)
       (fail! "Missing artifact" {:path path}))
-    (let [bytes (.length file)
+    (let [bytes (io/length file)
           text (slurp file)]
       (when (and min-bytes (< bytes min-bytes))
         (fail! "Artifact is unexpectedly small"
