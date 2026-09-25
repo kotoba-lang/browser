@@ -1,6 +1,6 @@
 (ns browser.session
   "Session adapter from browser pages/surfaces to the kotoba:dom host ABI."
-  (:require [browser.accessibility :as accessibility]
+  (:require [kotoba.http.form-urlencoded :as form-urlencoded] [browser.accessibility :as accessibility]
             [browser.audit :as audit]
             [browser.chrome :as chrome]
             [browser.core :as browser]
@@ -974,7 +974,7 @@
 
 (defn- url-encode
   [value]
-  #?(:clj (-> (java.net.URLEncoder/encode (str value) "UTF-8")
+  #?(:clj (-> (form-urlencoded/form-encode (str value))
               (str/replace "%20" "+"))
      :cljs (-> (js/encodeURIComponent (str value))
                (str/replace "%20" "+"))))
