@@ -6,7 +6,7 @@
   Whether the engine emits the right log is checked elsewhere, against
   quickjs-ng (`test/runtime-differential.cljk`) -- the two halves are measured
   separately so a bug in one cannot hide in the other."
-  (:require [browser.compat.ecma262 :as ecma262]
+  (:require [kotoba.lang.error :as kerror] [browser.compat.ecma262 :as ecma262]
             [browser.dom-bridge :as dom-bridge]
             [kotoba.lang.text :as str]
             [kotoba.test :refer [deftest is]]
@@ -56,9 +56,9 @@
 ;; parsed would make "the script asked for two things and we lost one"
 ;; indistinguishable from "the script asked for one thing".
 (deftest parse-effects-refuses-a-truncated-log
-  (is (thrown? clojure.lang.ExceptionInfo
+  (is (thrown? kerror/ExceptionInfo
                (ecma262/parse-effects "11:textContent8:ws-proof9:short")))
-  (is (thrown? clojure.lang.ExceptionInfo
+  (is (thrown? kerror/ExceptionInfo
                (ecma262/parse-effects "11:textContent"))))
 
 (deftest apply-effects-sets-real-text-content
