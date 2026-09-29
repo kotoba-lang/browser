@@ -336,7 +336,7 @@
 
   `cljs.test`'s `async` has no timeout of its own: a promise that never
   settles leaves the whole run waiting forever, and a run that hangs looks
-  exactly like one that is merely slow -- the sixth of CLAUDE.md's six
+  exactly like one that is merely slow -- the sixth of AGENTS.md's six
   questions, applied to a test rather than a gate. Measured 2026-08-29 on this
   workstation, this test DOES hang: the suite reaches
   `browser.demo-smoke-test` and stops there, and the WebSocket echo never
