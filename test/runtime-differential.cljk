@@ -254,7 +254,7 @@
         ;; Keep the error's NAME. Flattening every failure to "Error" made the
         ;; two engines look like they disagreed about `null.textContent = x`
         ;; when both answered TypeError -- the harness was discarding the
-        ;; message, which is the third of CLAUDE.md's six questions.
+        ;; message, which is the third of AGENTS.md's six questions.
         (let [msg (subs out 6)
               i (str/index-of msg ": ")]
           (str "<error:" (if i (subs msg 0 i) "Error") ">"))
