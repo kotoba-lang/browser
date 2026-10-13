@@ -21,7 +21,7 @@ Existing substrates are reused:
 - `kotoba-lang/dom-gpu`: current DOM ABI, virtual DOM, layout, WebGL/WebGPU hosts.
 - `kotoba-lang/html`: EDN/Hiccup to HTML emitter.
 - `kotoba-lang/css`: EDN to CSS emitter.
-- `kotoba-lang/kami-webgpu`: EDN render-IR and GPU execution.
+- `kotoba-lang/webgpu` (formerly kami-webgpu): EDN render-IR and GPU execution.
 
 ## Naming
 
