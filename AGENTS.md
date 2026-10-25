@@ -16,3 +16,9 @@ This does not cover the former full hosted Browser tests/lint, shared CSSOM,
 surface/input, a kernel desktop, accessibility, reference hardware, dapps or
 state restoration. Keep those qualification gaps open. Do not delete source
 declarations to make a graph compile. Preserve other owners' source ports.
+
+The native-shared workflow now executes the current owner fixture on both native
+ARM and x86 Linux using an immutable Amu commit and pinned shared dependencies.
+It hashes the actual compiler image, locks all discovered source bytes and
+preserves Kotoba verdicts/refusals as artifacts. Its bounded result does not
+restore the uncovered legacy full host suite or qualify the P4 desktop.
