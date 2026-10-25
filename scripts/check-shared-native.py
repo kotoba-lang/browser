@@ -53,6 +53,8 @@ def main(a):
     for name, owner, filename in [('text', a.text, 'text.kotoba'),
                                    ('dom', a.dom, 'dom.kotoba'),
                                    ('text-edit', a.browser, 'text-edit.kotoba')]:
+        if a.case and name != a.case:
+            continue
         entry = (owner / 'test/native' / filename).resolve()
         source_roots = [root / 'src' for root in roots] + [entry.parent]
         flags = [part for root in source_roots for part in ['--source-path', str(root)]]
@@ -107,6 +109,7 @@ if __name__ == '__main__':
     p.add_argument('--dom', type=Path, required=True)
     p.add_argument('--text', type=Path, required=True)
     p.add_argument('--output', type=Path, required=True)
+    p.add_argument('--case', choices=['text', 'dom', 'text-edit'])
     a = p.parse_args()
     assert a.runner_source if a.target == 'arm64' else a.runner
     main(a)
