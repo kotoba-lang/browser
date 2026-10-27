@@ -28,13 +28,13 @@
 
    A page that asks for `color-scheme: dark` still gets the dark theme; an
    explicit `:theme` from the embedder still wins over both."
-  (assoc layout/default-theme :fg "#000000" :bg "#ffffff"))
+  (assoc (layout/default-theme-value) :fg "#000000" :bg "#ffffff"))
 
 (defn- page-theme
   [theme color-scheme]
   (or theme
       (if (= "dark" (some-> color-scheme name))
-        layout/default-theme
+        (layout/default-theme-value)
         light-page-theme)))
 
 (defn render-document

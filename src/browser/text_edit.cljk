@@ -1,20 +1,146 @@
 (ns browser.text-edit
-  "Small text editing model for browser/OS surface text input.")
+  "Small text editing model for browser/OS surface text input."
+  {:kotoba/export [empty-state]}
+  (:schemas {:browser.text-edit/options
+             [:record :browser.text-edit/options [[:extend? :bool]]]
+             :browser.text-edit/state
+             [:record :browser.text-edit/state
+              [[:text/value :string]
+               [:text/caret :i64]
+               [:text/selection-start :i64]
+               [:text/selection-end :i64]
+               [:text/composition :string]
+               [:text/composing :bool]]]}))
 
-(defn empty-state
-  []
-  {:text/value ""
-   :text/caret 0
-   :text/selection [0 0]
-   :text/composition nil})
+#?(:kotoba
+   (defn empty-state [] [:ref :browser.text-edit/state]
+     (record [:ref :browser.text-edit/state] "" 0 0 0 "" false))
+   :default
+   (defn empty-state
+     []
+     {:text/value ""
+      :text/caret 0
+      :text/selection [0 0]
+      :text/composition nil}))
+
+(defn- selection-bounds
+  [#?@(:kotoba [state [:ref :browser.text-edit/state]] :default [state])] #?@(:kotoba [:vector-i64])
+  #?(:kotoba [(:text/selection-start state) (:text/selection-end state)]
+     :default (or (:text/selection state) [(:text/caret state) (:text/caret state)])))
+
+(defn- set-selection
+  [#?@(:kotoba [state [:ref :browser.text-edit/state] start :i64 end :i64]
+       :default [state start end])] #?@(:kotoba [[:ref :browser.text-edit/state]])
+  #?(:kotoba (assoc state :text/selection-start start :text/selection-end end)
+     :default (assoc state :text/selection [start end])))
+
+(defn- clear-composition
+  [#?@(:kotoba [state [:ref :browser.text-edit/state]] :default [state])] #?@(:kotoba [[:ref :browser.text-edit/state]])
+  #?(:kotoba (assoc state :text/composition "" :text/composing false)
+     :default (assoc state :text/composition nil)))
 
 (defn- clamp
-  [n lo hi]
-  (max lo (min hi (or n lo))))
+  [#?@(:kotoba [n :i64 lo :i64 hi :i64] :default [n lo hi])] #?@(:kotoba [:i64])
+  (max lo (min hi #?(:kotoba n :default (or n lo)))))
+
+(defn- kotoba-utf8-width
+  [#?@(:kotoba [code-point :i64] :default [code-point])] #?@(:kotoba [:i64])
+  #?(:kotoba
+     (if (< code-point 128) 1
+       (if (< code-point 2048) 2
+         (if (< code-point 65536) 3 4)))
+     :default 0))
+
+(defn- kotoba-utf16-length
+  [#?@(:kotoba [value :string] :default [value])] #?@(:kotoba [:i64])
+  #?(:kotoba
+     (let [byte-length (string-byte-length value)]
+       (loop [byte-offset 0
+              unit-length 0]
+         (if (>= byte-offset byte-length)
+           unit-length
+           (let [code-point (string-code-point-at value byte-offset)]
+             (recur (+ byte-offset (kotoba-utf8-width code-point))
+                    (+ unit-length (if (> code-point 65535) 2 1)))))))
+     :default 0))
+
+(defn- kotoba-byte-offset
+  "Map a UTF-16 position to a UTF-8 byte boundary. Positions inside a
+   surrogate pair map to its start; selection and caret reducers snap those
+   positions before editing."
+  [#?@(:kotoba [value :string target :i64] :default [value target])] #?@(:kotoba [:i64])
+  #?(:kotoba
+     (let [byte-length (string-byte-length value)]
+       (loop [byte-offset 0
+              unit-offset 0]
+         (cond
+           (<= target unit-offset) byte-offset
+           (>= byte-offset byte-length) byte-length
+           :else
+           (let [code-point (string-code-point-at value byte-offset)
+                 next-unit-offset (+ unit-offset (if (> code-point 65535) 2 1))]
+             (if (< target next-unit-offset)
+               byte-offset
+               (recur (+ byte-offset (kotoba-utf8-width code-point))
+                      next-unit-offset))))))
+     :default 0))
+
+(defn- kotoba-code-unit-at
+  [#?@(:kotoba [value :string target :i64] :default [value target])] #?@(:kotoba [:i64])
+  #?(:kotoba
+     (let [byte-length (string-byte-length value)]
+       (loop [byte-offset 0
+              unit-offset 0]
+         (if (>= byte-offset byte-length)
+           0
+           (let [code-point (string-code-point-at value byte-offset)
+                 unit-width (if (> code-point 65535) 2 1)]
+             (cond
+               (= target unit-offset)
+               (if (= unit-width 1)
+                 code-point
+                 (+ 55296 (quot (- code-point 65536) 1024)))
+
+               (and (= unit-width 2) (= target (+ unit-offset 1)))
+               (+ 56320
+                  #?(:kotoba
+                     (- (- code-point 65536)
+                        (* 1024 (quot (- code-point 65536) 1024)))
+                     :default (mod (- code-point 65536) 1024)))
+
+               (< target unit-offset) 0
+
+               :else
+               (recur (+ byte-offset (kotoba-utf8-width code-point))
+                      (+ unit-offset unit-width)))))))
+     :default 0))
+
+(defn- text-length
+  [#?@(:kotoba [value :string] :default [value])] #?@(:kotoba [:i64])
+  #?(:kotoba (kotoba-utf16-length value)
+     :default (count value)))
+
+(defn- text-substring
+  [#?@(:kotoba [value :string start :i64 end :i64] :default [value start end])] #?@(:kotoba [:string])
+  #?(:kotoba (string-substring value
+                               (kotoba-byte-offset value start)
+                               (kotoba-byte-offset value end))
+     :default (subs value start end)))
+
+(defn- text-concat
+  [#?@(:kotoba [left :string right :string] :default [left right])] #?@(:kotoba [:string])
+  #?(:kotoba (string-concat left right)
+     :default (str left right)))
+
+(defn- text-input
+  [#?@(:kotoba [value :string] :default [value])] #?@(:kotoba [:string])
+  #?(:kotoba value
+     :default (str value)))
 
 (defn- code-unit-at
-  [s idx]
-  #?(:clj (int (.charAt ^String s idx))
+  [#?@(:kotoba [s :string idx :i64] :default [s idx])] #?@(:kotoba [:i64])
+  #?(:kotoba (kotoba-code-unit-at s idx)
+     :clj (int (.charAt ^String s idx))
      :cljs (.charCodeAt s idx)))
 
 (defn- surrogate-pair-boundary?
@@ -28,21 +154,29 @@
    via a real REPL reproduction before this fix: typing an emoji then
    pressing Backspace, Delete, or an arrow key that lands mid-pair all
    produced a value containing an unpaired surrogate code unit."
-  [value p]
-  (and (pos? p) (< p (count value))
+  [#?@(:kotoba [value :string p :i64] :default [value p])] #?@(:kotoba [:bool])
+  (and (pos? p) (< p (text-length value))
        (<= 0xD800 (code-unit-at value (dec p)) 0xDBFF)
        (<= 0xDC00 (code-unit-at value p) 0xDFFF)))
 
-(defn normalize-selection
-  [state]
+(defn- normalize-selection-state
+  [#?@(:kotoba [state [:ref :browser.text-edit/state]] :default [state])]
+  #?@(:kotoba [[:ref :browser.text-edit/state]])
   (let [value (:text/value state "")
-        n (count value)
-        [a b] (or (:text/selection state) [(:text/caret state) (:text/caret state)])
-        a (clamp a 0 n)
-        b (clamp b 0 n)]
-    (assoc state
-           :text/caret (clamp (:text/caret state) 0 n)
-           :text/selection [(min a b) (max a b)])))
+        n (text-length value)
+        [selection-start selection-end] (selection-bounds state)
+        clamped-start (clamp selection-start 0 n)
+        clamped-end (clamp selection-end 0 n)]
+    (assoc (set-selection state (min clamped-start clamped-end)
+                          (max clamped-start clamped-end))
+           :text/caret (clamp (:text/caret state) 0 n))))
+
+#?(:kotoba
+   (defn normalize-selection [state [:ref :browser.text-edit/state]]
+     [:ref :browser.text-edit/state] (normalize-selection-state state))
+   :default
+   (defn normalize-selection [state]
+     (normalize-selection-state state)))
 
 (defn- snap-out-of-surrogate-pair
   "Snaps `p` backward, to just before the pair, whenever it sits strictly
@@ -61,121 +195,233 @@
   [value p]
   (if (surrogate-pair-boundary? value p) (dec p) p))
 
-(defn collapse
-  [state caret]
+(defn- collapse-state
+  [#?@(:kotoba [state [:ref :browser.text-edit/state] caret :i64] :default [state caret])]
+  #?@(:kotoba [[:ref :browser.text-edit/state]])
   (let [value (:text/value state "")
-        caret (-> caret (clamp 0 (count value)) (->> (snap-out-of-surrogate-pair value)))]
-    (assoc state :text/caret caret :text/selection [caret caret])))
+        normalized-caret (-> caret
+                             (clamp 0 (text-length value))
+                             (->> (snap-out-of-surrogate-pair value)))]
+    (set-selection (assoc state :text/caret normalized-caret)
+                   normalized-caret normalized-caret)))
 
-(defn select
-  [state start end]
+#?(:kotoba
+   (defn collapse [state [:ref :browser.text-edit/state] caret :i64]
+     [:ref :browser.text-edit/state] (collapse-state state caret))
+   :default
+   (defn collapse [state caret]
+     (collapse-state state caret)))
+
+(defn- select-state
+  [#?@(:kotoba [state [:ref :browser.text-edit/state] start :i64 end :i64] :default [state start end])]
+  #?@(:kotoba [[:ref :browser.text-edit/state]])
   (let [value (:text/value state "")]
-    (-> state
-        (assoc :text/selection [(snap-out-of-surrogate-pair value start)
-                                 (snap-out-of-surrogate-pair value end)]
-               :text/caret (snap-out-of-surrogate-pair value end))
+    (-> (set-selection state
+                       (snap-out-of-surrogate-pair value start)
+                       (snap-out-of-surrogate-pair value end))
+        (assoc :text/caret (snap-out-of-surrogate-pair value end))
         (normalize-selection))))
 
-(defn insert-text
-  [state text]
-  (let [state (normalize-selection state)
-        value (:text/value state "")
-        [start end] (:text/selection state)
-        text (str text)
-        value (str (subs value 0 start) text (subs value end))
-        caret (+ start (count text))]
-    (assoc state
-           :text/value value
-           :text/caret caret
-           :text/selection [caret caret]
-           :text/composition nil)))
+#?(:kotoba
+   (defn select
+     [state [:ref :browser.text-edit/state] start :i64 end :i64]
+     [:ref :browser.text-edit/state] (select-state state start end))
+   :default
+   (defn select
+     [state start end]
+     (select-state state start end)))
 
-(defn delete-backward
-  [state]
-  (let [state (normalize-selection state)
-        value (:text/value state "")
-        [start end] (:text/selection state)]
+(defn- insert-text-state
+  [#?@(:kotoba [state [:ref :browser.text-edit/state] text :string] :default [state text])]
+  #?@(:kotoba [[:ref :browser.text-edit/state]])
+  (let [normalized-state (normalize-selection state)
+        old-value (:text/value normalized-state "")
+        [start end] (selection-bounds normalized-state)
+        input-text (text-input text)
+        new-value (text-concat (text-concat (text-substring old-value 0 start)
+                                            input-text)
+                               (text-substring old-value end (text-length old-value)))
+        new-caret (+ start (text-length input-text))]
+    (clear-composition
+     (set-selection (assoc normalized-state :text/value new-value
+                                            :text/caret new-caret)
+                    new-caret new-caret))))
+
+#?(:kotoba
+   (defn insert-text [state [:ref :browser.text-edit/state] text :string]
+     [:ref :browser.text-edit/state] (insert-text-state state text))
+   :default
+   (defn insert-text [state text]
+     (insert-text-state state text)))
+
+(defn- delete-backward-state
+  [#?@(:kotoba [state [:ref :browser.text-edit/state]] :default [state])]
+  #?@(:kotoba [[:ref :browser.text-edit/state]])
+  (let [normalized-state (normalize-selection state)
+        value (:text/value normalized-state "")
+        [start end] (selection-bounds normalized-state)]
     (cond
       (< start end)
-      (insert-text state "")
+      (insert-text normalized-state "")
 
       (pos? start)
       (let [caret (if (surrogate-pair-boundary? value (dec start)) (- start 2) (dec start))]
-        (assoc state
-               :text/value (str (subs value 0 caret) (subs value start))
-               :text/caret caret
-               :text/selection [caret caret]))
+        (set-selection
+         (assoc normalized-state
+                :text/value (text-concat (text-substring value 0 caret)
+                                         (text-substring value start (text-length value)))
+                :text/caret caret)
+         caret caret))
 
-      :else state)))
+      :else normalized-state)))
 
-(defn delete-forward
-  [state]
-  (let [state (normalize-selection state)
-        value (:text/value state "")
-        [start end] (:text/selection state)]
+(defn- delete-forward-state
+  [#?@(:kotoba [state [:ref :browser.text-edit/state]] :default [state])]
+  #?@(:kotoba [[:ref :browser.text-edit/state]])
+  (let [normalized-state (normalize-selection state)
+        value (:text/value normalized-state "")
+        [start end] (selection-bounds normalized-state)]
     (cond
       (< start end)
-      (insert-text state "")
+      (insert-text normalized-state "")
 
-      (< end (count value))
+      (< end (text-length value))
       (let [delete-end (if (surrogate-pair-boundary? value (inc end)) (+ end 2) (inc end))]
-        (assoc state
-               :text/value (str (subs value 0 start) (subs value delete-end))
-               :text/caret start
-               :text/selection [start start]))
+        (set-selection
+         (assoc normalized-state
+                :text/value (text-concat (text-substring value 0 start)
+                                         (text-substring value delete-end (text-length value)))
+                :text/caret start)
+         start start))
 
-      :else state)))
+      :else normalized-state)))
+
+#?(:kotoba
+   (defn delete-backward [state [:ref :browser.text-edit/state]]
+     [:ref :browser.text-edit/state] (delete-backward-state state))
+   :default
+   (defn delete-backward [state]
+     (delete-backward-state state)))
+
+#?(:kotoba
+   (defn delete-forward [state [:ref :browser.text-edit/state]]
+     [:ref :browser.text-edit/state] (delete-forward-state state))
+   :default
+   (defn delete-forward [state]
+     (delete-forward-state state)))
 
 (defn- selection-anchor
-  [state]
-  (let [state (normalize-selection state)
-        caret (:text/caret state)
-        [start end] (:text/selection state)]
+  [#?@(:kotoba [state [:ref :browser.text-edit/state]] :default [state])] #?@(:kotoba [:i64])
+  (let [normalized-state (normalize-selection state)
+        caret (:text/caret normalized-state)
+        [start end] (selection-bounds normalized-state)]
     (if (<= caret start) end start)))
 
-(defn move-caret
-  ([state delta]
-   (move-caret state delta {}))
-  ([state delta {:keys [extend?]}]
-   (let [state (normalize-selection state)
-         value (:text/value state "")
-         [start end] (:text/selection state)
-         caret (:text/caret state)
-         next-caret (clamp (if (and (not extend?) (< start end))
-                             (if (neg? delta) start end)
-                             (+ caret delta))
-                           0
-                           (count value))
-         next-caret (cond
-                      (and (neg? delta) (surrogate-pair-boundary? value next-caret)) (dec next-caret)
-                      (and (pos? delta) (surrogate-pair-boundary? value next-caret)) (inc next-caret)
-                      :else next-caret)]
-     (if extend?
-       (select state (selection-anchor state) next-caret)
-       (collapse state next-caret)))))
+(defn- move-caret-state
+  [#?@(:kotoba [state [:ref :browser.text-edit/state]
+                 delta :i64 opts [:ref :browser.text-edit/options]]
+       :default [state delta opts])]
+  #?@(:kotoba [[:ref :browser.text-edit/state]])
+  (let [extend? (:extend? opts)
+        normalized-state (normalize-selection state)
+        value (:text/value normalized-state "")
+        [start end] (selection-bounds normalized-state)
+        current-caret (:text/caret normalized-state)
+        bounded-caret (clamp (if (and (not extend?) (< start end))
+                               (if (neg? delta) start end)
+                               (+ current-caret delta))
+                             0
+                             (text-length value))
+        next-caret (cond
+                     (and (neg? delta) (surrogate-pair-boundary? value bounded-caret))
+                     (dec bounded-caret)
+                     (and (pos? delta) (surrogate-pair-boundary? value bounded-caret))
+                     (inc bounded-caret)
+                     :else bounded-caret)]
+    (if extend?
+      (select normalized-state (selection-anchor normalized-state) next-caret)
+      (collapse normalized-state next-caret))))
 
-(defn move-to
-  ([state caret]
-   (move-to state caret {}))
-  ([state caret {:keys [extend?]}]
-   (let [state (normalize-selection state)
-         caret (clamp caret 0 (count (:text/value state "")))]
-     (if extend?
-       (select state (selection-anchor state) caret)
-       (collapse state caret)))))
+#?(:kotoba
+   (defn move-caret [state [:ref :browser.text-edit/state]
+                     delta :i64 opts [:ref :browser.text-edit/options]]
+     [:ref :browser.text-edit/state] (move-caret-state state delta opts))
+   :default
+   (defn move-caret
+     ([state delta]
+      (move-caret-state state delta {}))
+     ([state delta opts]
+      (move-caret-state state delta opts))))
 
-(defn select-all
-  [state]
-  (select state 0 (count (:text/value state ""))))
+(defn- move-to-state
+  [#?@(:kotoba [state [:ref :browser.text-edit/state]
+                 caret :i64 opts [:ref :browser.text-edit/options]]
+       :default [state caret opts])]
+  #?@(:kotoba [[:ref :browser.text-edit/state]])
+  (let [normalized-state (normalize-selection state)
+        bounded-caret (clamp caret 0 (text-length (:text/value normalized-state "")))]
+    (if (:extend? opts)
+      (select normalized-state (selection-anchor normalized-state) bounded-caret)
+      (collapse normalized-state bounded-caret))))
 
-(defn composition-start
-  [state]
-  (assoc state :text/composition {:composition/text ""}))
+#?(:kotoba
+   (defn move-to
+     [state [:ref :browser.text-edit/state]
+      caret :i64 opts [:ref :browser.text-edit/options]]
+     [:ref :browser.text-edit/state] (move-to-state state caret opts))
+   :default
+   (defn move-to
+     ([state caret]
+      (move-to-state state caret {}))
+     ([state caret opts]
+      (move-to-state state caret opts))))
 
-(defn composition-update
-  [state text]
-  (assoc state :text/composition {:composition/text (str text)}))
+(defn- select-all-state
+  [#?@(:kotoba [state [:ref :browser.text-edit/state]] :default [state])]
+  #?@(:kotoba [[:ref :browser.text-edit/state]])
+  (select state 0 (text-length (:text/value state ""))))
 
-(defn composition-end
-  [state text]
-  (insert-text (assoc state :text/composition nil) text))
+#?(:kotoba
+   (defn select-all [state [:ref :browser.text-edit/state]]
+     [:ref :browser.text-edit/state] (select-all-state state))
+   :default
+   (defn select-all [state]
+     (select-all-state state)))
+
+(defn- composition-start-state
+  [#?@(:kotoba [state [:ref :browser.text-edit/state]] :default [state])]
+  #?@(:kotoba [[:ref :browser.text-edit/state]])
+  #?(:kotoba (assoc state :text/composition "" :text/composing true)
+     :default (assoc state :text/composition {:composition/text ""})))
+
+(defn- composition-update-state
+  [#?@(:kotoba [state [:ref :browser.text-edit/state] text :string] :default [state text])]
+  #?@(:kotoba [[:ref :browser.text-edit/state]])
+  #?(:kotoba (assoc state :text/composition (text-input text) :text/composing true)
+     :default (assoc state :text/composition {:composition/text (text-input text)})))
+
+(defn- composition-end-state
+  [#?@(:kotoba [state [:ref :browser.text-edit/state] text :string] :default [state text])]
+  #?@(:kotoba [[:ref :browser.text-edit/state]])
+  (insert-text (clear-composition state) text))
+
+#?(:kotoba
+   (defn composition-start [state [:ref :browser.text-edit/state]]
+     [:ref :browser.text-edit/state] (composition-start-state state))
+   :default
+   (defn composition-start [state]
+     (composition-start-state state)))
+
+#?(:kotoba
+   (defn composition-update [state [:ref :browser.text-edit/state] text :string]
+     [:ref :browser.text-edit/state] (composition-update-state state text))
+   :default
+   (defn composition-update [state text]
+     (composition-update-state state text)))
+
+#?(:kotoba
+   (defn composition-end [state [:ref :browser.text-edit/state] text :string]
+     [:ref :browser.text-edit/state] (composition-end-state state text))
+   :default
+   (defn composition-end [state text]
+     (composition-end-state state text)))

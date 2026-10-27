@@ -3,6 +3,8 @@
 
    Host adapters and aiueos providers normalize their own event names into this
    vocabulary before reducing against browser.surface."
+  {:kotoba/export [empty-state window-at normalize-event actions-for-event
+                   reduce-event reduce-events]}
   (:require [browser.surface :as surface]))
 
 (def titlebar-height 28)
@@ -31,6 +33,43 @@
   [[px py] [x y w h]]
   (and (<= (- (+ x w) resize-handle-size) px (+ x w))
        (<= (- (+ y h) resize-handle-size) py (+ y h))))
+
+(defn- launcher-app-at
+  "Hit-test the fixed launcher rectangles emitted by surface-node."
+  [surface [px py]]
+  (let [top (:surface/menubar-height surface 28)]
+    (when (<= (+ top 3) py (+ top 27))
+      (first
+       (filter (fn [app]
+                 (let [left (+ 6 (* 102 (:app/launcher-slot app 0)))]
+                   (<= left px (+ left 96))))
+               (:surface/apps surface))))))
+
+(defn- dock-app-at
+  "Hit-test the centered Dock buttons emitted by surface-node."
+  [surface [px py]]
+  (let [[width height] (:surface/viewport surface [1280 800])
+        apps (:surface/apps surface)
+        dock-height (:surface/dock-height surface 64)
+        dock-width (+ 12 (* (count apps) 72))
+        centered-left (quot (- width dock-width) 2)
+        dock-left (if (< centered-left 12) 12 centered-left)
+        dock-top (- height (+ dock-height 8))]
+    (when (<= (+ dock-top 6) py (+ dock-top 58))
+      (first
+       (filter (fn [app]
+                 (let [left (+ dock-left 6 (* 72 (:app/launcher-slot app 0)))]
+                   (<= left px (+ left 64))))
+               apps)))))
+
+(defn- window-close-hit?
+  [window [px py]]
+  (let [[x y w _h] (:window/rect window)
+        left (+ x w -22)
+        top (+ y 6)]
+    (and (>= w 40)
+         (<= left px (+ left 16))
+         (<= top py (+ top 16)))))
 
 (defn normalize-event
   "Converts host/aiueos event records into the browser input vocabulary."
@@ -122,6 +161,7 @@
          :key/down :key/up :text/input
          :text/caret :text/selection
          :composition/start :composition/update :composition/end
+         :app/launch
          :select/change :file/select} t)
       event
 
@@ -151,6 +191,9 @@
         (let [[x y w h] (:window/rect window)
               id (:window/id window)
               action (cond
+                       (window-close-hit? window point)
+                       nil
+
                        (in-resize-handle? point (:window/rect window))
                        {:kind :resize
                         :window-id id
@@ -212,9 +255,21 @@
       :pointer/click
       (if-let [window (window-at surface point)]
         {:input (assoc input :pointer/position point)
-         :actions [{:action :window/focus :window-id (:window/id window)}]}
-        {:input (assoc input :pointer/position point)
-         :actions []})
+         :actions [(if (window-close-hit? window point)
+                     {:action :window/close :window-id (:window/id window)}
+                     {:action :window/focus :window-id (:window/id window)})]}
+        (if-let [app (launcher-app-at surface point)]
+          {:input (assoc input :pointer/position point)
+           :actions [{:action :app/launch :app-id (:app/id app)}]}
+          (if-let [app (dock-app-at surface point)]
+            {:input (assoc input :pointer/position point)
+             :actions [{:action :app/launch :app-id (:app/id app)}]}
+            {:input (assoc input :pointer/position point)
+             :actions []})))
+
+      :app/launch
+      {:input input
+       :actions [{:action :app/launch :app-id (:app-id event)}]}
 
       :pointer/wheel
       (if-let [window (window-at surface point)]
