@@ -1,0 +1,9 @@
+{
+  "manifest_version": 3,
+  "name": "declarativeNetRequest fixture",
+  "version": "1.0.0",
+  "permissions": ["declarativeNetRequest"],
+  "host_permissions": ["https://news.example/*"],
+  "declarative_net_request": {"rule_resources": [{"id": "static", "enabled": true, "path": "rules.json"}]},
+  "background": {"service_worker": "background.js"}
+}
