@@ -7,6 +7,7 @@ import { bindLocalInput, commitLocalProjection, encodeLocalEvent } from './local
 import { encodeLocalHtmlResponse } from './local_html_response.js';
 
 const MAX_FRAME = 1048576;
+const MAX_SNAPSHOT = 131072;
 const MAX_HEADER = 64;
 const MAX_INPUT = 65700;
 const MAX_PENDING_TEXT = 32;
@@ -42,6 +43,7 @@ export function createLocalActorHost({ mount, write, onNavigation = () => {}, on
   function fail(error) {
     if (!closed) {
       closed = true;
+      if (sent && sent.reject) { sent.reject(error); sent = null; }
       abortResponses();
       mount.removeEventListener('pointerdown', holdSelection, true);
       pendingText = []; pendingBytes = 0;
@@ -126,6 +128,8 @@ export function createLocalActorHost({ mount, write, onNavigation = () => {}, on
     const batches = JSON.parse(decoder.decode(shellLength === null ? bytes : bytes.subarray(0, shellLength)));
     const pageBatches = pageLength ? JSON.parse(decoder.decode(bytes.subarray(shellLength, shellLength + pageLength))) : undefined;
     const completed = sent;
+    if (completed && completed.type === ':host/snapshot') throw new Error('invalid snapshot acknowledgement');
+    if (completed && completed.type === ':host/restore' && (pageLength || intentLength)) throw new Error('invalid snapshot restore acknowledgement');
     if (completed && completed.type === ':host/response' && (!pageLength || intentLength)) {
       throw new Error('invalid HTML response acknowledgement');
     }
@@ -175,6 +179,7 @@ export function createLocalActorHost({ mount, write, onNavigation = () => {}, on
         pendingNotices.get(completed.notice.tab) === completed.notice) {
       pendingNotices.delete(completed.notice.tab);
     }
+    if (completed && completed.type === ':host/restore') completed.resolve(true);
     if (notice) { pendingNotices.set(notice.tab, notice); onNavigation(notice); }
     if (pendingText.length) {
       const input = mount.querySelector('input[data-role="address"]');
@@ -198,7 +203,7 @@ export function createLocalActorHost({ mount, write, onNavigation = () => {}, on
         if (nl > MAX_HEADER) throw new Error('actor header limit');
         const header = decoder.decode(buffer.subarray(0, nl));
         if (header === 'REJECT') {
-          if (!waiting || !sent || ![':host/response', ':host/cancel'].includes(sent.type)) {
+          if (!waiting || !sent || ![':host/response', ':host/cancel', ':host/snapshot', ':host/restore'].includes(sent.type)) {
             throw new Error('unexpected actor refusal');
           }
           const refused = sent;
@@ -208,7 +213,17 @@ export function createLocalActorHost({ mount, write, onNavigation = () => {}, on
           // The actor has not advanced its revision or changed state. Keep
           // the displayed page and the notice so the trusted host can cancel
           // or retry; this is a generic refusal, not a diagnostic from HTML.
+          if (refused.reject) { refused.reject(new Error('actor refused snapshot operation')); continue; }
           onNavigationError(Object.freeze({notice: refused.notice, operation: refused.type === ':host/response' ? 'response' : 'cancel'}));
+          continue;
+        }
+        const snapshot = /^SFRAME ([1-9][0-9]{0,15}) ([1-9][0-9]{0,5})$/.exec(header);
+        if (snapshot) {
+          const rev = Number(snapshot[1]), length = Number(snapshot[2]);
+          if (!waiting || !sent || sent.type !== ':host/snapshot' || rev !== revision ||
+              !Number.isSafeInteger(rev) || length > MAX_SNAPSHOT) throw new Error('unexpected snapshot frame');
+          expected = {rev, length, snapshot:true};
+          buffer = buffer.slice(nl + 1);
           continue;
         }
         const match = /^FRAME ([1-9][0-9]{0,15}) ([1-9][0-9]{0,6})$/.exec(header);
@@ -225,14 +240,36 @@ export function createLocalActorHost({ mount, write, onNavigation = () => {}, on
         buffer = buffer.slice(nl + 1);
       }
       if (buffer.length < expected.length) return;
-      const { rev, length, shellLength, pageLength, intentLength } = expected;
+      const { rev, length, shellLength, pageLength, intentLength, snapshot } = expected;
       const bytes = buffer.slice(0, length);
       buffer = buffer.slice(length);
       expected = null;
-      frame(rev, bytes, shellLength, pageLength, intentLength);
+      if (snapshot) {
+        const wire = decoder.decode(bytes);
+        if (!wire.startsWith('BSS1|')) throw new Error('invalid snapshot frame');
+        const completed = sent; sent = null; waiting = false;
+        completed.resolve(Object.freeze({revision:rev, wire}));
+      } else frame(rev, bytes, shellLength, pageLength, intentLength);
     }
   }
+  function snapshotOperation(type, body) {
+    if (closed) return Promise.reject(new Error('local actor host closed'));
+    if (waiting || composing || finishingComposition || pendingText.length) return Promise.reject(new Error('local actor host busy'));
+    return new Promise((resolve, reject) => {
+      waiting = true; sent = {type, resolve, reject};
+      try { write(encoder.encode(body).length + '\n' + body); }
+      catch (error) { try { fail(error); } catch (_) {} }
+    });
+  }
   return Object.freeze({
+    requestSnapshot() { return snapshotOperation(':host/snapshot', `S1|${revision}`); },
+    restoreSnapshot(wire) {
+      if (revision !== 1 || typeof wire !== 'string' || !wire.startsWith('BSS1|') || wire.length > MAX_SNAPSHOT)
+        return Promise.reject(new Error('invalid snapshot restore'));
+      const bytes = encoder.encode(wire);
+      if (bytes.length > MAX_SNAPSHOT || decoder.decode(bytes) !== wire) return Promise.reject(new Error('invalid snapshot restore'));
+      return snapshotOperation(':host/restore', `R1|${revision}|${wire}`);
+    },
     // The trusted caller must obtain this Response through the canonical
     // broker after fresh consent and verify its provenance. A Response is not
     // itself proof of approval; neither this API nor the actor authenticates
@@ -283,6 +320,7 @@ export function createLocalActorHost({ mount, write, onNavigation = () => {}, on
       if (closed) return;
       if (unbind) { unbind(true); unbind = null; }
       closed = true;
+      if (sent && sent.reject) { sent.reject(new Error('local actor host closed')); sent = null; }
       abortResponses();
       mount.removeEventListener('pointerdown', holdSelection, true);
       buffer = new Uint8Array(); pendingText = []; pendingBytes = 0;

@@ -337,6 +337,43 @@ try {
     if (outcome !== 'rejected' || !cancelled || writes.some(x => x.includes('H1|'))) throw new Error(`pending body not cancelled on ${action}`);
     host.close(); div.remove();
   }
+  {
+    const div = document.createElement('div'); document.body.appendChild(div);
+    const writes = [], errors = [], navigationErrors = [];
+    const host = createLocalActorHost({mount:div, write:x => writes.push(x), onError:e => errors.push(e), onNavigationError:e => navigationErrors.push(e)});
+    const body = JSON.stringify(shell), size = encoder.encode(body).length;
+    host.output(1, encoder.encode(`FRAME 1 ${size}\n${body}`));
+    const initial = div.firstChild;
+    const exported = host.requestSnapshot();
+    if (writes[0] !== '4\nS1|1') throw new Error('snapshot request mismatch');
+    const response = encoder.encode('SFRAME 1 8\nBSS1|猫');
+    host.output(1, response.slice(0, 15)); host.output(1, response.slice(15));
+    const saved = await exported;
+    if (saved.revision !== 1 || saved.wire !== 'BSS1|猫' || div.firstChild !== initial || host.state().waiting) throw new Error('snapshot response mismatch');
+    const refused = host.restoreSnapshot('BSS1|bad').then(() => false, () => true);
+    host.output(1, encoder.encode('REJECT\n'));
+    if (!await refused || host.state().revision !== 1 || host.state().waiting || navigationErrors.length) throw new Error('restore refusal mismatch');
+    for (const value of ['bad', 'BSS1|\ud800', 'BSS1|' + 'a'.repeat(131072)]) {
+      if (!await host.restoreSnapshot(value).then(() => false, () => true)) throw new Error('invalid snapshot accepted');
+    }
+    const restored = host.restoreSnapshot('BSS1|valid');
+    if (!writes.at(-1).endsWith('R1|1|BSS1|valid')) throw new Error('restore request mismatch');
+    host.output(1, encoder.encode(`FRAME 2 ${size}\n${body}`));
+    if (!await restored || host.state().revision !== 2 || !await host.restoreSnapshot('BSS1|again').then(() => false, () => true)) throw new Error('restore acknowledgement mismatch');
+    const pending = host.requestSnapshot().then(() => false, () => true);
+    host.close();
+    if (!await pending || errors.length) throw new Error('close did not reject snapshot');
+    div.remove();
+  }
+  {
+    const div = document.createElement('div'); document.body.appendChild(div);
+    const host = createLocalActorHost({mount:div, write:() => {}});
+    const body = JSON.stringify(shell); host.output(1, encoder.encode(`FRAME 1 ${encoder.encode(body).length}\n${body}`));
+    const pending = host.requestSnapshot().then(() => false, () => true);
+    try { host.output(1, encoder.encode(`FRAME 2 ${encoder.encode(body).length}\n${body}`)); } catch (_) {}
+    if (!await pending || !host.state().closed) throw new Error('wrong snapshot acknowledgement accepted');
+    div.remove();
+  }
   if (nativeFrame !== null) {
     const nativeMount = document.createElement('div'); document.body.appendChild(nativeMount);
     let nativePage = null;
