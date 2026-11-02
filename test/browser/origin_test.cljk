@@ -26,6 +26,13 @@
   (is (origin/same-origin? "kotoba://shell/a" "kotoba://shell/b"))
   (is (origin/same-origin? "wss://example.com:443/a" "wss://example.com/b")))
 
+(deftest query-and-fragment-terminate-the-authority
+  (is (= "https://victim.example" (origin/origin "https://victim.example?@attacker.example/path")))
+  (is (= "https://example.com" (origin/origin "https://example.com:443#frag/other")))
+  (is (= "/?x=1#top" (:path (origin/parse-url "https://example.com?x=1#top"))))
+  (is (= "/#top" (:path (origin/parse-url "https://example.com#top"))))
+  (is (origin/same-origin? "https://example.com?x" "https://example.com/")))
+
 (deftest parse-url-strips-userinfo-from-authority
   ;; RFC 6454: an origin is scheme://host[:port] -- userinfo ("user@" or
   ;; "user:pass@") is never part of it. A URL shaped like

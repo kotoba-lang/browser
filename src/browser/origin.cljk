@@ -44,8 +44,11 @@
       (let [scheme (str/lower scheme)]
         (if (str/starts-with? rest "//")
           (let [without-slashes (subs rest 2)
-                slash (.indexOf without-slashes "/")
-                authority-with-userinfo (if (neg? slash) without-slashes (subs without-slashes 0 slash))
+                end (reduce (fn [end delimiter]
+                              (let [i (.indexOf without-slashes delimiter)]
+                                (if (neg? i) end (min end i))))
+                            (count without-slashes) ["/" "?" "#"])
+                authority-with-userinfo (subs without-slashes 0 end)
                 ;; Strip any "userinfo@" prefix before the host (WHATWG URL:
                 ;; everything up to the LAST "@" in the authority is
                 ;; userinfo, never part of the host) -- without this, a URL
@@ -61,7 +64,8 @@
                             authority-with-userinfo
                             (subs authority-with-userinfo (inc at)))
                 authority (strip-default-port scheme (str/lower authority))
-                path (if (neg? slash) "/" (subs without-slashes slash))]
+                tail (subs without-slashes end)
+                path (if (str/starts-with? tail "/") tail (str "/" tail))]
             {:url s
              :scheme scheme
              :authority authority

@@ -19,4 +19,9 @@
         (origin/same-origin? "other://host/a" "other://host/b") 12
         (not (origin/same-origin? "kotoba://shell/a" "kotoba://shell/b")) 13
         (not (origin/same-origin? "wss://example.com:443/a" "wss://example.com/b")) 14
+        (not (string=? (origin/origin "https://victim.example?@attacker.example/path") "https://victim.example")) 15
+        (not (string=? (origin/origin "https://example.com:443#frag/other") "https://example.com")) 16
+        (not (string=? (:path (origin/parse-url "https://example.com?x=1#top")) "/?x=1#top")) 17
+        (not (string=? (:path (origin/parse-url "https://example.com#top")) "/#top")) 18
+        (not (origin/same-origin? "https://example.com?x" "https://example.com/")) 19
         :else 0))

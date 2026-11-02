@@ -21,4 +21,5 @@
           (not (string=? (value removed "work" "https://example.com/") "missing")) 3
           (not (string=? (value removed "personal" "mailto:b@example.com") "missing")) 4
           (not= (document-count (storage/origin-entries removed "personal" "data:text/plain,a")) 0) 5
+          (not (string=? (value removed "personal" "https://example.com?x") "personal")) 6
           :else 0)))

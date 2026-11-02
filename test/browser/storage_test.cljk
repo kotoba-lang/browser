@@ -35,7 +35,8 @@
     (is (nil? (storage/get-value denied p "mailto:b@example.com" :token)))
     (is (= {} (storage/origin-entries denied p "data:text/plain,a")))
     (is (= denied (storage/delete-value denied p "/relative" :token)))
-    (is (= "ok" (storage/get-value denied p "https://example.com:443/b" :token)))))
+    (is (= "ok" (storage/get-value denied p "https://example.com:443/b" :token)))
+    (is (= "ok" (storage/get-value denied p "https://example.com?x" :token)))))
 
 (deftest storage-log-can-be-promoted-to-audit-events
   (let [acct (account/new-account {:id "local"})
