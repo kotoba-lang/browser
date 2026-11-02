@@ -1,0 +1,38 @@
+(ns browser.local-controller
+  (:require [browser.local-session :as session])
+  (:export [dispatch]))
+
+;; Normalized UI events only. There is deliberately no response/approval
+;; event: the host must separately validate responses and obtain consent.
+(defn field [d :document key :keyword] :document
+  (option-or (document-get d key) (document-null)))
+(defn text [d :document] :string
+  (option-or (document-string-value d) ""))
+(defn action [d :document] :keyword
+  (option-or (document-keyword-value (field d :type)) :unknown))
+(defn has-text? [d :document] :bool
+  (option-some?-of [:option :string] (document-string-value (field d :text))))
+
+(defn dispatch [state :document event :document] :document
+  (if (not= (document-kind event) :map) state
+   (let [kind (action event)]
+    (cond (= kind :tab/new) (session/open-tab state "")
+          (= kind :tab/focus)
+          (if (has-text? event) (session/focus-tab state (text (field event :text))) state)
+          (= kind :address/insert)
+          (if (has-text? event) (session/address-insert state (text (field event :text))) state)
+          (= kind :address/backspace) (session/address-backspace state)
+          (= kind :address/select-all) (session/address-select-all state)
+          (= kind :address/move)
+          (let [delta (document-i64-value (field event :delta))]
+            (if (option-some?-of [:option :i64] delta)
+              (session/address-move state (option-or delta 0)
+                                    (option-or (document-bool-value (field event :extend)) false))
+              state))
+          (= kind :address/composition-start) (session/address-composition-start state)
+          (= kind :address/composition-update)
+          (if (has-text? event) (session/address-composition-update state (text (field event :text))) state)
+          (= kind :address/composition-end)
+          (if (has-text? event) (session/address-composition-end state (text (field event :text))) state)
+          (= kind :address/submit) (session/commit-address state)
+          :else state))))

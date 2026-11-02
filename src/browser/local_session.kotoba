@@ -70,7 +70,8 @@
 (defn open-tab [session :document url :string] :document
   (let [state (chrome/set-url-input (chrome/new-tab (field session :session/chrome) "") url)
         tab-id (text (field state :chrome/active-tab-id))]
-    (queue-navigation (with-chrome session state) tab-id url)))
+    (if (string=? url "") (with-chrome session state)
+      (queue-navigation (with-chrome session state) tab-id url))))
 
 (defn focus-tab [session :document tab-id :string] :document
   (let [state (chrome/focus-tab (field session :session/chrome) tab-id)
