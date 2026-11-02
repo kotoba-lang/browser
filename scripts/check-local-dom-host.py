@@ -33,11 +33,13 @@ def main():
     parser.add_argument('--browser', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--wire', type=Path, help='native-emitted JSON operation batches')
+    parser.add_argument('--wire-case', choices=['initial', 'roundtrip'], default='initial')
     args = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
-    suffix = 'local_dom_wire_host' if args.wire else 'local_dom_host'
+    assert args.wire or args.wire_case == 'initial'
+    suffix = ('local_dom_roundtrip_host' if args.wire_case == 'roundtrip' else 'local_dom_wire_host') if args.wire else 'local_dom_host'
     html = root / ('test/browser-native/' + suffix + '.html')
     test = root / ('test/browser-native/' + suffix + '_test.js')
     host = root / 'src/browser/local_dom_host.js'

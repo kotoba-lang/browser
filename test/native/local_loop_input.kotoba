@@ -1,7 +1,7 @@
 (ns browser.native-local-loop-input-test
   (:require [browser.local-session :as session]
             [browser.local-loop :as runtime])
-  (:capabilities [:cli/args])
+  (:capabilities [:cli/args :io/write])
   (:export [main]))
 
 (defn field [d :document key :keyword] :document
@@ -17,4 +17,7 @@
     (cond
           (not (string=? (option-or (document-string-value (field editor :text/value)) "") "A😀B")) 2
           (not= (option-or (document-i64-value (field editor :text/caret)) 0) 3) 3
-          :else 0)))))
+          :else (let [wire (option-or (document-string-value (field next :wire)) "")
+                      printed (typed-cap-call :io/write :string :string
+                                (string-concat "WIRE2 " (string-concat wire "\n")))]
+                  0))))))

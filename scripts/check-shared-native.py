@@ -112,7 +112,7 @@ def main(a):
             wire = a.event_wire.read_text(encoding='utf-8')
             assert len(wire.encode('utf-8')) <= 65664
             invoke += [wire]
-        allow = '37' if name == 'local-dom-wire' else ('38' if name == 'local-loop-input' else '-')
+        allow = '37' if name == 'local-dom-wire' else ('37,38' if name == 'local-loop-input' else '-')
         result = run(name + '-execute', invoke, dict(env, KEXE_STRUCTURED_REPORT='1', KEXE_ALLOW=allow))
         match = re.search(rb':result (-?[0-9]+)', result.stdout)
         assert match and int(match[1]) == 0, (name, result.stdout)
@@ -120,8 +120,17 @@ def main(a):
             lines = [line[6:] for line in result.stdout.splitlines() if line.startswith(b'WIRE1 ')]
             assert len(lines) == 1 and isinstance(json.loads(lines[0]), list)
             (out / 'wire.json').write_bytes(lines[0])
-        cases.append(dict(name=name, verdict=0, artifact=pin(artifact), executable=pin(image),
-                          lock=pin(lock), sources={str(path): pin(path) for path in files}))
+        if name == 'local-loop-input':
+            lines = [line[6:] for line in result.stdout.splitlines() if line.startswith(b'WIRE2 ')]
+            assert len(lines) == 1 and isinstance(json.loads(lines[0]), list)
+            (out / 'wire.json').write_bytes(lines[0])
+        case_result = dict(name=name, verdict=0, artifact=pin(artifact), executable=pin(image),
+                           lock=pin(lock), sources={str(path): pin(path) for path in files})
+        if name == 'local-loop-input':
+            case_result.update(eventWire=pin(a.event_wire), outputWire=pin(out / 'wire.json'))
+        elif name == 'local-dom-wire':
+            case_result.update(outputWire=pin(out / 'wire.json'))
+        cases.append(case_result)
         (out / 'shared-native.json').write_text(json.dumps(dict(status='PASS_SHARED_COMPONENTS_NATIVE',
             target=a.target, host=[platform.system(), machine, platform.release()], compiler=pin(compiler),
             cases=cases, complete=len(cases) == 15, emulation=False, kernelDesktopQualified=False,
