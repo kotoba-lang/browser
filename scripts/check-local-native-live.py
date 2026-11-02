@@ -207,13 +207,24 @@ def run(args):
             advance(7)
             state = snap()
             assert state == {'revision': 7, 'value': 'AX日本B', 'focused': True, 'start': 4, 'end': 4}, state
+            evaluate('window.nativeLive.captureNode()')
+            # Synthetic composition events test protocol ordering, not a real IME.
+            evaluate("(()=>{const e=document.querySelector('input'); for(const [type,data] of [['compositionstart',''],['compositionupdate','語'],['compositionend','語']]) e.dispatchEvent(new CompositionEvent(type,{bubbles:true,data}));})()")
+            advance(8)
+            assert evaluate('window.nativeLive.sameNode()') is True
+            advance(9)
+            assert evaluate('window.nativeLive.sameNode()') is True
+            advance(10)
+            assert evaluate('window.nativeLive.sameNode()') is False
+            state = snap()
+            assert state == {'revision': 10, 'value': 'AX日本語B', 'focused': True, 'start': 5, 'end': 5}, state
             actor.proc.stdin.write(b'0\n')
             actor.proc.stdin.flush()
             tail, _ = actor.proc.communicate(timeout=30)
             actor.log.extend(tail)
             assert actor.proc.returncode == 0, bytes(actor.log[-1000:])
             assert b':status :ok :result 0' in actor.log, bytes(actor.log[-1000:])
-            print(json.dumps({'chrome': version, 'frames': 7, 'stale_rejected': True, 'final': state}, ensure_ascii=False))
+            print(json.dumps({'chrome': version, 'frames': 10, 'stale_rejected': True, 'synthetic_composition': True, 'final': state}, ensure_ascii=False))
     finally:
         if browser is not None:
             browser.close()

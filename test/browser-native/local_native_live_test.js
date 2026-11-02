@@ -3,11 +3,14 @@ import { createLocalActorHost } from '../../src/browser/local_actor_host.js';
 const mount = document.getElementById('mount');
 const events = [];
 let busy = 0;
+let capturedNode = null;
 const host = createLocalActorHost({ mount, write: input => events.push(input), onBusy: () => busy++ });
 window.nativeLive = {
   feed(bytes) { host.output(1, Uint8Array.from(bytes)); },
   take() { return events.shift() || null; },
   busy() { return busy; },
+  captureNode() { capturedNode = mount.querySelector('input'); },
+  sameNode() { return capturedNode === mount.querySelector('input'); },
   queueLimit(first, second) {
     const div = document.createElement('div'); document.body.appendChild(div);
     const writes = []; let refused = 0;

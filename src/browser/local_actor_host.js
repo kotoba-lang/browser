@@ -15,12 +15,13 @@ export function createLocalActorHost({ mount, write, onBusy = () => {}, onError 
   }
   let revision = 0, waiting = true, closed = false, unbind = null;
   let projection = null, sent = null, pendingText = [], pendingBytes = 0;
+  let composing = false, finishingComposition = false, compositionTarget = 0, pendingComposition = [], compositionBytes = 0;
   let buffer = new Uint8Array(), expected = null;
   const encoder = new TextEncoder(), decoder = new TextDecoder('utf-8', { fatal: true });
   // Do not let a pointer move the displayed selection while the actor owns
   // an outstanding edit; queued text is based on that selection.
   function holdSelection(event) {
-    if (waiting && sent && event.target instanceof HTMLInputElement) {
+    if (((waiting && sent) || composing || finishingComposition) && event.target instanceof HTMLInputElement) {
       if (event.cancelable) event.preventDefault();
       onBusy();
     }
@@ -32,6 +33,7 @@ export function createLocalActorHost({ mount, write, onBusy = () => {}, onError 
       closed = true;
       mount.removeEventListener('pointerdown', holdSelection, true);
       pendingText = []; pendingBytes = 0;
+      pendingComposition = []; compositionBytes = 0;
       if (unbind) { try { unbind(); } catch (_) { /* active composition requires owner cleanup */ } }
       onError(error);
     }
@@ -39,6 +41,22 @@ export function createLocalActorHost({ mount, write, onBusy = () => {}, onError 
   }
   function intent(message) {
     if (closed) return;
+    if (message.type === ':ui/composition-start') {
+      if (waiting || composing || finishingComposition || pendingText.length) return fail(new Error('composition started while busy'));
+      composing = true; compositionTarget = message.target;
+    } else if (message.type === ':ui/composition-update' || message.type === ':ui/composition-end') {
+      if (!composing || message.target !== compositionTarget) return fail(new Error('unexpected composition event'));
+      if (message.type === ':ui/composition-end') { composing = false; finishingComposition = true; }
+      if (waiting) {
+        try {
+          encodeLocalEvent(message);
+          const size = encoder.encode(message.text).length;
+          if (pendingComposition.length >= MAX_PENDING_TEXT || compositionBytes + size > MAX_PENDING_BYTES) throw new Error('composition queue limit');
+          pendingComposition.push(message); compositionBytes += size;
+          return;
+        } catch (error) { return fail(error); }
+      }
+    } else if (composing || finishingComposition) { onBusy(); return; }
     if (waiting) {
       // Only consecutive text from the same unchanged selection can be
       // rebased onto the actor's next confirmed caret. Other gestures must
@@ -56,6 +74,9 @@ export function createLocalActorHost({ mount, write, onBusy = () => {}, onError 
       }
       onBusy(); return;
     }
+    send(message);
+  }
+  function send(message) {
     try {
       const body = revision + '|' + encodeLocalEvent(message);
       const size = encoder.encode(body).length;
@@ -68,6 +89,23 @@ export function createLocalActorHost({ mount, write, onBusy = () => {}, onError 
   function frame(rev, bytes) {
     if (!waiting || rev !== revision + 1 || !Number.isSafeInteger(rev)) throw new Error('unexpected actor revision');
     const batches = JSON.parse(decoder.decode(bytes));
+    const completed = sent;
+    if (completed && (completed.type === ':ui/composition-start' || completed.type === ':ui/composition-update')) {
+      // Validate each projection on a detached tree, but keep the actual
+      // composing input alive until the browser's compositionend.
+      const detached = document.createElement('div');
+      const checked = commitLocalProjection(detached, batches);
+      const input = detached.querySelector('input[data-role="address"]');
+      if (!input || checked.resolve(input)?.id !== completed.target) throw new Error('composition target changed');
+      revision = rev; waiting = false; sent = null;
+      if (pendingComposition.length) {
+        const next = pendingComposition.shift();
+        compositionBytes -= encoder.encode(next.text).length;
+        send(next);
+      }
+      return;
+    }
+    if (completed && completed.type === ':ui/composition-end') { finishingComposition = false; compositionTarget = 0; }
     if (unbind) { unbind(); unbind = null; }
     projection = commitLocalProjection(mount, batches);
     revision = rev;
@@ -127,6 +165,7 @@ export function createLocalActorHost({ mount, write, onBusy = () => {}, onError 
       closed = true;
       mount.removeEventListener('pointerdown', holdSelection, true);
       buffer = new Uint8Array(); pendingText = []; pendingBytes = 0;
+      pendingComposition = []; compositionBytes = 0;
       write('0\n');
     },
     state() { return { revision, waiting, closed }; },
