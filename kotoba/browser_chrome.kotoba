@@ -29,7 +29,9 @@
 ;; --- accessors (html_document.kotoba option idiom) -------------------------
 
 (defn get-d [d :document k :keyword] :document
-  (option-or (document-get d k) (document-null)))
+  (if (= (document-kind d) :map)
+    (option-or (document-get d k) (document-null))
+    (document-null)))
 
 (defn get-s [d :document k :keyword] :string
   (option-or (document-string-value (get-d d k)) ""))

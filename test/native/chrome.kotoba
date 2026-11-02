@@ -23,7 +23,11 @@
         tabs (field unknown :chrome/tabs)
         first-tab (item tabs 0)
         second-tab (item tabs 1)
-        history (field second-tab :tab/history)]
+        history (field second-tab :tab/history)
+        close-active (chrome/close-tab initial "tab-2")
+        close-other (chrome/close-tab initial "tab-1")
+        close-intent (chrome/close-tab committed "tab-2")
+        close-last (chrome/close-tab close-active "tab-1")]
     (cond (not= (document-count tabs) 2) 1
           (not (string=? (text (field first-tab :tab/url)) "https://one.example/")) 2
           (not (string=? (text (field second-tab :tab/url)) "https://next.example/")) 3
@@ -31,4 +35,9 @@
           (not= (document-count history) 2) 5
           (not (string=? (text (item history 0)) "https://two.example/")) 6
           (not (string=? (text (item history 1)) "https://next.example/")) 7
+          (not= (document-count (field close-active :chrome/tabs)) 1) 8
+          (not (string=? (text (field close-active :chrome/active-tab-id)) "tab-1")) 9
+          (not (string=? (text (field close-other :chrome/active-tab-id)) "tab-2")) 10
+          (not= (document-kind (field close-intent :chrome/last-navigation)) :null) 11
+          (not= (document-count (field close-last :chrome/tabs)) 0) 12
           :else 0)))
