@@ -25,6 +25,13 @@ window.htmlLive = {
   },
   listItems() { return page ? Array.from(page.querySelectorAll('ul > li'), node => node.textContent) : []; },
   deepStructure() { return !!page?.querySelector('div > div > div > div > div > section > h1 > em'); },
+  linkRect(index = 0) {
+    const a = page?.querySelectorAll('a')[index]; if (!a) return null;
+    const r = a.getBoundingClientRect();
+    return {x:r.x + r.width / 2, y:r.y + r.height / 2, hasHref:a.hasAttribute('href')};
+  },
+  syntheticLink() { page?.querySelector('a')?.click(); return events.length; },
+  focusLink() { const a = page?.querySelector('a'); a?.focus(); return !!a && page.activeElement === a; },
   snapshot() {
     const input = mount.querySelector('input');
     return {url: input?.value ?? null, page: page?.textContent ?? null, tabs: mount.querySelectorAll('nav [data-tab-id]').length};

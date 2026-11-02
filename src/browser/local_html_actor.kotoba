@@ -11,6 +11,7 @@
 ;; H1 carries already-supplied HTML only; it grants no network capability.
 ;; H1|revision|generation|tab|url-byte-length|<url><html> is length framed.
 ;; C1|revision|generation|tab cancels a matching pending navigation.
+;; L1|revision|tab|url requests navigation from a host-verified page gesture.
 ;; NFRAME reports a newly queued navigation to the trusted host; it conveys
 ;; no consent and is valid only on the authenticated actor channel.
 ;; Other inputs retain the native actor's revision|B1 UI event format.
@@ -82,6 +83,13 @@
             (> (string-byte-length tab) 32) (>= (string-index-of tab "|") 0))
       (option-none-of [:option :document])
       (html/cancel frame revision tab generation))))
+(defn link [frame :document raw :string] [:option :document]
+  (let [a (split raw) b (split (item a 1)) revision (number (item a 0))
+        tab (item b 0) url (item b 1)]
+    (if (or (= (document-kind a) :null) (= (document-kind b) :null)
+            (<= revision 0) (string=? tab "") (> (string-byte-length tab) 32))
+      (option-none-of [:option :document])
+      (html/link frame revision tab url))))
 (defn serve [frame :document] :i64
   (let [length (read-length 0 0)]
     (cond (= length -1) 0
@@ -90,12 +98,14 @@
                   (if (not (option-some?-of [:option :string] body)) 2
                     (let [s (option-or body "") is-html (= (string-index-of s "H1|") 0)
                           is-cancel (= (string-index-of s "C1|") 0)
+                          is-link (= (string-index-of s "L1|") 0)
                           separator (string-index-of s "|")
                           revision (if (< separator 0) 0 (parse-revision s separator))
                           event (if (< separator 0) "" (string-substring s (+ separator 1) (string-length s)))
                           next (if is-html (response frame (string-substring s 3 (string-length s)))
                                  (if is-cancel (cancel frame (string-substring s 3 (string-length s)))
-                                   (runtime/step frame revision event)))]
+                                   (if is-link (link frame (string-substring s 3 (string-length s)))
+                                     (runtime/step frame revision event))))]
                       (if (option-some?-of [:option :document] next)
                         (let [f (option-or next (document-null)) sent (emitter/emit-html-frame f)] (serve f))
                         (let [sent (write-flush "REJECT\n")] (serve frame)))))))))

@@ -50,8 +50,8 @@ export function encodeLocalEvent(message) {
 // Build an entirely detached tree, validate every operation and only then
 // replace the live root. The caller must still authenticate the originating
 // guest and current state; valid syntax alone grants no authority.
-export function commitLocalProjection(container, batches, pageBatches = undefined) {
-  if (!(container instanceof Element) || !Array.isArray(batches) || batches.length > 8) {
+export function commitLocalProjection(container, batches, pageBatches = undefined, onPageLink = () => {}) {
+  if (!(container instanceof Element) || !Array.isArray(batches) || batches.length > 8 || typeof onPageLink !== 'function') {
     throw new Error("invalid projection");
   }
   const nodes = new Map();
@@ -139,7 +139,7 @@ export function commitLocalProjection(container, batches, pageBatches = undefine
     const pages = root.querySelectorAll('section[data-role="page"]');
     if (pages.length !== 1 || pages[0].childNodes.length !== 0) throw new Error("invalid page mount");
     const pageRoot = pages[0].attachShadow({ mode: "closed" });
-    commitLocalPageProjection(pageRoot, pageBatches);
+    commitLocalPageProjection(pageRoot, pageBatches, onPageLink);
   }
   container.replaceChildren(root);
   if (keepFocus) {

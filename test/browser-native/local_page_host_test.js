@@ -32,6 +32,20 @@ try {
   if (root.querySelector('ol > li')?.textContent !== 'one') throw new Error('list projection mismatch');
   commitLocalPageProjection(root, batches);
   const before = root.firstChild;
+  {
+    const div = document.createElement('div'), shadow = div.attachShadow({mode:'closed'});
+    const seen = [];
+    const links = [[[':dom/create-element',1,':div'], [':dom/set-root',1],
+      [':dom/create-element',2,':a'], [':dom/set-attr',2,':href','javascript:alert(1)'],
+      [':dom/create-text',3,'link'], [':dom/append-child',2,3], [':dom/append-child',1,2]]];
+    commitLocalPageProjection(shadow, links, value => seen.push(value));
+    const a = shadow.querySelector('a');
+    if (!a || a.hasAttribute('href') || a.getAttribute('role') !== 'link') throw new Error('link is not inert');
+    a.click(); a.dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', bubbles:true, cancelable:true}));
+    const tab = new KeyboardEvent('keydown', {key:'Tab', bubbles:true, cancelable:true}); a.dispatchEvent(tab);
+    if (tab.defaultPrevented) throw new Error('link trapped keyboard focus');
+    if (seen.length) throw new Error('synthetic link gesture accepted');
+  }
   refuse([[[':dom/create-element', 1, ':script'], [':dom/set-root', 1]]]);
   refuse([[[':dom/create-element', 1, ':div'], [':dom/set-root', 1], [':dom/set-attr', 1, ':onclick', 'alert(1)']]]);
   refuse([[[':dom/create-element', 1, ':div'], [':dom/set-root', 1], [':dom/set-attr', 1, ':href', 'https://example.com']]]);

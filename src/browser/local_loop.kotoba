@@ -5,7 +5,7 @@
             [browser.local-dom-wire :as wire]
             [browser.local-event-wire :as input]
             [kotoba.wasm.dom :as dom])
-  (:export [begin step]))
+  (:export [begin step new-navigation]))
 
 (defn field [d :document key :keyword] :document
   (option-or (document-get d key) (document-null)))

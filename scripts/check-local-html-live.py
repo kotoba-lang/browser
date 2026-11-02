@@ -62,7 +62,7 @@ def run(args):
             fixture = ROOT / 'test/browser-native/local_html_live.html'
             # Exercise implicit paragraph and list-item endings in the native
             # parser before applying the resulting wire to the page host.
-            html = '<div><div><div><div><section><h1>Hi <em>世界</em></h1><p><strong>重要</strong> <code>x</code><ul><li>一<li>二</ul></section></div></div></div></div>'
+            html = '<div><div><div><div><section><h1>Hi <em>世界</em></h1><p><strong>重要</strong> <code>x</code><ul><li>一<li>二</ul><a href="/page">Again</a><a href="javascript:alert(1)">Unsafe</a></section></div></div></div></div>'
             if args.broker:
                 broker_bytes = args.broker.read_bytes()
                 assert hashlib.sha256(broker_bytes).hexdigest() == '7f760128c3a58098123c31ec3dd34b9c871932e3933f2c952facc4ab0e647212'
@@ -201,15 +201,48 @@ def run(args):
             assert int(header) == len(payload.encode('utf-8')) and payload.startswith(f'H1|{response_revision}|{response_generation}|tab-1|')
             actor.proc.stdin.write(response.encode('utf-8')); actor.proc.stdin.flush()
             present(frame(response_revision + 1))
-            assert snap() == {'url':url, 'page':'Hi 世界重要 x一二', 'tabs':1}, snap()
+            assert snap() == {'url':url, 'page':'Hi 世界重要 x一二AgainUnsafe', 'tabs':1}, snap()
             assert evaluate('window.htmlLive.listItems()') == ['一', '二']
             assert evaluate('window.htmlLive.deepStructure()') is True
-            click('input'); browser.call('Input.insertText', {'text':'x'}, session); present_frame = advance(response_revision + 2)
-            assert present_frame[1] is not None and snap()['page'] == 'Hi 世界重要 x一二'
-            click('button[data-action=":tab/new"]'); advance(response_revision + 3)
+            current = response_revision + 1
+            link = evaluate('window.htmlLive.linkRect()')
+            assert link and not link['hasHref'] and evaluate('window.htmlLive.syntheticLink()') == 0
+            if args.broker:
+                unsafe = evaluate('window.htmlLive.linkRect(1)')
+                assert unsafe and not unsafe['hasHref']
+                for kind in ('mousePressed', 'mouseReleased'):
+                    browser.call('Input.dispatchMouseEvent', {'type':kind, 'x':unsafe['x'], 'y':unsafe['y'], 'button':'left', 'clickCount':1}, session)
+                assert evaluate('window.htmlLive.take()') is None and len(requests) == 1
+                for kind in ('mousePressed', 'mouseReleased'):
+                    browser.call('Input.dispatchMouseEvent', {'type':kind, 'x':link['x'], 'y':link['y'], 'button':'left', 'clickCount':1}, session)
+                linked = advance(current + 1); current += 1
+                assert linked[2] == {'tab':'tab-1', 'generation':3, 'url':url}, linked[2]
+                assert evaluate('window.htmlLive.notice()') == dict(revision=current, **linked[2])
+                phase = 'deny-link'; evaluate(broker_call(linked[2], current)); broker_wait(lambda state: state['open'])
+                click('dialog.kotoba-client-consent button:first-of-type')
+                denied = broker_wait(lambda state: state['status'] == 'error')
+                assert 'not approved' in denied['message'] and len(requests) == 1
+                assert evaluate('window.htmlLive.cancel()') is True
+                actor.proc.stdin.write(take().encode('utf-8')); actor.proc.stdin.flush()
+                current += 1; present(frame(current))
+                assert evaluate('window.htmlLive.focusLink()') is True
+                browser.call('Input.dispatchKeyEvent', {'type':'keyDown', 'key':'Enter', 'code':'Enter', 'windowsVirtualKeyCode':13}, session)
+                browser.call('Input.dispatchKeyEvent', {'type':'keyUp', 'key':'Enter', 'code':'Enter', 'windowsVirtualKeyCode':13}, session)
+                keyboard = advance(current + 1); current += 1
+                assert keyboard[2] == {'tab':'tab-1', 'generation':4, 'url':url}, keyboard[2]
+                phase = 'deny-keyboard'; evaluate(broker_call(keyboard[2], current)); broker_wait(lambda state: state['open'])
+                click('dialog.kotoba-client-consent button:first-of-type')
+                denied = broker_wait(lambda state: state['status'] == 'error')
+                assert 'not approved' in denied['message'] and len(requests) == 1
+                assert evaluate('window.htmlLive.cancel()') is True
+                actor.proc.stdin.write(take().encode('utf-8')); actor.proc.stdin.flush()
+                current += 1; present(frame(current))
+            click('input'); browser.call('Input.insertText', {'text':'x'}, session); present_frame = advance(current + 1)
+            assert present_frame[1] is not None and snap()['page'] == 'Hi 世界重要 x一二AgainUnsafe'
+            click('button[data-action=":tab/new"]'); advance(current + 2)
             assert snap()['page'] is None and snap()['tabs'] == 2
-            click('button[data-tab-id="tab-1"]'); advance(response_revision + 4)
-            assert snap()['page'] == 'Hi 世界重要 x一二' and snap()['tabs'] == 2
+            click('button[data-tab-id="tab-1"]'); advance(current + 3)
+            assert snap()['page'] == 'Hi 世界重要 x一二AgainUnsafe' and snap()['tabs'] == 2
             actor.proc.stdin.write(b'0\n'); actor.proc.stdin.flush()
             tail, _ = actor.proc.communicate(timeout=30); actor.log.extend(tail)
             assert actor.proc.returncode == 0 and b':status :ok :result 0' in actor.log
@@ -218,7 +251,7 @@ def run(args):
                             'src/browser/local_page_host.js', 'src/browser/local_html_response.js']
             source_names += (['test/browser-native/local_html_broker_live.html', 'test/browser-native/local_broker_response_test.js']
                              if args.broker else ['test/browser-native/local_html_live.html'])
-            receipt = {'status':'PASS_OFFLINE_HTML_LIVE', 'chrome':version, 'frames':response_revision + 4,
+            receipt = {'status':'PASS_OFFLINE_HTML_LIVE', 'chrome':version, 'frames':current + 3,
                        'interceptedBroker':bool(args.broker), 'syntheticResponse':True, 'requests':requests, 'final':snap(),
                        'brokerSha256':hashlib.sha256(args.broker.read_bytes()).hexdigest() if args.broker else None,
                        'actorLogSha256':hashlib.sha256(actor.log).hexdigest(),

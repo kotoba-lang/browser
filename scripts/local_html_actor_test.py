@@ -94,6 +94,13 @@ def run_actor(command, env, output, timeout=90):
         event(8, 'B1|:ui/click|5|-1|-1|0|0|'); frame(9)  # open a second blank tab
         event(9, 'B1|:ui/click|3|-1|-1|0|0|'); _, restored = frame(10, True)
         assert restored == page
+        send('L1|9|tab-1|https://one.example/next'); reject()
+        send('L1|10|tab-2|https://one.example/next'); reject()
+        send('L1|10|tab-1|javascript:alert(1)'); reject()
+        send('L1|10|tab-1|https://one.example/next')
+        frame(11, True, {'tab':'tab-1', 'generation':3, 'url':'https://one.example/next'})
+        send('C1|11|3|tab-1'); _, cancelled_link = frame(12, True)
+        assert cancelled_link == page
         process.stdin.write(b'0\n'); process.stdin.flush()
         tail, errors = process.communicate(timeout=timeout)
         observed.extend(tail)

@@ -20,6 +20,8 @@ export function createLocalActorHost({ mount, write, onNavigation = () => {}, on
   let revision = 0, waiting = true, closed = false, unbind = null;
   let projection = null, sent = null, pendingText = [], pendingBytes = 0;
   const pendingNotices = new Map();
+  const committedUrls = new Map();
+  let pageToken = null;
   const readingResponses = new WeakSet();
   let composing = false, finishingComposition = false, compositionTarget = 0, pendingComposition = [], compositionBytes = 0;
   let buffer = new Uint8Array(), expected = null;
@@ -40,6 +42,7 @@ export function createLocalActorHost({ mount, write, onNavigation = () => {}, on
       mount.removeEventListener('pointerdown', holdSelection, true);
       pendingText = []; pendingBytes = 0;
       pendingNotices.clear();
+      committedUrls.clear(); pageToken = null;
       pendingComposition = []; compositionBytes = 0;
       if (unbind) { unbind(true); unbind = null; }
       onError(error);
@@ -93,6 +96,25 @@ export function createLocalActorHost({ mount, write, onNavigation = () => {}, on
       write(size + '\n' + body);
     } catch (error) { fail(error); }
   }
+  function pageLink(token, href) {
+    if (closed || token !== pageToken) return;
+    if (waiting || composing || finishingComposition || pendingText.length) { onBusy(); return; }
+    const selected = mount.querySelectorAll('button[data-tab-id][aria-selected="true"]');
+    if (selected.length !== 1) return;
+    const tab = selected[0].getAttribute('data-tab-id'), base = committedUrls.get(tab);
+    if (!base || typeof href !== 'string') return;
+    let url;
+    try {
+      const parsed = new URL(href, base);
+      if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.hash || encoder.encode(parsed.href).length > 4096) return;
+      url = parsed.href;
+    } catch (_) { return; }
+    try {
+      const body = `L1|${revision}|${tab}|${url}`;
+      waiting = true; sent = {type: ':host/link'};
+      write(encoder.encode(body).length + '\n' + body);
+    } catch (error) { fail(error); }
+  }
   function frame(rev, bytes, shellLength = null, pageLength = 0, intentLength = 0) {
     if (!waiting || rev !== revision + 1 || !Number.isSafeInteger(rev)) throw new Error('unexpected actor revision');
     const batches = JSON.parse(decoder.decode(shellLength === null ? bytes : bytes.subarray(0, shellLength)));
@@ -103,7 +125,7 @@ export function createLocalActorHost({ mount, write, onNavigation = () => {}, on
     }
     let notice;
     if (intentLength) {
-      if (!completed || ![':ui/submit', ':ui/click'].includes(completed.type)) throw new Error('unexpected navigation intent');
+      if (!completed || ![':ui/submit', ':ui/click', ':host/link'].includes(completed.type)) throw new Error('unexpected navigation intent');
       const item = JSON.parse(decoder.decode(bytes.subarray(shellLength + pageLength)));
       if (!item || Array.isArray(item) || typeof item !== 'object' || Object.keys(item).sort().join(',') !== 'generation,tab,url' ||
           typeof item.tab !== 'string' || !/^tab-[1-9][0-9]{0,9}$/.test(item.tab) ||
@@ -128,7 +150,9 @@ export function createLocalActorHost({ mount, write, onNavigation = () => {}, on
     }
     if (completed && completed.type === ':ui/composition-end') { finishingComposition = false; compositionTarget = 0; }
     if (unbind) { unbind(); unbind = null; }
-    projection = commitLocalProjection(mount, batches, pageBatches);
+    const nextPageToken = {};
+    projection = commitLocalProjection(mount, batches, pageBatches, href => pageLink(nextPageToken, href));
+    pageToken = nextPageToken;
     revision = rev;
     unbind = bindLocalInput(mount, projection, intent);
     waiting = false;
@@ -137,6 +161,10 @@ export function createLocalActorHost({ mount, write, onNavigation = () => {}, on
     // The actor still checks the generation for every actual cancellation.
     const tabs = new Set(Array.from(mount.querySelectorAll('button[data-tab-id]'), node => node.getAttribute('data-tab-id')));
     for (const tab of pendingNotices.keys()) if (!tabs.has(tab)) pendingNotices.delete(tab);
+    for (const tab of committedUrls.keys()) if (!tabs.has(tab)) committedUrls.delete(tab);
+    if (completed && completed.type === ':host/response' && tabs.has(completed.notice.tab)) {
+      committedUrls.set(completed.notice.tab, completed.notice.url);
+    }
     if (completed && (completed.type === ':host/cancel' || completed.type === ':host/response') &&
         pendingNotices.get(completed.notice.tab) === completed.notice) {
       pendingNotices.delete(completed.notice.tab);
@@ -250,6 +278,7 @@ export function createLocalActorHost({ mount, write, onNavigation = () => {}, on
       mount.removeEventListener('pointerdown', holdSelection, true);
       buffer = new Uint8Array(); pendingText = []; pendingBytes = 0;
       pendingNotices.clear();
+      committedUrls.clear(); pageToken = null;
       pendingComposition = []; compositionBytes = 0;
       write('0\n');
     },

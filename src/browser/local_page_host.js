@@ -2,15 +2,16 @@
 // The caller owns document provenance and isolation. This adapter does not
 // execute scripts, request resources, grant capabilities or implement layout.
 const TAGS = new Set(['div', 'span', 'p', 'br', 'section', 'article', 'header', 'footer', 'main',
-  'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'strong', 'em', 'b', 'i', 'code', 'ul', 'ol', 'li']);
+  'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'strong', 'em', 'b', 'i', 'code', 'ul', 'ol', 'li', 'a']);
 const ATTRS = new Set(['id', 'class', 'title']);
 const MAX_TEXT = 1048576;
+const pageBindings = new WeakMap();
 
-export function commitLocalPageProjection(root, batches) {
-  if (!(root instanceof ShadowRoot) || root.mode !== 'closed' || !Array.isArray(batches) || batches.length > 8) {
+export function commitLocalPageProjection(root, batches, onLink = () => {}) {
+  if (!(root instanceof ShadowRoot) || root.mode !== 'closed' || !Array.isArray(batches) || batches.length > 8 || typeof onLink !== 'function') {
     throw new Error('invalid page projection');
   }
-  const nodes = new Map(), parents = new Set();
+  const nodes = new Map(), parents = new Set(), links = new WeakMap();
   let page = null, operations = 0, textBytes = 0;
   const encoder = new TextEncoder();
   const idOk = id => Number.isSafeInteger(id) && id > 0 && id <= 256;
@@ -37,8 +38,15 @@ export function commitLocalPageProjection(root, batches) {
         page = node;
       } else if (kind === ':dom/set-attr') {
         const node = nodes.get(id);
-        if (op.length !== 4 || !(node instanceof Element) || typeof value !== 'string' || value[0] !== ':' || !ATTRS.has(value.slice(1))) throw new Error('invalid page attribute');
-        node.setAttribute(value.slice(1), textOk(extra));
+        if (op.length !== 4 || !(node instanceof Element) || typeof value !== 'string' || value[0] !== ':') throw new Error('invalid page attribute');
+        if (value === ':href') {
+          if (!(node instanceof HTMLAnchorElement) || links.has(node)) throw new Error('invalid page link');
+          links.set(node, textOk(extra));
+          node.setAttribute('role', 'link'); node.tabIndex = 0;
+        } else {
+          if (!ATTRS.has(value.slice(1))) throw new Error('invalid page attribute');
+          node.setAttribute(value.slice(1), textOk(extra));
+        }
       } else if (kind === ':dom/append-child') {
         const parent = nodes.get(id), child = nodes.get(value);
         if (op.length !== 3 || !(parent instanceof Element) || parent instanceof HTMLBRElement || !idOk(value) || !child ||
@@ -48,5 +56,22 @@ export function commitLocalPageProjection(root, batches) {
     }
   }
   if (!page || parents.size !== nodes.size - 1 || [...nodes.values()].some(node => node !== page && !page.contains(node))) throw new Error('incomplete page projection');
+  const activate = event => {
+    const anchor = event.composedPath().find(node => links.has(node));
+    if (!anchor) return;
+    if (event.type === 'keydown' && event.key !== 'Enter') return;
+    // No live href is installed: default browser navigation must never
+    // bypass the operation broker, even for synthetic or modified events.
+    if (event.cancelable) event.preventDefault();
+    if (!event.isTrusted || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey ||
+        (event.type === 'click' && event.button !== 0)) return;
+    if (event.type === 'keydown' && event.repeat) return;
+    onLink(links.get(anchor));
+  };
+  const previous = pageBindings.get(root);
+  if (previous) { root.removeEventListener('click', previous, true); root.removeEventListener('keydown', previous, true); }
+  root.addEventListener('click', activate, true);
+  root.addEventListener('keydown', activate, true);
+  pageBindings.set(root, activate);
   root.replaceChildren(page);
 }

@@ -3,7 +3,7 @@
             [browser.storage :as storage]
             [browser.text-edit :as edit])
   (:export [empty-session open-tab focus-tab close-tab set-address commit-address
-            pending-generation request-history confirm-navigation confirm-text-navigation cancel-navigation
+            pending-generation request-history request-link confirm-navigation confirm-text-navigation cancel-navigation
             address-insert address-backspace address-delete address-select address-move address-select-all
             address-composition-start address-composition-update address-composition-end
             active-url active-html-page remember-html-page put-value get-value delete-value]))
@@ -164,6 +164,15 @@
         (document-assoc queued :session/pending
           (document-assoc pending (document-string tab-id)
             (document-assoc entry :history-index (field target :index))))))))
+
+(defn request-link [session :document tab-id :string url :string] :document
+  ;; The authenticated host must bind this input to a trusted click on the
+  ;; current page and resolve/validate its URL. This only queues an intent.
+  (let [state (field session :session/chrome)]
+    (if (or (not (string=? tab-id (text (field state :chrome/active-tab-id))))
+            (not (option-some?-of [:option :string] (active-html-page session)))
+            (:text/composing (editor-state session)) (string=? url "")) session
+      (commit-address (set-address session url)))))
 
 (defn pending-entry [session :document tab-id :string] :document
   (option-or (document-get (field session :session/pending) (document-string tab-id))
