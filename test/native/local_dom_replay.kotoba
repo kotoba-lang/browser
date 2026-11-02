@@ -1,0 +1,47 @@
+(ns browser.native-local-dom-replay-test
+  (:require [browser.local-session :as session]
+            [browser.local-view :as view]
+            [kotoba.wasm.dom :as dom])
+  (:export [main]))
+
+(defn item [d :document i :i64] :document
+  (option-or (document-vector-at d i) (document-null)))
+(defn number [d :document] :i64
+  (option-or (document-i64-value d) -1))
+(defn key [d :document] :keyword
+  (option-or (document-keyword-value d) :invalid))
+(defn text [d :document] :string
+  (option-or (document-string-value d) ""))
+
+;; An offline oracle for this known fixture, not a validating host adapter.
+(defn replay-op [d :document op :document] :document
+  (let [kind (key (item op 0)) id (number (item op 1))]
+    (cond (= kind :dom/create-element)
+          (let [made (dom/create-element d (key (item op 2)))]
+            (if (= (number (item made 0)) id) (item made 1) (document-null)))
+          (= kind :dom/create-text)
+          (let [made (dom/create-text-node d (text (item op 2)))]
+            (if (= (number (item made 0)) id) (item made 1) (document-null)))
+          (= kind :dom/set-root) (dom/set-root d id)
+          (= kind :dom/set-attr) (dom/set-attribute d id (key (item op 2)) (item op 3))
+          (= kind :dom/append-child) (dom/append-child d id (number (item op 2)))
+          :else (document-null))))
+
+(defn replay-batch [d :document batch :document i :i64] :document
+  (if (or (= (document-kind d) :null) (>= i (document-count batch))) d
+    (replay-batch (replay-op d (item batch i)) batch (+ i 1))))
+
+(defn main [] :i64
+  (let [one (session/open-tab (session/empty-session "p") "https://one.example/")
+        ready (session/confirm-navigation one "tab-1" 1 "https://one.example/")
+        two (session/open-tab ready "https://two.example/")
+        page (session/confirm-text-navigation two "tab-2" 2 "https://two.example/" "<b>text</b> 日本")
+        rendered (view/render page)
+        transaction (dom/consume-op-transaction rendered)
+        batches (item transaction 0)
+        first (replay-batch (dom/empty-document) (item batches 0) 0)
+        replayed (replay-batch first (item batches 1) 0)]
+    (cond (not= (document-count batches) 2) 1
+          (= (document-kind replayed) :null) 2
+          (not (document-equal? (dom/tree replayed) (dom/tree rendered))) 3
+          :else 0)))

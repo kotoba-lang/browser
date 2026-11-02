@@ -60,6 +60,7 @@ def main(a):
                                    ('local-view', a.browser, 'local_view.kotoba'),
                                    ('local-text-view', a.browser, 'local_text_view.kotoba'),
                                    ('local-multitab-text', a.browser, 'local_multitab_text.kotoba'),
+                                   ('local-dom-replay', a.browser, 'local_dom_replay.kotoba'),
                                    ('local-controller', a.browser, 'local_controller.kotoba'),
                                    ('local-dom-events', a.browser, 'local_dom_events.kotoba')]:
         if a.case and name != a.case:
@@ -103,7 +104,7 @@ def main(a):
                           lock=pin(lock), sources={str(path): pin(path) for path in files}))
         (out / 'shared-native.json').write_text(json.dumps(dict(status='PASS_SHARED_COMPONENTS_NATIVE',
             target=a.target, host=[platform.system(), machine, platform.release()], compiler=pin(compiler),
-            cases=cases, complete=len(cases) == 12, emulation=False, kernelDesktopQualified=False,
+            cases=cases, complete=len(cases) == 13, emulation=False, kernelDesktopQualified=False,
             cssomQualified=False, itonamiDappsQualified=False, restorationQualified=False), indent=2) + '\n')
     print('PASS_SHARED_COMPONENTS_NATIVE', a.target, len(cases), flush=True)
 
@@ -118,7 +119,7 @@ if __name__ == '__main__':
     p.add_argument('--dom', type=Path, required=True)
     p.add_argument('--text', type=Path, required=True)
     p.add_argument('--output', type=Path, required=True)
-    p.add_argument('--case', choices=['text', 'dom', 'text-edit', 'chrome', 'origin', 'storage', 'local-session', 'local-view', 'local-text-view', 'local-multitab-text', 'local-controller', 'local-dom-events'])
+    p.add_argument('--case', choices=['text', 'dom', 'text-edit', 'chrome', 'origin', 'storage', 'local-session', 'local-view', 'local-text-view', 'local-multitab-text', 'local-dom-replay', 'local-controller', 'local-dom-events'])
     a = p.parse_args()
     assert a.runner_source if a.target == 'arm64' else a.runner
     main(a)
