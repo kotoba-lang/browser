@@ -11,6 +11,7 @@ from pathlib import Path
 import sys
 import tempfile
 import time
+from urllib.parse import urlsplit
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,18 +32,21 @@ def run(args):
             deadline = time.monotonic() + 120
             while True:
                 header = actor.line(deadline)
-                if header.startswith((b'FRAME ', b'PFRAME ')):
+                if header.startswith((b'FRAME ', b'PFRAME ', b'NFRAME ')):
                     break
                 if header.startswith((b'KEXE_TRAP', b'seed:', b'ACTOR_EXIT')):
                     raise RuntimeError(('native actor', header))
-            fields = header.split(); is_page = fields[0] == b'PFRAME'
-            assert len(fields) == (4 if is_page else 3) and int(fields[1]) == revision, header
-            shell_size = int(fields[2]); page_size = int(fields[3]) if is_page else 0
-            assert shell_size > 0 and shell_size + page_size <= 1048576 and (not is_page or page_size > 0)
-            while len(actor.buf) < shell_size + page_size:
+            fields = header.split(); is_page = fields[0] == b'PFRAME'; is_notice = fields[0] == b'NFRAME'
+            assert len(fields) == (5 if is_notice else 4 if is_page else 3) and int(fields[1]) == revision, header
+            shell_size = int(fields[2]); page_size = int(fields[3]) if is_page or is_notice else 0
+            notice_size = int(fields[4]) if is_notice else 0
+            size = shell_size + page_size + notice_size
+            assert shell_size > 0 and size <= 1048576 and (not is_page or page_size > 0)
+            while len(actor.buf) < size:
                 actor.more(deadline)
-            raw, actor.buf = actor.buf[:shell_size + page_size], actor.buf[shell_size + page_size:]
-            return json.loads(raw[:shell_size]), json.loads(raw[shell_size:]) if is_page else None
+            raw, actor.buf = actor.buf[:size], actor.buf[size:]
+            return (json.loads(raw[:shell_size]), json.loads(raw[shell_size:shell_size + page_size]) if page_size else None,
+                    json.loads(raw[shell_size + page_size:]) if is_notice else None)
 
         def send(raw):
             data = raw.encode('utf-8')
@@ -121,13 +125,23 @@ def run(args):
             browser.call('Input.insertText', {'text':url}, session); advance(3)
             browser.call('Input.dispatchKeyEvent', {'type':'keyDown', 'key':'Enter', 'code':'Enter', 'windowsVirtualKeyCode':13}, session)
             browser.call('Input.dispatchKeyEvent', {'type':'keyUp', 'key':'Enter', 'code':'Enter', 'windowsVirtualKeyCode':13}, session)
-            advance(4)
+            submitted = advance(4)
+            assert submitted[2] == {'tab':'tab-1', 'generation':1, 'url':url}, submitted[2]
             # The wrong response is locally injected; the approved case below is intercepted.
             wrong = 'https://other.example/'
             send(f'H1|4|1|tab-1|{len(wrong.encode())}|{wrong}{html}')
             assert actor.line(time.monotonic() + 30) == b'REJECT'
             assert snap() == {'url':url, 'page':None, 'tabs':1}, snap()
             if args.broker:
+                # The test-only bridge derives the fixed declared operation and
+                # response context from the actor's notification. It is not a
+                # shipping host or authentication of the actor channel.
+                intent = submitted[2]
+                parsed = urlsplit(intent['url'])
+                assert parsed.scheme == 'https' and parsed.netloc == 'service.invalid' and not parsed.query and not parsed.fragment
+                operation = json.dumps(parsed.path)
+                context = json.dumps({'revision':4, 'generation':intent['generation'], 'tab':intent['tab']})
+                start_broker = 'window.brokerFixture.start(' + operation + ',' + context + ')'
                 def broker_wait(predicate):
                     deadline = time.monotonic() + 30
                     while time.monotonic() < deadline:
@@ -136,14 +150,14 @@ def run(args):
                         time.sleep(.05)
                     raise TimeoutError(('broker', state))
                 broker_wait(lambda state: state['status'] == 'ready')
-                phase = 'deny'; evaluate("window.brokerFixture.start('/page')")
+                phase = 'deny'; evaluate(start_broker)
                 shown = broker_wait(lambda state: state['open'])
                 assert 'https://service.invalid' in shown['scope'] and 'GET /page' in shown['scope']
                 click('dialog.kotoba-client-consent button:first-of-type')
                 denied = broker_wait(lambda state: state['status'] == 'error')
                 assert 'not approved' in denied['message'] and not requests and snap()['page'] is None
                 time.sleep(.25)
-                phase = 'allow'; evaluate("window.brokerFixture.start('/page')"); broker_wait(lambda state: state['open'])
+                phase = 'allow'; evaluate(start_broker); broker_wait(lambda state: state['open'])
                 evaluate("document.querySelectorAll('dialog.kotoba-client-consent button')[1].click()")
                 assert evaluate('window.brokerFixture.state().open') and not requests
                 click('dialog.kotoba-client-consent button:last-of-type')

@@ -1,6 +1,8 @@
 // Local actor transport for an already authenticated Worker/process. This
 // module performs no service operations and does not authenticate its source.
 // Call output from the acknowledged local stdio callback; write queues stdin.
+// onNavigation is an unapproved intent. Only a separately trusted host may
+// use it with the canonical broker and a fresh operation-specific decision.
 import { bindLocalInput, commitLocalProjection, encodeLocalEvent } from './local_dom_host.js';
 
 const MAX_FRAME = 1048576;
@@ -9,8 +11,8 @@ const MAX_INPUT = 65700;
 const MAX_PENDING_TEXT = 32;
 const MAX_PENDING_BYTES = 65536;
 
-export function createLocalActorHost({ mount, write, onBusy = () => {}, onError = () => {} }) {
-  if (!(mount instanceof Element) || typeof write !== 'function' || typeof onBusy !== 'function' || typeof onError !== 'function') {
+export function createLocalActorHost({ mount, write, onNavigation = () => {}, onBusy = () => {}, onError = () => {} }) {
+  if (!(mount instanceof Element) || typeof write !== 'function' || typeof onNavigation !== 'function' || typeof onBusy !== 'function' || typeof onError !== 'function') {
     throw new Error('invalid local actor host');
   }
   let revision = 0, waiting = true, closed = false, unbind = null;
@@ -86,11 +88,21 @@ export function createLocalActorHost({ mount, write, onBusy = () => {}, onError 
       write(size + '\n' + body);
     } catch (error) { fail(error); }
   }
-  function frame(rev, bytes, shellLength = null) {
+  function frame(rev, bytes, shellLength = null, pageLength = 0, intentLength = 0) {
     if (!waiting || rev !== revision + 1 || !Number.isSafeInteger(rev)) throw new Error('unexpected actor revision');
     const batches = JSON.parse(decoder.decode(shellLength === null ? bytes : bytes.subarray(0, shellLength)));
-    const pageBatches = shellLength === null ? undefined : JSON.parse(decoder.decode(bytes.subarray(shellLength)));
+    const pageBatches = pageLength ? JSON.parse(decoder.decode(bytes.subarray(shellLength, shellLength + pageLength))) : undefined;
     const completed = sent;
+    let notice;
+    if (intentLength) {
+      if (!completed || ![':ui/submit', ':ui/click'].includes(completed.type)) throw new Error('unexpected navigation intent');
+      const item = JSON.parse(decoder.decode(bytes.subarray(shellLength + pageLength)));
+      if (!item || Array.isArray(item) || typeof item !== 'object' || Object.keys(item).sort().join(',') !== 'generation,tab,url' ||
+          typeof item.tab !== 'string' || !/^tab-[1-9][0-9]{0,9}$/.test(item.tab) ||
+          !Number.isSafeInteger(item.generation) || item.generation < 1 || typeof item.url !== 'string' ||
+          encoder.encode(item.url).length > 4096) throw new Error('invalid navigation intent');
+      notice = Object.freeze({revision: rev, tab: item.tab, generation: item.generation, url: item.url});
+    }
     if (completed && (completed.type === ':ui/composition-start' || completed.type === ':ui/composition-update')) {
       // Validate each projection on a detached tree, but keep the actual
       // composing input alive until the browser's compositionend.
@@ -113,6 +125,7 @@ export function createLocalActorHost({ mount, write, onBusy = () => {}, onError 
     unbind = bindLocalInput(mount, projection, intent);
     waiting = false;
     sent = null;
+    if (notice) onNavigation(notice);
     if (pendingText.length) {
       const input = mount.querySelector('input[data-role="address"]');
       const target = input && projection.resolve(input);
@@ -136,20 +149,23 @@ export function createLocalActorHost({ mount, write, onBusy = () => {}, onError 
         const header = decoder.decode(buffer.subarray(0, nl));
         const match = /^FRAME ([1-9][0-9]{0,15}) ([1-9][0-9]{0,6})$/.exec(header);
         const page = /^PFRAME ([1-9][0-9]{0,15}) ([1-9][0-9]{0,6}) ([1-9][0-9]{0,6})$/.exec(header);
-        if (!match && !page) throw new Error('invalid actor header');
-        const fields = match || page;
+        const nav = /^NFRAME ([1-9][0-9]{0,15}) ([1-9][0-9]{0,6}) (0|[1-9][0-9]{0,6}) ([1-9][0-9]{0,4})$/.exec(header);
+        if (!match && !page && !nav) throw new Error('invalid actor header');
+        const fields = match || page || nav;
         const rev = Number(fields[1]), shellLength = Number(fields[2]);
-        const length = shellLength + (page ? Number(page[3]) : 0);
+        const pageLength = page || nav ? Number(fields[3]) : 0;
+        const intentLength = nav ? Number(fields[4]) : 0;
+        const length = shellLength + pageLength + intentLength;
         if (!Number.isSafeInteger(rev) || length > MAX_FRAME) throw new Error('actor frame limit');
-        expected = { rev, length, shellLength: page ? shellLength : null };
+        expected = { rev, length, shellLength: page || nav ? shellLength : null, pageLength, intentLength };
         buffer = buffer.slice(nl + 1);
       }
       if (buffer.length < expected.length) return;
-      const { rev, length, shellLength } = expected;
+      const { rev, length, shellLength, pageLength, intentLength } = expected;
       const bytes = buffer.slice(0, length);
       buffer = buffer.slice(length);
       expected = null;
-      frame(rev, bytes, shellLength);
+      frame(rev, bytes, shellLength, pageLength, intentLength);
     }
   }
   return Object.freeze({

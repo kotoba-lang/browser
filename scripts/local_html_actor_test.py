@@ -1,4 +1,4 @@
-"""Exercise the experimental authenticated-peer HTML actor over local pipes."""
+"""Exercise the experimental HTML actor over local pipes; peer authentication is not implemented."""
 import json
 import os
 from pathlib import Path
@@ -31,19 +31,22 @@ def run_actor(command, env, output, timeout=90):
         value, buffer = buffer.split(b'\n', 1)
         return value.rstrip(b'\r')
 
-    def frame(revision, page=False):
+    def frame(revision, page=False, notice=None):
         nonlocal buffer
         deadline = time.monotonic() + timeout
         header = line(deadline)
         fields = header.split()
-        assert fields[0] == (b'PFRAME' if page else b'FRAME') and int(fields[1]) == revision, header
-        assert len(fields) == (4 if page else 3)
-        shell_len = int(fields[2]); page_len = int(fields[3]) if page else 0
-        assert 0 < shell_len and shell_len + page_len <= 1048576 and (not page or page_len > 0)
-        while len(buffer) < shell_len + page_len:
+        assert fields[0] == (b'NFRAME' if notice else b'PFRAME' if page else b'FRAME') and int(fields[1]) == revision, header
+        assert len(fields) == (5 if notice else 4 if page else 3)
+        shell_len = int(fields[2]); page_len = int(fields[3]) if page or notice else 0
+        intent_len = int(fields[4]) if notice else 0
+        size = shell_len + page_len + intent_len
+        assert 0 < shell_len and size <= 1048576 and (not page or page_len > 0)
+        while len(buffer) < size:
             more(deadline)
-        raw, buffer = buffer[:shell_len + page_len], buffer[shell_len + page_len:]
-        return json.loads(raw[:shell_len]), json.loads(raw[shell_len:]) if page else None
+        raw, buffer = buffer[:size], buffer[size:]
+        if notice: assert json.loads(raw[shell_len + page_len:]) == notice
+        return json.loads(raw[:shell_len]), json.loads(raw[shell_len:shell_len + page_len]) if page else None
 
     def send(payload):
         raw = payload.encode('utf-8')
@@ -67,7 +70,7 @@ def run_actor(command, env, output, timeout=90):
         event(1, 'B1|:ui/click|3|-1|-1|0|0|'); frame(2)
         url = 'https://one.example/'
         event(2, 'B1|:ui/text|9|0|0|0|0|' + url); assert address(frame(3)[0]) == url
-        event(3, 'B1|:ui/submit|9|-1|-1|0|0|'); frame(4)
+        event(3, 'B1|:ui/submit|9|-1|-1|0|0|'); frame(4, notice={'tab':'tab-1', 'generation':1, 'url':url})
         body = '<section><h1>Hi <em>世界</em></h1><p><strong>重要</strong> <code>x</code></p></section>'
         response(3, 1, 'tab-1', url, body); reject()
         response(4, 1, 'tab-1', 'https://other.example/', body); reject()

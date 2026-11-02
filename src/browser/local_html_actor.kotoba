@@ -10,6 +10,8 @@
 ;; verify response provenance/MIME/size and obtain fresh operation consent.
 ;; H1 carries already-supplied HTML only; it grants no network capability.
 ;; H1|revision|generation|tab|url-byte-length|<url><html> is length framed.
+;; NFRAME reports a newly queued navigation to the trusted host; it conveys
+;; no consent and is valid only on the authenticated actor channel.
 ;; Other inputs retain the native actor's revision|B1 UI event format.
 (defn field [d :document key :keyword] :document
   (option-or (document-get d key) (document-null)))
@@ -84,10 +86,10 @@
                           next (if is-html (response frame (string-substring s 3 (string-length s)))
                                  (runtime/step frame revision event))]
                       (if (option-some?-of [:option :document] next)
-                        (let [f (option-or next (document-null)) sent (emitter/emit-frame f)] (serve f))
+                        (let [f (option-or next (document-null)) sent (emitter/emit-html-frame f)] (serve f))
                         (let [sent (write-flush "REJECT\n")] (serve frame)))))))))
 
 (defn main [] :i64
   (let [initial (runtime/begin (session/empty-session "local") 1)]
     (if (not (option-some?-of [:option :document] initial)) 1
-      (let [frame (option-or initial (document-null)) sent (emitter/emit-frame frame)] (serve frame)))))
+      (let [frame (option-or initial (document-null)) sent (emitter/emit-html-frame frame)] (serve frame)))))

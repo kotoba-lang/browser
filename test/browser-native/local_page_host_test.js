@@ -89,6 +89,45 @@ try {
     try { invalid.output(1, encoder.encode(header)); } catch (_) {}
     if (!rejected || !invalid.state().closed || badMount.childNodes.length) throw new Error('invalid actor page header accepted');
   }
+  const shellWire = JSON.stringify(shell), shellBytes = encoder.encode(shellWire).length;
+  const normal = encoder.encode(`FRAME 1 ${shellBytes}\n${shellWire}`);
+  const navFrame = (metadata, page = '') => {
+    const json = typeof metadata === 'string' ? metadata : JSON.stringify(metadata);
+    return encoder.encode(`NFRAME 2 ${shellBytes} ${encoder.encode(page).length} ${encoder.encode(json).length}\n${shellWire}${page}${json}`);
+  };
+  {
+    const div = document.createElement('div'); let rejected = false, notified = false;
+    const host = createLocalActorHost({mount:div, write:() => {}, onNavigation:() => {notified = true;}, onError:() => {rejected = true;}});
+    const item = JSON.stringify({tab:'tab-1', generation:1, url:'https://one.example/'});
+    try { host.output(1, encoder.encode(`NFRAME 1 ${shellBytes} 0 ${encoder.encode(item).length}\n${shellWire}${item}`)); } catch (_) {}
+    if (!rejected || notified || div.childNodes.length) throw new Error('unsolicited navigation accepted');
+  }
+  for (const page of ['', JSON.stringify(batches)]) {
+    const div = document.createElement('div'); document.body.appendChild(div);
+    const notices = [], writes = [];
+    const host = createLocalActorHost({mount:div, write:x => writes.push(x), onNavigation:x => notices.push(x)});
+    host.output(1, normal);
+    div.querySelector('input').dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', bubbles:true, cancelable:true}));
+    const data = navFrame({tab:'tab-1', generation:3, url:'https://one.example/'}, page);
+    for (let i = 0; i < data.length; i += 13) host.output(1, data.slice(i, i + 13));
+    if (writes.length !== 1 || notices.length !== 1 || !Object.isFrozen(notices[0]) ||
+        JSON.stringify(notices[0]) !== JSON.stringify({revision:2, tab:'tab-1', generation:3, url:'https://one.example/'})) {
+      throw new Error('actor navigation notification mismatch');
+    }
+    host.close(); div.remove();
+  }
+  for (const invalid of ['{', {tab:'tab-1', generation:0, url:'https://one.example/'},
+                         {tab:'tab-1', generation:1, url:'https://one.example/', approval:true}]) {
+    const div = document.createElement('div'); document.body.appendChild(div);
+    let error = false, notified = false;
+    const host = createLocalActorHost({mount:div, write:() => {}, onNavigation:() => {notified = true;}, onError:() => {error = true;}});
+    host.output(1, normal);
+    div.querySelector('input').dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', bubbles:true, cancelable:true}));
+    const stable = div.firstChild;
+    try { host.output(1, navFrame(invalid)); } catch (_) {}
+    if (!error || notified || !host.state().closed || div.firstChild !== stable) throw new Error('invalid navigation accepted');
+    div.remove();
+  }
   if (nativeFrame !== null) {
     const nativeMount = document.createElement('div'); document.body.appendChild(nativeMount);
     let nativePage = null;

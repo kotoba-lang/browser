@@ -18,6 +18,9 @@
         f2 (frame typed)
         selected (runtime/step f2 3 "B1|:ui/text|9|3|1|0|0|X")
         f3 (frame selected)
+        submitted (frame (runtime/step f3 4 "B1|:ui/submit|9|-1|-1|0|0|"))
+        notice (field submitted :navigation)
+        after-edit (frame (runtime/step submitted 5 "B1|:ui/text|9|-1|-1|0|0|!"))
         output (text (field (field (field f3 :state) :session/address-editor) :text/value))
         stale (runtime/step f2 2 "B1|:ui/text|9|0|0|0|0|wrong")
         malformed (input/decode "B1|:ui/text|09|0|0|0|0|bad")
@@ -32,4 +35,8 @@
           (or (present? malformed) (present? broken) (present? movement)) 6
           (not (string=? (text (field (frame escaped) :text)) "a|b\n日本")) 7
           (not= (option-or (document-i64-value (field f3 :revision)) 0) 4) 8
+          (not (string=? (text (field notice :tab)) "tab-1")) 9
+          (not (string=? (text (field notice :url)) "AXB")) 10
+          (not= (option-or (document-i64-value (field notice :generation)) 0) 1) 11
+          (not= (document-kind (field after-edit :navigation)) :null) 12
           :else 0)))

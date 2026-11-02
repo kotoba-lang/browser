@@ -11,6 +11,18 @@
   (option-or (document-get d key) (document-null)))
 (defn item [d :document i :i64] :document
   (option-or (document-vector-at d i) (document-null)))
+(defn text [d :document] :string
+  (option-or (document-string-value d) ""))
+
+(defn new-navigation [before :document after :document] :document
+  ;; This is an intent notification only. The trusted host still owns the
+  ;; operation broker, consent, response provenance and actor authentication.
+  (let [tab (text (field (field after :session/chrome) :chrome/active-tab-id))
+        generation (session/pending-generation after tab)
+        previous (session/pending-generation before tab)
+        entry (option-or (document-get (field after :session/pending) (document-string tab)) (document-null))]
+    (if (or (string=? tab "") (<= generation 0) (= generation previous)) (document-null)
+      (document-map :tab (document-string tab) :generation (document-i64 generation) :url (field entry :url)))))
 
 ;; The embedding runtime owns this frame and its revision. A UI callback is
 ;; not an authority grant; input must name the exact current revision.
@@ -37,4 +49,7 @@
       (option-none-of [:option :document])
       (let [next (events/dispatch state snapshot (option-or event (document-null)))]
         (if (document-equal? next state) (option-none-of [:option :document])
-          (begin next (+ revision 1)))))))
+          (let [result (begin next (+ revision 1))]
+            (if (not (option-some?-of [:option :document] result)) result
+              (option-some-of [:option :document]
+                (document-assoc (option-or result (document-null)) :navigation (new-navigation state next))))))))))

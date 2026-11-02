@@ -14,11 +14,11 @@ let state = {status:'ready', message:'', encoded:''};
 window.brokerFixture = {
   state() { const dialog = document.querySelector('dialog.kotoba-client-consent'); return {...state, open:dialog.open,
     scope:dialog.querySelector('.kotoba-client-consent-scope').textContent}; },
-  start(path) {
+  start(path, context = {revision:4, generation:1, tab:'tab-1'}) {
     state = {status:'pending', message:'', encoded:''};
     const url = 'https://service.invalid' + path;
     broker.invoke(selector, {input:url, init:{method:'GET'}})
-      .then(response => encodeLocalHtmlResponse(response, {revision:4, generation:1, tab:'tab-1', url}))
+      .then(response => encodeLocalHtmlResponse(response, {...context, url}))
       .then(encoded => { state = {status:'ok', message:'', encoded}; })
       .catch(error => { state = {status:'error', message:String(error.message), encoded:''}; });
   },
