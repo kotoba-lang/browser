@@ -42,6 +42,8 @@ jobs:
             --broker "$PWD/_broker/src/kotoba-client-runtime.js" --output "$RUNNER_TEMP/broker-https"
           python3 scripts/check-local-broker-https.py --negative-no-cert-exception --browser "$(command -v google-chrome)" \
             --broker "$PWD/_broker/src/kotoba-client-runtime.js" --output "$RUNNER_TEMP/broker-https-negative"
+          python3 scripts/check-local-broker-https.py --negative-no-cors --browser "$(command -v google-chrome)" \
+            --broker "$PWD/_broker/src/kotoba-client-runtime.js" --output "$RUNNER_TEMP/broker-https-cors"
       - name: Verify slow loopback HTTPS response cancellation
         run: >-
           python3 scripts/check-local-slow-html-https.py --browser "$(command -v google-chrome)"
@@ -63,6 +65,7 @@ jobs:
             ${{ runner.temp }}/broker-response/*.json
             ${{ runner.temp }}/broker-https/receipt.json
             ${{ runner.temp }}/broker-https-negative/negative-receipt.json
+            ${{ runner.temp }}/broker-https-cors/cors-receipt.json
             ${{ runner.temp }}/slow-html-https/receipt.json
           if-no-files-found: warn
   native-html-page-wire:

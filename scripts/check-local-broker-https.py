@@ -36,7 +36,9 @@ def main():
     p.add_argument('--browser', required=True, type=Path)
     p.add_argument('--broker', required=True, type=Path)
     p.add_argument('--output', required=True, type=Path)
-    p.add_argument('--negative-no-cert-exception', action='store_true', help='verify the self-signed endpoint is refused without the test-only key exception')
+    negatives = p.add_mutually_exclusive_group()
+    negatives.add_argument('--negative-no-cert-exception', action='store_true', help='verify the self-signed endpoint is refused without the test-only key exception')
+    negatives.add_argument('--negative-no-cors', action='store_true', help='verify a contacted service without CORS approval cannot supply a response')
     a = p.parse_args()
     output = a.output.resolve(); output.mkdir(parents=True, exist_ok=False)
     data = a.broker.resolve(strict=True).read_bytes()
@@ -60,7 +62,7 @@ def main():
             payload = body.encode('utf-8')
             self.send_response(200)
             self.send_header('Content-Type', 'text/html; charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            if not a.negative_no_cors: self.send_header('Access-Control-Allow-Origin', '*')
             self.send_header('Content-Length', str(len(payload)))
             self.end_headers(); self.wfile.write(payload)
         def log_message(self, *_): pass
@@ -132,6 +134,17 @@ def main():
                     (output / 'negative-receipt.json').write_text(json.dumps({'status':'PASS_SELF_SIGNED_CERT_REFUSED',
                         'browser':version, 'failures':failures, 'serverRequests':requests}, indent=2) + '\n')
                     print('PASS_SELF_SIGNED_CERT_REFUSED', version)
+                    return
+                if a.negative_no_cors:
+                    assert allowed['status']=='error' and len(observed)==1 and len(requests)==1, (allowed, observed, requests, failures)
+                    assert requests[0]['path']=='/page' and not allowed['encoded'], (allowed, requests)
+                    assert any(f.get('corsErrorStatus') for f in failures), failures
+                    (output / 'cors-receipt.json').write_text(json.dumps({'status':'PASS_CORS_RESPONSE_REFUSED',
+                        'browser':version, 'brokerSha256':BROKER_SHA, 'serverRequests':requests, 'failures':failures,
+                        'limitations':['test-only loopback HTTPS; automated consent; archived unreviewed broker',
+                                       'server received request; CORS only refused response access',
+                                       'test certificate exception; no real service or production qualification']}, indent=2) + '\n')
+                    print('PASS_CORS_RESPONSE_REFUSED', version)
                     return
                 assert allowed['status']=='ok', (allowed, observed, requests, failures)
                 assert len(observed)==1 and len(requests)==1 and requests[0]['path']=='/page'
