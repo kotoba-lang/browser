@@ -61,6 +61,7 @@ def main(a):
                                    ('origin', a.browser, 'origin.kotoba'),
                                    ('storage', a.browser, 'storage.kotoba'),
                                    ('local-session', a.browser, 'local_session.kotoba'),
+                                   ('local-snapshot', a.browser, 'local_snapshot.kotoba'),
                                    ('local-view', a.browser, 'local_view.kotoba'),
                                    ('local-text-view', a.browser, 'local_text_view.kotoba'),
                                    ('local-multitab-text', a.browser, 'local_multitab_text.kotoba'),
@@ -186,7 +187,7 @@ if __name__ == '__main__':
     p.add_argument('--text', type=Path, required=True)
     p.add_argument('--html', type=Path, help='pinned kotoba.htmldom owner for HTML navigation')
     p.add_argument('--output', type=Path, required=True)
-    p.add_argument('--case', choices=['text', 'dom', 'text-edit', 'chrome', 'origin', 'storage', 'local-session', 'local-view', 'local-text-view', 'local-multitab-text', 'local-dom-replay', 'local-dom-commit', 'local-controller', 'local-dom-events', 'local-dom-wire', 'local-loop', 'local-loop-input', 'local-native-actor', 'local-html-navigation', 'local-html-loop', 'local-html-frame', 'local-html-actor'])
+    p.add_argument('--case', choices=['text', 'dom', 'text-edit', 'chrome', 'origin', 'storage', 'local-session', 'local-snapshot', 'local-view', 'local-text-view', 'local-multitab-text', 'local-dom-replay', 'local-dom-commit', 'local-controller', 'local-dom-events', 'local-dom-wire', 'local-loop', 'local-loop-input', 'local-native-actor', 'local-html-navigation', 'local-html-loop', 'local-html-frame', 'local-html-actor'])
     p.add_argument('--event-wire', type=Path, help='Chrome-emitted event for local-loop-input')
     a = p.parse_args()
     assert a.runner_source if a.target == 'arm64' else a.runner

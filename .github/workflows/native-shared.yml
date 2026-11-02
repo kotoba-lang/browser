@@ -361,6 +361,12 @@ jobs:
       - name: Execute local session on x86
         if: matrix.target == 'x86_64'
         run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-session --output "$RUNNER_TEMP/session-native"
+      - name: Execute session snapshot on ARM
+        if: matrix.target == 'arm64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-snapshot --output "$RUNNER_TEMP/snapshot-native"
+      - name: Execute session snapshot on x86
+        if: matrix.target == 'x86_64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-snapshot --output "$RUNNER_TEMP/snapshot-native"
       - name: Execute local view on ARM
         if: matrix.target == 'arm64'
         run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-view --output "$RUNNER_TEMP/view-native"
@@ -446,6 +452,10 @@ jobs:
             ${{ runner.temp }}/session-native/*.ksl
             ${{ runner.temp }}/session-native/*.stdout
             ${{ runner.temp }}/session-native/*.stderr
+            ${{ runner.temp }}/snapshot-native/*.json
+            ${{ runner.temp }}/snapshot-native/*.ksl
+            ${{ runner.temp }}/snapshot-native/*.stdout
+            ${{ runner.temp }}/snapshot-native/*.stderr
             ${{ runner.temp }}/view-native/*.json
             ${{ runner.temp }}/view-native/*.ksl
             ${{ runner.temp }}/view-native/*.stdout
