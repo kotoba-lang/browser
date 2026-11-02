@@ -1,0 +1,68 @@
+(ns browser.local-native-actor
+  (:require [browser.local-session :as session]
+            [browser.local-loop :as runtime])
+  (:capabilities [:io/read :io/write :io/write-error])
+  (:export [main]))
+
+;; Local stdio transport only. Each input is <byte-count> newline followed by
+;; <expected-revision>|<B1 event>; a zero-length header closes the session.
+;; Each response is either REJECT newline or
+;; FRAME <revision> <byte-count> newline followed by the JSON projection.
+;; The owning process must authenticate its peer; stdin is not consent.
+(defn field [d :document key :keyword] :document
+  (option-or (document-get d key) (document-null)))
+(defn read-one [] :string (typed-cap-call :io/read :string :string "1"))
+(defn write-flush [s :string] :i64
+  (let [out (typed-cap-call :io/write :string :string s)
+        flush (typed-cap-call :io/write-error :string :string "")]
+    0))
+
+;; -1 is clean EOF, -2 is a malformed or truncated length header.
+(defn read-length [value :i64 digits :i64] :i64
+  (let [s (read-one)]
+    (cond (string=? s "") (if (= digits 0) -1 -2)
+          (string=? s "\n") (cond (= digits 0) -2 (= value 0) -1 (> value 65700) -2 :else value)
+          (or (not= (string-byte-length s) 1) (>= digits 5)) -2
+          :else (let [c (string-code-point-at s 0)]
+                  (if (or (< c 48) (> c 57) (and (> digits 0) (= value 0))) -2
+                    (read-length (+ (* value 10) (- c 48)) (+ digits 1)))))))
+
+(defn read-body [remaining :i64 out :string] [:option :string]
+  (if (= remaining 0) (option-some-of [:option :string] out)
+    (let [s (read-one) n (string-byte-length s)]
+      (if (or (= n 0) (> n remaining)) (option-none-of [:option :string])
+        (read-body (- remaining n) (string-concat out s))))))
+
+;; Bounded decimal revision before the first delimiter; 0 means invalid.
+(defn parse-revision [s :string end :i64] :i64
+  (if (or (< end 1) (> end 16) (and (> end 1) (= (string-code-point-at s 0) 48))) 0
+    (loop [i 0 value 0]
+      (if (= i end) (if (<= value 9007199254740991) value 0)
+        (let [c (string-code-point-at s i)]
+          (if (or (< c 48) (> c 57)) 0 (recur (+ i 1) (+ (* value 10) (- c 48)))))))))
+
+(defn emit-frame [frame :document] :i64
+  (let [revision (option-or (document-i64-value (field frame :revision)) 0)
+        wire (option-or (document-string-value (field frame :wire)) "")]
+    (write-flush (string-concat "FRAME " (string-concat (string-from-i64 revision)
+      (string-concat " " (string-concat (string-from-i64 (string-byte-length wire))
+        (string-concat "\n" wire))))))))
+
+(defn serve [frame :document] :i64
+  (let [length (read-length 0 0)]
+    (cond (= length -1) 0
+          (< length 0) 2
+          :else (let [body (read-body length "")]
+                  (if (not (option-some?-of [:option :string] body)) 2
+                    (let [s (option-or body "") separator (string-index-of s "|")
+                          revision (if (< separator 0) 0 (parse-revision s separator))
+                          event (if (< separator 0) "" (string-substring s (+ separator 1) (string-length s)))
+                          next (runtime/step frame revision event)]
+                      (if (option-some?-of [:option :document] next)
+                        (let [f (option-or next (document-null)) sent (emit-frame f)] (serve f))
+                        (let [sent (write-flush "REJECT\n")] (serve frame)))))))))
+
+(defn main [] :i64
+  (let [initial (runtime/begin (session/empty-session "local") 1)]
+    (if (not (option-some?-of [:option :document] initial)) 1
+      (let [frame (option-or initial (document-null)) sent (emit-frame frame)] (serve frame)))))

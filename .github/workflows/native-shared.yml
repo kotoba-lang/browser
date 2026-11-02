@@ -261,6 +261,9 @@ jobs:
       - name: Emit admitted DOM wire on ARM
         if: matrix.target == 'arm64'
         run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-dom-wire --output "$RUNNER_TEMP/dom-wire-native"
+      - name: Exercise persistent local actor on ARM
+        if: matrix.target == 'arm64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-native-actor --output "$RUNNER_TEMP/local-native-actor"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: matrix.target == 'arm64'
         with:
@@ -324,6 +327,12 @@ jobs:
             ${{ runner.temp }}/local-loop-native/*.ksl
             ${{ runner.temp }}/local-loop-native/*.stdout
             ${{ runner.temp }}/local-loop-native/*.stderr
+            ${{ runner.temp }}/local-native-actor/*.json
+            ${{ runner.temp }}/local-native-actor/*.ksl
+            ${{ runner.temp }}/local-native-actor/*.stdout
+            ${{ runner.temp }}/local-native-actor/*.stderr
+            ${{ runner.temp }}/local-native-actor/*.invalid
+            ${{ runner.temp }}/local-native-actor/*.denied
             ${{ runner.temp }}/project-native/*.json
             ${{ runner.temp }}/project-native/*.stdout
             ${{ runner.temp }}/project-native/*.stderr

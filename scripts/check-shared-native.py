@@ -12,8 +12,11 @@ import os
 import platform
 import re
 import subprocess
+import sys
 import time
 from pathlib import Path
+sys.dont_write_bytecode = True
+from local_actor_test import run_actor
 
 
 def pin(path):
@@ -73,10 +76,13 @@ def main(a):
     if a.case == 'local-loop-input':
         assert a.target == 'arm64' and a.event_wire
         test_cases.append(('local-loop-input', a.browser, 'local_loop_input.kotoba'))
+    if a.case == 'local-native-actor':
+        assert a.target == 'arm64'
+        test_cases.append(('local-native-actor', a.browser, 'local_native_actor.kotoba'))
     for name, owner, filename in test_cases:
         if a.case and name != a.case:
             continue
-        entry = (owner / 'test/native' / filename).resolve()
+        entry = (owner / ('src/browser' if name == 'local-native-actor' else 'test/native') / filename).resolve()
         source_roots = [root / 'src' for root in roots] + [a.browser.resolve() / 'kotoba', entry.parent]
         flags = [part for root in source_roots for part in ['--source-path', str(root)]]
         discovered = run(name + '-modules', [compiler, 'modules', entry, *flags])
@@ -113,9 +119,13 @@ def main(a):
             assert len(wire.encode('utf-8')) <= 65664
             invoke += [wire]
         allow = '37' if name == 'local-dom-wire' else ('37,38' if name == 'local-loop-input' else '-')
-        result = run(name + '-execute', invoke, dict(env, KEXE_STRUCTURED_REPORT='1', KEXE_ALLOW=allow))
-        match = re.search(rb':result (-?[0-9]+)', result.stdout)
-        assert match and int(match[1]) == 0, (name, result.stdout)
+        if name == 'local-native-actor':
+            run_actor(invoke, dict(env, KEXE_STRUCTURED_REPORT='1', KEXE_ALLOW='37,39,41'),
+                      out / (name + '-execute.stdout'))
+        else:
+            result = run(name + '-execute', invoke, dict(env, KEXE_STRUCTURED_REPORT='1', KEXE_ALLOW=allow))
+            match = re.search(rb':result (-?[0-9]+)', result.stdout)
+            assert match and int(match[1]) == 0, (name, result.stdout)
         if name == 'local-dom-wire':
             lines = [line[6:] for line in result.stdout.splitlines() if line.startswith(b'WIRE1 ')]
             assert len(lines) == 1 and isinstance(json.loads(lines[0]), list)
@@ -148,7 +158,7 @@ if __name__ == '__main__':
     p.add_argument('--dom', type=Path, required=True)
     p.add_argument('--text', type=Path, required=True)
     p.add_argument('--output', type=Path, required=True)
-    p.add_argument('--case', choices=['text', 'dom', 'text-edit', 'chrome', 'origin', 'storage', 'local-session', 'local-view', 'local-text-view', 'local-multitab-text', 'local-dom-replay', 'local-dom-commit', 'local-controller', 'local-dom-events', 'local-dom-wire', 'local-loop', 'local-loop-input'])
+    p.add_argument('--case', choices=['text', 'dom', 'text-edit', 'chrome', 'origin', 'storage', 'local-session', 'local-view', 'local-text-view', 'local-multitab-text', 'local-dom-replay', 'local-dom-commit', 'local-controller', 'local-dom-events', 'local-dom-wire', 'local-loop', 'local-loop-input', 'local-native-actor'])
     p.add_argument('--event-wire', type=Path, help='Chrome-emitted event for local-loop-input')
     a = p.parse_args()
     assert a.runner_source if a.target == 'arm64' else a.runner
