@@ -99,8 +99,21 @@ def run_actor(command, env, output, timeout=90):
         send('L1|10|tab-1|javascript:alert(1)'); reject()
         send('L1|10|tab-1|https://one.example/next')
         frame(11, True, {'tab':'tab-1', 'generation':3, 'url':'https://one.example/next'})
-        send('C1|11|3|tab-1'); _, cancelled_link = frame(12, True)
-        assert cancelled_link == page
+        next_url = 'https://one.example/next'; next_body = '<section><h1>Next page</h1></section>'
+        response(11, 3, 'tab-1', next_url, next_body)
+        shell, next_page = frame(12, True)
+        assert address(shell) == next_url and next_page != page
+        def action_id(projection, action):
+            return next(op[1] for batch in projection for op in batch
+                        if op[0] == ':dom/set-attr' and op[2] == ':data-action' and op[3] == action)
+        event(12, f'B1|:ui/click|{action_id(shell, ":history/back")}|-1|-1|0|0|')
+        frame(13, True, {'tab':'tab-1', 'generation':4, 'url':url})
+        response(13, 4, 'tab-1', url, body); shell, previous_page = frame(14, True)
+        assert address(shell) == url and previous_page == page
+        event(14, f'B1|:ui/click|{action_id(shell, ":history/forward")}|-1|-1|0|0|')
+        frame(15, True, {'tab':'tab-1', 'generation':5, 'url':next_url})
+        response(15, 5, 'tab-1', next_url, next_body); shell, forward_page = frame(16, True)
+        assert address(shell) == next_url and forward_page == next_page
         process.stdin.write(b'0\n'); process.stdin.flush()
         tail, errors = process.communicate(timeout=timeout)
         observed.extend(tail)

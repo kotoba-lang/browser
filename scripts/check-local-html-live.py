@@ -62,7 +62,8 @@ def run(args):
             fixture = ROOT / 'test/browser-native/local_html_live.html'
             # Exercise implicit paragraph and list-item endings in the native
             # parser before applying the resulting wire to the page host.
-            html = '<div><div><div><div><section><h1>Hi <em>世界</em></h1><p><strong>重要</strong> <code>x</code><ul><li>一<li>二</ul><a href="/page">Again</a><a href="javascript:alert(1)">Unsafe</a></section></div></div></div></div>'
+            html = '<div><div><div><div><section><h1>Hi <em>世界</em></h1><p><strong>重要</strong> <code>x</code><ul><li>一<li>二</ul><a href="/next">Again</a><a href="javascript:alert(1)">Unsafe</a></section></div></div></div></div>'
+            next_html = '<section><h1>Next page</h1><p>Second document</p></section>'
             if args.broker:
                 broker_bytes = args.broker.read_bytes()
                 assert hashlib.sha256(broker_bytes).hexdigest() == '7f760128c3a58098123c31ec3dd34b9c871932e3933f2c952facc4ab0e647212'
@@ -84,9 +85,10 @@ def run(args):
                     params = event['params']; request = params['request']; owner = event.get('sessionId')
                     requests.append({'phase':phase, 'url':request['url'], 'method':request['method'],
                                      'headers':sorted(k.lower() for k in request.get('headers', {}))})
-                    if phase == 'allow' and owner == session and request['url'] == 'https://service.invalid/page' and request['method'] == 'GET':
+                    if phase.startswith('allow') and owner == session and request['url'] in ('https://service.invalid/page', 'https://service.invalid/next') and request['method'] == 'GET':
+                        body = html if request['url'].endswith('/page') else next_html
                         browser.send('Fetch.fulfillRequest', {'requestId':params['requestId'], 'responseCode':200,
-                            'body':base64.b64encode(html.encode()).decode(),
+                            'body':base64.b64encode(body.encode()).decode(),
                             'responseHeaders':[{'name':'Content-Type','value':'text/html; charset=utf-8'},
                                                {'name':'Access-Control-Allow-Origin','value':'*'}]}, owner)
                     else:
@@ -216,7 +218,8 @@ def run(args):
                 for kind in ('mousePressed', 'mouseReleased'):
                     browser.call('Input.dispatchMouseEvent', {'type':kind, 'x':link['x'], 'y':link['y'], 'button':'left', 'clickCount':1}, session)
                 linked = advance(current + 1); current += 1
-                assert linked[2] == {'tab':'tab-1', 'generation':3, 'url':url}, linked[2]
+                next_url = 'https://service.invalid/next'
+                assert linked[2] == {'tab':'tab-1', 'generation':3, 'url':next_url}, linked[2]
                 assert evaluate('window.htmlLive.notice()') == dict(revision=current, **linked[2])
                 phase = 'deny-link'; evaluate(broker_call(linked[2], current)); broker_wait(lambda state: state['open'])
                 click('dialog.kotoba-client-consent button:first-of-type')
@@ -229,14 +232,47 @@ def run(args):
                 browser.call('Input.dispatchKeyEvent', {'type':'keyDown', 'key':'Enter', 'code':'Enter', 'windowsVirtualKeyCode':13}, session)
                 browser.call('Input.dispatchKeyEvent', {'type':'keyUp', 'key':'Enter', 'code':'Enter', 'windowsVirtualKeyCode':13}, session)
                 keyboard = advance(current + 1); current += 1
-                assert keyboard[2] == {'tab':'tab-1', 'generation':4, 'url':url}, keyboard[2]
-                phase = 'deny-keyboard'; evaluate(broker_call(keyboard[2], current)); broker_wait(lambda state: state['open'])
+                assert keyboard[2] == {'tab':'tab-1', 'generation':4, 'url':next_url}, keyboard[2]
+                def accept_notice(notice, revision, expected_url, expected_page):
+                    nonlocal phase
+                    count = len(requests)
+                    phase = 'allow-navigation'; evaluate(broker_call(notice, revision))
+                    shown = broker_wait(lambda state: state['open'])
+                    assert 'GET ' + urlsplit(expected_url).path in shown['scope'] and len(requests) == count
+                    click('dialog.kotoba-client-consent button:last-of-type')
+                    accepted = broker_wait(lambda state: state['status'] in ('ok', 'error'))
+                    assert accepted['status'] == 'ok', accepted
+                    assert len(requests) == count + 1 and requests[-1]['url'] == expected_url
+                    assert evaluate('window.htmlLive.deliver(window.brokerFixture.takeResponse())', True) is True
+                    actor.proc.stdin.write(take().encode('utf-8')); actor.proc.stdin.flush()
+                    present(frame(revision + 1))
+                    assert snap() == {'url':expected_url, 'page':expected_page, 'tabs':1}, snap()
+                    return revision + 1
+                current = accept_notice(keyboard[2], current, next_url, 'Next pageSecond document')
+                click('button[data-action=":history/back"]')
+                back = advance(current + 1); current += 1
+                assert back[2] == {'tab':'tab-1', 'generation':5, 'url':url}
+                phase = 'deny-back'; evaluate(broker_call(back[2], current)); broker_wait(lambda state: state['open'])
                 click('dialog.kotoba-client-consent button:first-of-type')
                 denied = broker_wait(lambda state: state['status'] == 'error')
-                assert 'not approved' in denied['message'] and len(requests) == 1
+                assert 'not approved' in denied['message'] and len(requests) == 2
                 assert evaluate('window.htmlLive.cancel()') is True
                 actor.proc.stdin.write(take().encode('utf-8')); actor.proc.stdin.flush()
                 current += 1; present(frame(current))
+                assert snap() == {'url':next_url, 'page':'Next pageSecond document', 'tabs':1}
+                click('button[data-action=":history/back"]')
+                back = advance(current + 1); current += 1
+                assert back[2] == {'tab':'tab-1', 'generation':6, 'url':url}
+                current = accept_notice(back[2], current, url, 'Hi 世界重要 x一二AgainUnsafe')
+                click('button[data-action=":history/forward"]')
+                forward = advance(current + 1); current += 1
+                assert forward[2] == {'tab':'tab-1', 'generation':7, 'url':next_url}
+                current = accept_notice(forward[2], current, next_url, 'Next pageSecond document')
+                click('button[data-action=":history/back"]')
+                back = advance(current + 1); current += 1
+                assert back[2] == {'tab':'tab-1', 'generation':8, 'url':url}
+                current = accept_notice(back[2], current, url, 'Hi 世界重要 x一二AgainUnsafe')
+                assert len(requests) == 5 and all(not any(h in request['headers'] for h in ('authorization','cookie','referer')) for request in requests)
             click('input'); browser.call('Input.insertText', {'text':'x'}, session); present_frame = advance(current + 1)
             assert present_frame[1] is not None and snap()['page'] == 'Hi 世界重要 x一二AgainUnsafe'
             click('button[data-action=":tab/new"]'); advance(current + 2)
