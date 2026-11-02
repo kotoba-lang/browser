@@ -49,8 +49,8 @@ def run(args):
             target = browser.call('Target.createTarget', {'url': 'about:blank'})['targetId']
             session = browser.call('Target.attachToTarget', {'targetId': target, 'flatten': True})['sessionId']
             browser.call('Page.navigate', {'url': (ROOT / 'test/browser-native/local_html_live.html').as_uri()}, session)
-            def evaluate(expression):
-                result = browser.call('Runtime.evaluate', {'expression': expression, 'returnByValue': True}, session)
+            def evaluate(expression, await_promise=False):
+                result = browser.call('Runtime.evaluate', {'expression': expression, 'returnByValue': True, 'awaitPromise': await_promise}, session)
                 if 'exceptionDetails' in result:
                     raise RuntimeError(result['exceptionDetails'])
                 return result['result'].get('value')
@@ -87,8 +87,11 @@ def run(args):
             send(f'H1|4|1|tab-1|{len(wrong.encode())}|{wrong}{html}')
             assert actor.line(time.monotonic() + 30) == b'REJECT'
             assert snap() == {'url':url, 'page':None, 'tabs':1}, snap()
-            response = f'H1|4|1|tab-1|{len(url.encode())}|{url}{html}'
-            send(response); present(frame(5))
+            response = evaluate('window.htmlLive.encodeFixture(' + json.dumps(url) + ',' + json.dumps(html, ensure_ascii=True) + ')', True)
+            header, payload = response.split('\n', 1)
+            assert int(header) == len(payload.encode('utf-8')) and payload.startswith('H1|4|1|tab-1|')
+            actor.proc.stdin.write(response.encode('utf-8')); actor.proc.stdin.flush()
+            present(frame(5))
             assert snap() == {'url':url, 'page':'Hi 世界重要 x', 'tabs':1}, snap()
             browser.call('Input.insertText', {'text':'x'}, session); present_frame = advance(6)
             assert present_frame[1] is not None and snap()['page'] == 'Hi 世界重要 x'
