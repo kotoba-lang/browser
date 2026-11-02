@@ -98,6 +98,14 @@ jobs:
           --browser "$PWD" --dom "$PWD/_dom/lib/kotoba.domGpu"
           --text "$PWD/_text/lib/kotoba.text" --html "$PWD/_html/lib/kotoba.htmldom"
           --output "$RUNNER_TEMP/frame-page"
+      - name: Exercise local HTML actor transport
+        run: >-
+          python3 scripts/check-shared-native.py --case local-html-actor
+          --compiler "$PWD/_amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64
+          --runner-source "$PWD/_amu/seed/x86_64-kx64-runner.kotoba"
+          --browser "$PWD" --dom "$PWD/_dom/lib/kotoba.domGpu"
+          --text "$PWD/_text/lib/kotoba.text" --html "$PWD/_html/lib/kotoba.htmldom"
+          --output "$RUNNER_TEMP/html-actor"
       - name: Compare independent wire output
         run: |
           python3 - <<'PYCODE'

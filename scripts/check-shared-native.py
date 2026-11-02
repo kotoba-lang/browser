@@ -17,6 +17,7 @@ import time
 from pathlib import Path
 sys.dont_write_bytecode = True
 from local_actor_test import run_actor
+from local_html_actor_test import run_actor as run_html_actor
 
 
 def pin(path):
@@ -79,15 +80,15 @@ def main(a):
     if a.case in ('local-html-navigation', 'local-html-loop', 'local-html-frame'):
         assert a.target == 'arm64' and a.html
         test_cases.append((a.case, a.browser, a.case.replace('-', '_') + '.kotoba'))
-    if a.case == 'local-native-actor':
-        assert a.target == 'arm64'
-        test_cases.append(('local-native-actor', a.browser, 'local_native_actor.kotoba'))
+    if a.case in ('local-native-actor', 'local-html-actor'):
+        assert a.target == 'arm64' and (a.case != 'local-html-actor' or a.html)
+        test_cases.append((a.case, a.browser, a.case.replace('-', '_') + '.kotoba'))
     for name, owner, filename in test_cases:
         if a.case and name != a.case:
             continue
-        entry = (owner / ('src/browser' if name == 'local-native-actor' else 'test/native') / filename).resolve()
+        entry = (owner / ('src/browser' if name in ('local-native-actor', 'local-html-actor') else 'test/native') / filename).resolve()
         source_roots = [root / 'src' for root in roots] + [a.browser.resolve() / 'kotoba', entry.parent]
-        if a.case in ('local-html-navigation', 'local-html-loop', 'local-html-frame'):
+        if a.case in ('local-html-navigation', 'local-html-loop', 'local-html-frame', 'local-html-actor'):
             source_roots.append(a.html.resolve() / 'kotoba')
         flags = [part for root in source_roots for part in ['--source-path', str(root)]]
         discovered = run(name + '-modules', [compiler, 'modules', entry, *flags])
@@ -124,8 +125,8 @@ def main(a):
             assert len(wire.encode('utf-8')) <= 65664
             invoke += [wire]
         allow = '37,39' if name == 'local-html-frame' else ('37' if name in ('local-dom-wire', 'local-html-navigation', 'local-html-loop') else ('37,38' if name == 'local-loop-input' else '-'))
-        if name == 'local-native-actor':
-            run_actor(invoke, dict(env, KEXE_STRUCTURED_REPORT='1', KEXE_ALLOW='37,39,41'),
+        if name in ('local-native-actor', 'local-html-actor'):
+            (run_html_actor if name == 'local-html-actor' else run_actor)(invoke, dict(env, KEXE_STRUCTURED_REPORT='1', KEXE_ALLOW='37,39,41'),
                       out / (name + '-execute.stdout'))
         else:
             result = run(name + '-execute', invoke, dict(env, KEXE_STRUCTURED_REPORT='1', KEXE_ALLOW=allow))
@@ -185,7 +186,7 @@ if __name__ == '__main__':
     p.add_argument('--text', type=Path, required=True)
     p.add_argument('--html', type=Path, help='pinned kotoba.htmldom owner for HTML navigation')
     p.add_argument('--output', type=Path, required=True)
-    p.add_argument('--case', choices=['text', 'dom', 'text-edit', 'chrome', 'origin', 'storage', 'local-session', 'local-view', 'local-text-view', 'local-multitab-text', 'local-dom-replay', 'local-dom-commit', 'local-controller', 'local-dom-events', 'local-dom-wire', 'local-loop', 'local-loop-input', 'local-native-actor', 'local-html-navigation', 'local-html-loop', 'local-html-frame'])
+    p.add_argument('--case', choices=['text', 'dom', 'text-edit', 'chrome', 'origin', 'storage', 'local-session', 'local-view', 'local-text-view', 'local-multitab-text', 'local-dom-replay', 'local-dom-commit', 'local-controller', 'local-dom-events', 'local-dom-wire', 'local-loop', 'local-loop-input', 'local-native-actor', 'local-html-navigation', 'local-html-loop', 'local-html-frame', 'local-html-actor'])
     p.add_argument('--event-wire', type=Path, help='Chrome-emitted event for local-loop-input')
     a = p.parse_args()
     assert a.runner_source if a.target == 'arm64' else a.runner
