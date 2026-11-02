@@ -8,7 +8,7 @@
 (defn rejected? [r :document original :document expected :keyword] :bool
   (and (= (kind r) expected) (document-equal? (field r :session) original) (= (document-kind (field r :wire)) :null)))
 (defn main [] :i64
-  (let [url "https://one.example/" body "<section><h1>Hi <em>世界</em></h1><p><strong>重要</strong> <code>x</code></p></section>"
+  (let [url "https://one.example/" body "<section><h1>Hi <em>世界</em></h1><p><strong>重要</strong> <code>x</code></section>"
         state (session/open-tab (session/empty-session "local") url)
         wrong-generation (nav/prepare state "tab-1" 2 url body)
         wrong-tab (nav/prepare state "tab-2" 1 url body)

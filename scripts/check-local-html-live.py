@@ -56,7 +56,10 @@ def run(args):
             target = browser.call('Target.createTarget', {'url': 'about:blank'})['targetId']
             session = browser.call('Target.attachToTarget', {'targetId': target, 'flatten': True})['sessionId']
             fixture = ROOT / 'test/browser-native/local_html_live.html'
-            html = '<section><h1>Hi <em>世界</em></h1><p><strong>重要</strong> <code>x</code></p></section>'
+            # HTML permits the paragraph end tag to be omitted before the
+            # parent section closes. Exercise the native parser, not Chrome's
+            # parser, on this response before applying the resulting wire.
+            html = '<section><h1>Hi <em>世界</em></h1><p><strong>重要</strong> <code>x</code></section>'
             if args.broker:
                 broker_bytes = args.broker.read_bytes()
                 assert hashlib.sha256(broker_bytes).hexdigest() == '7f760128c3a58098123c31ec3dd34b9c871932e3933f2c952facc4ab0e647212'
