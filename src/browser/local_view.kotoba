@@ -1,0 +1,61 @@
+(ns browser.local-view
+  (:require [kotoba.wasm.dom :as dom])
+  (:export [render]))
+
+;; Construct shared DOM data only. The consumer owns layout, rendering,
+;; input routing and all external operations. User text is never markup.
+(defn field [d :document key :keyword] :document
+  (option-or (document-get d key) (document-null)))
+
+(defn item [d :document i :i64] :document
+  (option-or (document-vector-at d i) (document-null)))
+
+(defn text [d :document] :string
+  (option-or (document-string-value d) ""))
+
+(defn number [d :document] :i64
+  (option-or (document-i64-value d) 0))
+
+(defn append-text [document :document parent :i64 label :string] :document
+  (let [result (dom/create-text-node document label)]
+    (dom/append-child (item result 1) parent (number (item result 0)))))
+
+(defn append-tab [document :document parent :i64 tab :document active :string] :document
+  (let [result (dom/create-element document :button)
+        id (number (item result 0))
+        tab-id (text (field tab :tab/id))
+        title (text (field tab :tab/title))
+        url (text (field tab :tab/url))
+        label (if (not (string=? title "")) title
+                (if (not (string=? url "")) url "New tab"))
+        d1 (dom/set-attribute (item result 1) id :data-tab-id (document-string tab-id))
+        d2 (dom/set-attribute d1 id :aria-selected (document-bool (string=? tab-id active)))
+        d3 (append-text d2 id label)]
+    (dom/append-child d3 parent id)))
+
+(defn append-tabs [document :document parent :i64 tabs :document active :string i :i64] :document
+  (if (>= i (document-count tabs)) document
+    (append-tabs (append-tab document parent (item tabs i) active)
+                 parent tabs active (+ i 1))))
+
+(defn render [session :document] :document
+  (let [chrome (field session :session/chrome)
+        tabs (field chrome :chrome/tabs)
+        active (text (field chrome :chrome/active-tab-id))
+        root (dom/create-element (dom/empty-document) :main)
+        root-id (number (item root 0))
+        d1 (dom/set-root (item root 1) root-id)
+        strip (dom/create-element d1 :nav)
+        strip-id (number (item strip 0))
+        d2 (dom/set-attribute (item strip 1) strip-id :aria-label (document-string "Tabs"))
+        d3 (dom/append-child d2 root-id strip-id)
+        d4 (append-tabs d3 strip-id tabs active 0)
+        address (dom/create-element d4 :input)
+        address-id (number (item address 0))
+        d5 (dom/set-attribute (item address 1) address-id :aria-label (document-string "Address"))
+        d6 (dom/set-attribute d5 address-id :value (field chrome :chrome/url-input))
+        d7 (dom/append-child d6 root-id address-id)
+        page (dom/create-element d7 :section)
+        page-id (number (item page 0))
+        d8 (dom/set-attribute (item page 1) page-id :data-role (document-string "page"))]
+    (dom/append-child d8 root-id page-id)))
