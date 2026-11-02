@@ -11,6 +11,10 @@
 (defn item [d :document i :i64] :document
   (option-or (document-vector-at d i) (document-null)))
 
+(defn navigate-many [state :document i :i64] :document
+  (if (>= i 40) state
+    (navigate-many (chrome/commit-tab-url state "tab-1" (string-from-i64 i)) (+ i 1))))
+
 ;; Exercise the exported module as a project dependency, including repeated
 ;; updates and preservation of an unrelated tab's position and history.
 (defn main [] :i64
@@ -27,7 +31,9 @@
         close-active (chrome/close-tab initial "tab-2")
         close-other (chrome/close-tab initial "tab-1")
         close-intent (chrome/close-tab committed "tab-2")
-        close-last (chrome/close-tab close-active "tab-1")]
+        close-last (chrome/close-tab close-active "tab-1")
+        long-session (navigate-many (chrome/new-tab (chrome/empty-chrome) "start") 0)
+        long-history (field (item (field long-session :chrome/tabs) 0) :tab/history)]
     (cond (not= (document-count tabs) 2) 1
           (not (string=? (text (field first-tab :tab/url)) "https://one.example/")) 2
           (not (string=? (text (field second-tab :tab/url)) "https://next.example/")) 3
@@ -40,4 +46,7 @@
           (not (string=? (text (field close-other :chrome/active-tab-id)) "tab-2")) 10
           (not= (document-kind (field close-intent :chrome/last-navigation)) :null) 11
           (not= (document-count (field close-last :chrome/tabs)) 0) 12
+          (not= (document-count long-history) 32) 13
+          (not (string=? (text (item long-history 0)) "8")) 14
+          (not (string=? (text (item long-history 31)) "39")) 15
           :else 0)))

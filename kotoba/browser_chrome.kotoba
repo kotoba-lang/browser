@@ -145,6 +145,18 @@
       (tabs-assoc tabs i tab (+ k 1)
                   (document-vector-conj acc (tab-at-doc tabs k))))))
 
+(defn history-tail [hist :document i :i64 acc :document] :document
+  (if (>= i (document-count hist)) acc
+    (history-tail hist (+ i 1) (document-vector-conj acc (tab-at-doc hist i)))))
+
+(defn bounded-history [hist :document url :string] :document
+  ;; Native document vectors hold at most 32 items. Retain the newest 31
+  ;; before adding the next navigation, so an ordinary browsing session
+  ;; cannot trap when the history reaches that limit.
+  (let [n (document-count hist)
+        retained (if (>= n 32) (history-tail hist (+ (- n 32) 1) (document-vector)) hist)]
+    (document-vector-conj retained (document-string url))))
+
 (defn updated-tab [tab :document url :string hist :document] :document
   ;; commit-url's mapv branch for the active tab: url + :loading + history conj.
   (document-assoc
@@ -152,7 +164,7 @@
     (document-assoc tab
                     :tab/url (document-string url))
     :tab/status (document-keyword :loading))
-   :tab/history (document-vector-conj hist (document-string url))))
+   :tab/history (bounded-history hist url)))
 
 (defn update-tab [tabs :document i :i64 tab :document url :string hist :document] :document
   (tabs-assoc tabs i (updated-tab tab url hist) 0 (document-vector)))
