@@ -14,7 +14,7 @@
         wrong-tab (nav/prepare state "tab-2" 1 url body)
         redirect (nav/prepare state "tab-1" 1 "https://other.example/" body)
         invalid (nav/prepare state "tab-1" 1 url "<script>bad</script>")
-        document-page (nav/prepare state "tab-1" 1 url "<!doctype html><html><head><title>猫\r\n犬</title></head><body><p>page\r\ntext</p></body></html>")
+        document-page (nav/prepare state "tab-1" 1 url "<!doctype html><html><head><title>猫\r\n犬</title></head><body><p>page\r\n<!--猫-->text</p></body></html>")
         document-tab (option-or (document-vector-at (field (field (field document-page :session) :session/chrome) :chrome/tabs) 0) (document-null))
         bad-head (nav/prepare state "tab-1" 1 url "<!doctype html><html><head><meta http-equiv='refresh' content='0'></head><body>x</body></html>")
         ;; The native document tree-value projection traps at this depth;
@@ -38,6 +38,7 @@
                   (rejected? invalid state :html-navigation/unsupported)
                   (rejected? bad-head state :html-navigation/unsupported)
                   (= (kind document-page) :html-navigation/ok)
+                  (string-contains? (text (field document-page :wire)) ":dom/create-comment")
                   (string=? (text (field document-tab :tab/title)) "猫 犬")
                   (= (kind deep) :html-navigation/ok) (> (string-length (text (field deep :wire))) 0)
                   (= (kind ok) :html-navigation/ok) (= (session/pending-generation next "tab-1") 0)

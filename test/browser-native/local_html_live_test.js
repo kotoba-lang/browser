@@ -23,6 +23,7 @@ window.htmlLive = {
     Object.defineProperty(response, 'url', {value:url});
     return host.deliverHtml(notice, response);
   },
+  commentNodes() { return Array.from(page?.querySelector('strong')?.childNodes ?? [], node => [node.nodeType, node.data]); },
   listItems() { return page ? Array.from(page.querySelectorAll('ul > li'), node => node.textContent) : []; },
   deepStructure() { return !!page?.querySelector('div > div > div > div > div > section > h1 > em'); },
   linkRect(index = 0) {

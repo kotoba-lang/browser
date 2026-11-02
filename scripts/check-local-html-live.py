@@ -62,7 +62,7 @@ def run(args):
             fixture = ROOT / 'test/browser-native/local_html_live.html'
             # Exercise implicit paragraph and list-item endings in the native
             # parser before applying the resulting wire to the page host.
-            html = '<!DOCTYPE html>\r\n<html><head><meta charset="utf-8"><title>猫\r\n犬</title></head><body><div><div><div><div><section><h1>Hi <em>世界</em></h1><p><strong>重要\r注意</strong> <code>x</code><ul><li>一<li>二</ul><a href="/next">Again</a><a href="javascript:alert(1)">Unsafe</a></section></div></div></div></div></body></html>'
+            html = '<!DOCTYPE html>\r\n<html><head><meta charset="utf-8"><title>猫\r\n犬</title></head><body><div><div><div><div><section><h1>Hi <em>世界</em></h1><p><strong>重要\r<!--猫 & < -->注意</strong> <code>x</code><ul><li>一<li>二</ul><a href="/next">Again</a><a href="javascript:alert(1)">Unsafe</a></section></div></div></div></div></body></html>'
             next_html = '<!doctype html><html><head><title>Next</title></head><body><section><h1>Next page</h1><p>Second document</p></section></body></html>'
             if args.broker:
                 broker_bytes = args.broker.read_bytes()
@@ -205,6 +205,7 @@ def run(args):
             present(frame(response_revision + 1))
             assert snap() == {'url':url, 'page':'Hi 世界重要\n注意 x一二AgainUnsafe', 'tabs':1}, snap()
             assert evaluate('window.htmlLive.tabTitle()') == '猫 犬'
+            assert evaluate('window.htmlLive.commentNodes()') == [[3, '重要\n'], [8, '猫 & < '], [3, '注意']]
             assert evaluate('window.htmlLive.listItems()') == ['一', '二']
             assert evaluate('window.htmlLive.deepStructure()') is True
             current = response_revision + 1
