@@ -62,7 +62,7 @@ def run(args):
             fixture = ROOT / 'test/browser-native/local_html_live.html'
             # Exercise implicit paragraph and list-item endings in the native
             # parser before applying the resulting wire to the page host.
-            html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>猫 &amp; 犬</title></head><body><div><div><div><div><section><h1>Hi <em>世界</em></h1><p><strong>重要</strong> <code>x</code><ul><li>一<li>二</ul><a href="/next">Again</a><a href="javascript:alert(1)">Unsafe</a></section></div></div></div></div></body></html>'
+            html = '<!DOCTYPE html>\r\n<html><head><meta charset="utf-8"><title>猫\r\n犬</title></head><body><div><div><div><div><section><h1>Hi <em>世界</em></h1><p><strong>重要\r注意</strong> <code>x</code><ul><li>一<li>二</ul><a href="/next">Again</a><a href="javascript:alert(1)">Unsafe</a></section></div></div></div></div></body></html>'
             next_html = '<!doctype html><html><head><title>Next</title></head><body><section><h1>Next page</h1><p>Second document</p></section></body></html>'
             if args.broker:
                 broker_bytes = args.broker.read_bytes()
@@ -203,8 +203,8 @@ def run(args):
             assert int(header) == len(payload.encode('utf-8')) and payload.startswith(f'H1|{response_revision}|{response_generation}|tab-1|')
             actor.proc.stdin.write(response.encode('utf-8')); actor.proc.stdin.flush()
             present(frame(response_revision + 1))
-            assert snap() == {'url':url, 'page':'Hi 世界重要 x一二AgainUnsafe', 'tabs':1}, snap()
-            assert evaluate('window.htmlLive.tabTitle()') == '猫 & 犬'
+            assert snap() == {'url':url, 'page':'Hi 世界重要\n注意 x一二AgainUnsafe', 'tabs':1}, snap()
+            assert evaluate('window.htmlLive.tabTitle()') == '猫\n犬'
             assert evaluate('window.htmlLive.listItems()') == ['一', '二']
             assert evaluate('window.htmlLive.deepStructure()') is True
             current = response_revision + 1
@@ -265,7 +265,7 @@ def run(args):
                 click('button[data-action=":history/back"]')
                 back = advance(current + 1); current += 1
                 assert back[2] == {'tab':'tab-1', 'generation':6, 'url':url}
-                current = accept_notice(back[2], current, url, 'Hi 世界重要 x一二AgainUnsafe', '猫 & 犬')
+                current = accept_notice(back[2], current, url, 'Hi 世界重要\n注意 x一二AgainUnsafe', '猫\n犬')
                 click('button[data-action=":history/forward"]')
                 forward = advance(current + 1); current += 1
                 assert forward[2] == {'tab':'tab-1', 'generation':7, 'url':next_url}
@@ -273,14 +273,14 @@ def run(args):
                 click('button[data-action=":history/back"]')
                 back = advance(current + 1); current += 1
                 assert back[2] == {'tab':'tab-1', 'generation':8, 'url':url}
-                current = accept_notice(back[2], current, url, 'Hi 世界重要 x一二AgainUnsafe', '猫 & 犬')
+                current = accept_notice(back[2], current, url, 'Hi 世界重要\n注意 x一二AgainUnsafe', '猫\n犬')
                 assert len(requests) == 5 and all(not any(h in request['headers'] for h in ('authorization','cookie','referer')) for request in requests)
             click('input'); browser.call('Input.insertText', {'text':'x'}, session); present_frame = advance(current + 1)
-            assert present_frame[1] is not None and snap()['page'] == 'Hi 世界重要 x一二AgainUnsafe'
+            assert present_frame[1] is not None and snap()['page'] == 'Hi 世界重要\n注意 x一二AgainUnsafe'
             click('button[data-action=":tab/new"]'); advance(current + 2)
             assert snap()['page'] is None and snap()['tabs'] == 2
             click('button[data-tab-id="tab-1"]'); advance(current + 3)
-            assert snap()['page'] == 'Hi 世界重要 x一二AgainUnsafe' and snap()['tabs'] == 2
+            assert snap()['page'] == 'Hi 世界重要\n注意 x一二AgainUnsafe' and snap()['tabs'] == 2
             actor.proc.stdin.write(b'0\n'); actor.proc.stdin.flush()
             tail, _ = actor.proc.communicate(timeout=30); actor.log.extend(tail)
             assert actor.proc.returncode == 0 and b':status :ok :result 0' in actor.log
