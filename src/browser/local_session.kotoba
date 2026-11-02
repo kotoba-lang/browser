@@ -3,7 +3,7 @@
             [browser.storage :as storage]
             [browser.text-edit :as edit])
   (:export [empty-session open-tab focus-tab close-tab set-address commit-address
-            pending-generation confirm-navigation confirm-text-navigation cancel-navigation
+            pending-generation request-history confirm-navigation confirm-text-navigation cancel-navigation
             address-insert address-backspace address-delete address-select address-move address-select-all
             address-composition-start address-composition-update address-composition-end
             active-url active-html-page remember-html-page put-value get-value delete-value]))
@@ -148,6 +148,23 @@
                                                :url (document-string url)))]
         (queue-navigation (document-assoc session :session/chrome next) tab-id url)))))
 
+(defn request-history [session :document delta :i64] :document
+  ;; A history click requests a new navigation; it does not grant a fetch or
+  ;; move the committed cursor. Denial/cancellation leaves the page intact.
+  (let [state (field session :session/chrome)
+        tab-id (text (field state :chrome/active-tab-id))
+        target (chrome/history-target state tab-id delta)]
+    (if (or (= (document-kind target) :null) (:text/composing (editor-state session))) session
+      (let [url (text (field target :url))
+            next (document-assoc (chrome/set-url-input state url) :chrome/last-navigation
+                                  (document-map :tab/id (document-string tab-id) :url (document-string url)))
+            queued (queue-navigation (with-chrome session next) tab-id url)
+            pending (field queued :session/pending)
+            entry (option-or (document-get pending (document-string tab-id)) (document-map))]
+        (document-assoc queued :session/pending
+          (document-assoc pending (document-string tab-id)
+            (document-assoc entry :history-index (field target :index))))))))
+
 (defn pending-entry [session :document tab-id :string] :document
   (option-or (document-get (field session :session/pending) (document-string tab-id))
              (document-map)))
@@ -173,9 +190,14 @@
   (let [pending (pending-entry session tab-id)]
     (if (and (> generation 0)
              (= generation (integer (field pending :generation)))
-             (string=? url (text (field pending :url))))
+             (string=? url (text (field pending :url)))
+             (or (= (document-kind (field pending :history-index)) :null)
+                 (document-equal? (chrome/history-at (field session :session/chrome) tab-id
+                                  (integer (field pending :history-index))) (document-string url))))
       (let [state (field session :session/chrome)
-            committed (chrome/commit-tab-url state tab-id url)
+            committed (if (= (document-kind (field pending :history-index)) :null)
+                        (chrome/commit-tab-url state tab-id url)
+                        (chrome/commit-history state tab-id (integer (field pending :history-index)) url))
             ;; A response must not overwrite typing or an IME composition
             ;; started after the request, even when the tab is still active.
             next (if (string=? tab-id (text (field state :chrome/active-tab-id)))

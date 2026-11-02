@@ -24,7 +24,7 @@
   ;;   url-bar-commit-produces-navigation-intent
   ;;   tabs-can-be-focused-and-finished
   (:export [empty-chrome new-tab active-tab-index focus-tab close-tab set-url-input
-            commit-url commit-tab-url finish-navigation main]))
+            commit-url commit-tab-url history-target history-at commit-history finish-navigation main]))
 
 ;; --- accessors (html_document.kotoba option idiom) -------------------------
 
@@ -64,6 +64,7 @@
                           :tab/url (document-string url)
                           :tab/title (document-string "")
                           :tab/history hist
+                          :tab/history-index (document-i64 (if (string=? url "") -1 0))
                           :tab/status (document-keyword :idle))
         tabs (document-vector-conj (get-d chrome :chrome/tabs) tab)]
     (document-assoc
@@ -157,14 +158,52 @@
         retained (if (>= n 32) (history-tail hist (+ (- n 32) 1) (document-vector)) hist)]
     (document-vector-conj retained (document-string url))))
 
+(defn history-prefix [hist :document end :i64 i :i64 acc :document] :document
+  (if (or (>= i end) (>= i (document-count hist))) acc
+    (history-prefix hist end (+ i 1) (document-vector-conj acc (tab-at-doc hist i)))))
+
 (defn updated-tab [tab :document url :string hist :document] :document
   ;; commit-url's mapv branch for the active tab: url + :loading + history conj.
-  (document-assoc
-   (document-assoc
-    (document-assoc tab
-                    :tab/url (document-string url))
-    :tab/status (document-keyword :loading))
-   :tab/history (bounded-history hist url)))
+  (let [prefix (history-prefix hist (+ (get-i tab :tab/history-index) 1) 0 (document-vector))
+        next (bounded-history prefix url)]
+    (document-assoc
+      (document-assoc
+        (document-assoc
+          (document-assoc tab :tab/url (document-string url))
+          :tab/status (document-keyword :loading))
+        :tab/history next)
+      :tab/history-index (document-i64 (- (document-count next) 1)))))
+
+(defn history-target [chrome :document tab-id :string delta :i64] :document
+  (let [i (scan-for-id (get-d chrome :chrome/tabs) tab-id 0 (tab-count chrome))]
+    (if (or (< i 0) (and (not= delta -1) (not= delta 1))) (document-null)
+      (let [tab (tab-at chrome i)
+            hist (get-d tab :tab/history)
+            target (+ (get-i tab :tab/history-index) delta)]
+        (if (or (< target 0) (>= target (document-count hist))) (document-null)
+          (document-map :index (document-i64 target) :url (tab-at-doc hist target)))))))
+
+(defn history-at [chrome :document tab-id :string index :i64] :document
+  (let [i (scan-for-id (get-d chrome :chrome/tabs) tab-id 0 (tab-count chrome))]
+    (if (< i 0) (document-null)
+      (let [hist (get-d (tab-at chrome i) :tab/history)]
+        (if (or (< index 0) (>= index (document-count hist))) (document-null)
+          (tab-at-doc hist index))))))
+
+(defn commit-history [chrome :document tab-id :string index :i64 url :string] :document
+  (let [tabs (get-d chrome :chrome/tabs)
+        i (scan-for-id tabs tab-id 0 (tab-count chrome))]
+    (if (< i 0) chrome
+      (let [tab (tab-at-doc tabs i) hist (get-d tab :tab/history)]
+        (if (or (< index 0) (>= index (document-count hist))
+                (not (string=? url (option-or (document-string-value (tab-at-doc hist index)) ""))))
+          chrome
+          (let [updated (document-assoc
+                          (document-assoc (document-assoc tab :tab/url (document-string url))
+                                          :tab/history-index (document-i64 index))
+                          :tab/status (document-keyword :idle))
+                state (document-assoc chrome :chrome/tabs (tabs-assoc tabs i updated 0 (document-vector)))]
+            (if (string=? tab-id (get-s chrome :chrome/active-tab-id)) (set-url-input state url) state)))))))
 
 (defn update-tab [tabs :document i :i64 tab :document url :string hist :document] :document
   (tabs-assoc tabs i (updated-tab tab url hist) 0 (document-vector)))
