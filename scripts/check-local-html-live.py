@@ -204,7 +204,7 @@ def run(args):
             actor.proc.stdin.write(response.encode('utf-8')); actor.proc.stdin.flush()
             present(frame(response_revision + 1))
             assert snap() == {'url':url, 'page':'Hi 世界重要\n注意 x一二AgainUnsafe', 'tabs':1}, snap()
-            assert evaluate('window.htmlLive.tabTitle()') == '猫\n犬'
+            assert evaluate('window.htmlLive.tabTitle()') == '猫 犬'
             assert evaluate('window.htmlLive.listItems()') == ['一', '二']
             assert evaluate('window.htmlLive.deepStructure()') is True
             current = response_revision + 1
@@ -265,7 +265,7 @@ def run(args):
                 click('button[data-action=":history/back"]')
                 back = advance(current + 1); current += 1
                 assert back[2] == {'tab':'tab-1', 'generation':6, 'url':url}
-                current = accept_notice(back[2], current, url, 'Hi 世界重要\n注意 x一二AgainUnsafe', '猫\n犬')
+                current = accept_notice(back[2], current, url, 'Hi 世界重要\n注意 x一二AgainUnsafe', '猫 犬')
                 click('button[data-action=":history/forward"]')
                 forward = advance(current + 1); current += 1
                 assert forward[2] == {'tab':'tab-1', 'generation':7, 'url':next_url}
@@ -273,7 +273,7 @@ def run(args):
                 click('button[data-action=":history/back"]')
                 back = advance(current + 1); current += 1
                 assert back[2] == {'tab':'tab-1', 'generation':8, 'url':url}
-                current = accept_notice(back[2], current, url, 'Hi 世界重要\n注意 x一二AgainUnsafe', '猫\n犬')
+                current = accept_notice(back[2], current, url, 'Hi 世界重要\n注意 x一二AgainUnsafe', '猫 犬')
                 assert len(requests) == 5 and all(not any(h in request['headers'] for h in ('authorization','cookie','referer')) for request in requests)
             click('input'); browser.call('Input.insertText', {'text':'x'}, session); present_frame = advance(current + 1)
             assert present_frame[1] is not None and snap()['page'] == 'Hi 世界重要\n注意 x一二AgainUnsafe'

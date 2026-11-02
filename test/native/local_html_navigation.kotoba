@@ -38,7 +38,7 @@
                   (rejected? invalid state :html-navigation/unsupported)
                   (rejected? bad-head state :html-navigation/unsupported)
                   (= (kind document-page) :html-navigation/ok)
-                  (string=? (text (field document-tab :tab/title)) "猫\n犬")
+                  (string=? (text (field document-tab :tab/title)) "猫 犬")
                   (= (kind deep) :html-navigation/ok) (> (string-length (text (field deep :wire))) 0)
                   (= (kind ok) :html-navigation/ok) (= (session/pending-generation next "tab-1") 0)
                   (string=? (session/active-url next) url) (> (string-length wire) 0)
