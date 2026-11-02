@@ -72,6 +72,8 @@ def main(a):
                                    ('local-loop', a.browser, 'local_loop.kotoba')]
     # The wire fixture writes its result through the explicitly granted local
     # stdout capability. The x86 scalar project runner does not support it.
+    if a.case == 'local-snapshot-loop':
+        test_cases.append(('local-snapshot-loop', a.browser, 'local_snapshot_loop.kotoba'))
     if a.case == 'local-snapshot-codec-boundary':
         test_cases.append(('local-snapshot-codec-boundary', a.browser, 'local_snapshot_codec_boundary.kotoba'))
     if a.case == 'local-snapshot-codec-limit':
@@ -210,7 +212,7 @@ if __name__ == '__main__':
     p.add_argument('--text', type=Path, required=True)
     p.add_argument('--html', type=Path, help='pinned kotoba.htmldom owner for HTML navigation')
     p.add_argument('--output', type=Path, required=True)
-    p.add_argument('--case', choices=['text', 'dom', 'text-edit', 'chrome', 'origin', 'storage', 'local-session', 'local-snapshot', 'local-snapshot-codec', 'local-snapshot-codec-limit', 'local-snapshot-codec-boundary', 'local-snapshot-wire', 'local-snapshot-read', 'local-view', 'local-text-view', 'local-multitab-text', 'local-dom-replay', 'local-dom-commit', 'local-controller', 'local-dom-events', 'local-dom-wire', 'local-loop', 'local-loop-input', 'local-native-actor', 'local-html-navigation', 'local-html-loop', 'local-html-frame', 'local-html-actor'])
+    p.add_argument('--case', choices=['text', 'dom', 'text-edit', 'chrome', 'origin', 'storage', 'local-session', 'local-snapshot', 'local-snapshot-codec', 'local-snapshot-loop', 'local-snapshot-codec-limit', 'local-snapshot-codec-boundary', 'local-snapshot-wire', 'local-snapshot-read', 'local-view', 'local-text-view', 'local-multitab-text', 'local-dom-replay', 'local-dom-commit', 'local-controller', 'local-dom-events', 'local-dom-wire', 'local-loop', 'local-loop-input', 'local-native-actor', 'local-html-navigation', 'local-html-loop', 'local-html-frame', 'local-html-actor'])
     p.add_argument('--event-wire', type=Path, help='Chrome-emitted event for local-loop-input')
     a = p.parse_args()
     assert a.runner_source if a.target == 'arm64' else a.runner

@@ -1,0 +1,21 @@
+(ns browser.native-snapshot-loop-test
+  (:require [browser.local-session :as session] [browser.local-loop :as runtime]
+            [browser.local-snapshot-loop :as snapshot]) (:export [main]))
+(defn field [d :document k :keyword] :document (option-or (document-get d k) (document-null)))
+(defn num [d :document] :i64 (option-or (document-i64-value d) 0))
+(defn main [] :i64
+  (let [opened (session/open-tab (session/empty-session "local") "https://example.test/猫")
+        confirmed (session/confirm-navigation opened "tab-1" 1 "https://example.test/猫")
+        src (option-or (runtime/begin confirmed 5) (document-null))
+        wire (snapshot/export-wire src 5)
+        empty (option-or (runtime/begin (session/empty-session "local") 1) (document-null))
+        restored (snapshot/restore-wire empty 1 (option-or wire ""))
+        frame (option-or restored (document-null)) state (field frame :state)]
+    (if (and (option-some?-of [:option :string] wire) (option-some?-of [:option :document] restored)
+             (= (num (field frame :revision)) 2) (string=? (session/active-url state) "https://example.test/猫")
+             (= (session/pending-generation state "tab-1") 0)
+             (not (option-some?-of [:option :string] (snapshot/export-wire src 4)))
+             (not (option-some?-of [:option :document] (snapshot/restore-wire empty 2 (option-or wire ""))))
+             (not (option-some?-of [:option :document] (snapshot/restore-wire empty 1 "BSS1|bad")))
+             (not (option-some?-of [:option :document] (snapshot/restore-wire src 5 (option-or wire ""))))
+             (not (option-some?-of [:option :document] (snapshot/restore-wire frame 2 (option-or wire ""))))) 0 1)))

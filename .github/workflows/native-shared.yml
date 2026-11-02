@@ -445,6 +445,12 @@ jobs:
       - name: Execute snapshot codec on x86
         if: matrix.target == 'x86_64'
         run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-snapshot-codec --output "$RUNNER_TEMP/snapshot-codec-native"
+      - name: Execute snapshot frame boundary on ARM
+        if: matrix.target == 'arm64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-snapshot-loop --output "$RUNNER_TEMP/snapshot-loop-native"
+      - name: Execute snapshot frame boundary on x86
+        if: matrix.target == 'x86_64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-snapshot-loop --output "$RUNNER_TEMP/snapshot-loop-native"
       - name: Execute snapshot codec aggregate limit on ARM
         if: matrix.target == 'arm64'
         run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-snapshot-codec-limit --output "$RUNNER_TEMP/snapshot-codec-limit"
@@ -540,6 +546,10 @@ jobs:
             ${{ runner.temp }}/snapshot-native/*.ksl
             ${{ runner.temp }}/snapshot-native/*.stdout
             ${{ runner.temp }}/snapshot-native/*.stderr
+            ${{ runner.temp }}/snapshot-loop-native/*.json
+            ${{ runner.temp }}/snapshot-loop-native/*.ksl
+            ${{ runner.temp }}/snapshot-loop-native/*.stdout
+            ${{ runner.temp }}/snapshot-loop-native/*.stderr
             ${{ runner.temp }}/snapshot-codec-native/*.json
             ${{ runner.temp }}/snapshot-codec-native/*.ksl
             ${{ runner.temp }}/snapshot-codec-native/*.stdout
