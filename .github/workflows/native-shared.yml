@@ -10,6 +10,25 @@ concurrency:
   group: native-shared-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
+  offline-dom-host:
+    name: Offline DOM host (Chrome)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Validate detached DOM transactions
+        run: python3 scripts/check-local-dom-host.py --browser "$(command -v google-chrome)" --output "$RUNNER_TEMP/local-dom-host"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: offline-dom-host
+          path: |
+            ${{ runner.temp }}/local-dom-host/*.json
+            ${{ runner.temp }}/local-dom-host/*.html
+            ${{ runner.temp }}/local-dom-host/*.stderr
+          if-no-files-found: warn
   native-shared:
     name: Native text-edit (${{ matrix.target }})
     runs-on: ${{ matrix.runner }}
