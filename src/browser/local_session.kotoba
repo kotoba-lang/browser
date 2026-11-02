@@ -175,11 +175,17 @@
 (defn cancel-navigation [session :document tab-id :string generation :i64] :document
   (if (and (> generation 0) (= generation (pending-generation session tab-id)))
     (let [state (field session :session/chrome)
-          next (if (string=? tab-id (text (field state :chrome/active-tab-id)))
+          active? (string=? tab-id (text (field state :chrome/active-tab-id)))
+          ;; Preserve typing or an IME composition begun while consent was
+          ;; pending. Only restore the committed URL if the editor still
+          ;; contains the cancelled request's original value.
+          restore? (and active? (not (:text/composing (editor-state session)))
+                        (string=? (text (field state :chrome/url-input)) (text (field (pending-entry session tab-id) :url))))
+          next (if restore?
                  (chrome/focus-tab state tab-id) state)]
       (let [updated (document-assoc session :session/pending
                                     (document-dissoc (field session :session/pending) (document-string tab-id)))]
-        (if (string=? tab-id (text (field state :chrome/active-tab-id)))
+        (if restore?
           (with-chrome updated next)
           (document-assoc updated :session/chrome next))))
     session))

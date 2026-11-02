@@ -66,6 +66,8 @@
         confirmed (session/confirm-navigation again "tab-1" 4 "https://two.example/next")
         pending-cancel (session/commit-address (session/set-address confirmed "https://one.example/"))
         cancelled (session/cancel-navigation pending-cancel "tab-1" 5)
+        cancel-typing (session/cancel-navigation (session/address-insert pending-cancel "!") "tab-1" 5)
+        cancel-compose (session/cancel-navigation (session/address-composition-update (session/address-composition-start pending-cancel) "日本") "tab-1" 5)
         late (session/confirm-navigation cancelled "tab-1" 5 "https://one.example/")
         opaque (session/open-tab late "mailto:person@example.com")
         opaque-ready (session/confirm-navigation opaque "tab-3" 6 "mailto:person@example.com")
@@ -109,6 +111,9 @@
           (not (string=? (value cancelled) "two")) 18
           (not= (document-count (field (tab cancelled 0) :tab/history)) 3) 22
           (not (string=? (text (field (field cancelled :session/chrome) :chrome/url-input)) "https://two.example/next")) 23
+          (not (string=? (text (field (field cancel-typing :session/chrome) :chrome/url-input)) "https://one.example/!")) 50
+          (not (option-or (document-bool-value (field (field cancel-compose :session/address-editor) :text/composing)) false)) 51
+          (not (string=? (text (field (field cancel-compose :session/address-editor) :text/composition)) "日本")) 52
           (not (string=? (value late) "two")) 19
           (not (string=? (value denied) "")) 7
           (not (string=? (value restored) "two")) 8
