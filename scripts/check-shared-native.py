@@ -76,9 +76,9 @@ def main(a):
     if a.case == 'local-loop-input':
         assert a.target == 'arm64' and a.event_wire
         test_cases.append(('local-loop-input', a.browser, 'local_loop_input.kotoba'))
-    if a.case == 'local-html-navigation':
+    if a.case in ('local-html-navigation', 'local-html-loop'):
         assert a.target == 'arm64' and a.html
-        test_cases.append(('local-html-navigation', a.browser, 'local_html_navigation.kotoba'))
+        test_cases.append((a.case, a.browser, a.case.replace('-', '_') + '.kotoba'))
     if a.case == 'local-native-actor':
         assert a.target == 'arm64'
         test_cases.append(('local-native-actor', a.browser, 'local_native_actor.kotoba'))
@@ -87,7 +87,7 @@ def main(a):
             continue
         entry = (owner / ('src/browser' if name == 'local-native-actor' else 'test/native') / filename).resolve()
         source_roots = [root / 'src' for root in roots] + [a.browser.resolve() / 'kotoba', entry.parent]
-        if a.case == 'local-html-navigation':
+        if a.case in ('local-html-navigation', 'local-html-loop'):
             source_roots.append(a.html.resolve() / 'kotoba')
         flags = [part for root in source_roots for part in ['--source-path', str(root)]]
         discovered = run(name + '-modules', [compiler, 'modules', entry, *flags])
@@ -123,7 +123,7 @@ def main(a):
             wire = a.event_wire.read_text(encoding='utf-8')
             assert len(wire.encode('utf-8')) <= 65664
             invoke += [wire]
-        allow = '37' if name in ('local-dom-wire', 'local-html-navigation') else ('37,38' if name == 'local-loop-input' else '-')
+        allow = '37' if name in ('local-dom-wire', 'local-html-navigation', 'local-html-loop') else ('37,38' if name == 'local-loop-input' else '-')
         if name == 'local-native-actor':
             run_actor(invoke, dict(env, KEXE_STRUCTURED_REPORT='1', KEXE_ALLOW='37,39,41'),
                       out / (name + '-execute.stdout'))
@@ -135,7 +135,7 @@ def main(a):
             lines = [line[6:] for line in result.stdout.splitlines() if line.startswith(b'WIRE1 ')]
             assert len(lines) == 1 and isinstance(json.loads(lines[0]), list)
             (out / 'wire.json').write_bytes(lines[0])
-        if name == 'local-html-navigation':
+        if name in ('local-html-navigation', 'local-html-loop'):
             lines = [line[5:] for line in result.stdout.splitlines() if line.startswith(b'PAGE ')]
             assert len(lines) == 1 and isinstance(json.loads(lines[0]), list)
             (out / 'wire.json').write_bytes(lines[0] + b'\n')
@@ -150,7 +150,7 @@ def main(a):
                            lock=pin(lock), sources={str(path): pin(path) for path in files})
         if name == 'local-loop-input':
             case_result.update(eventWire=pin(a.event_wire), outputWire=pin(out / 'wire.json'))
-        elif name in ('local-dom-wire', 'local-html-navigation'):
+        elif name in ('local-dom-wire', 'local-html-navigation', 'local-html-loop'):
             case_result.update(outputWire=pin(out / 'wire.json'))
         cases.append(case_result)
         (out / 'shared-native.json').write_text(json.dumps(dict(status='PASS_SHARED_COMPONENTS_NATIVE',
@@ -171,7 +171,7 @@ if __name__ == '__main__':
     p.add_argument('--text', type=Path, required=True)
     p.add_argument('--html', type=Path, help='pinned kotoba.htmldom owner for HTML navigation')
     p.add_argument('--output', type=Path, required=True)
-    p.add_argument('--case', choices=['text', 'dom', 'text-edit', 'chrome', 'origin', 'storage', 'local-session', 'local-view', 'local-text-view', 'local-multitab-text', 'local-dom-replay', 'local-dom-commit', 'local-controller', 'local-dom-events', 'local-dom-wire', 'local-loop', 'local-loop-input', 'local-native-actor', 'local-html-navigation'])
+    p.add_argument('--case', choices=['text', 'dom', 'text-edit', 'chrome', 'origin', 'storage', 'local-session', 'local-view', 'local-text-view', 'local-multitab-text', 'local-dom-replay', 'local-dom-commit', 'local-controller', 'local-dom-events', 'local-dom-wire', 'local-loop', 'local-loop-input', 'local-native-actor', 'local-html-navigation', 'local-html-loop'])
     p.add_argument('--event-wire', type=Path, help='Chrome-emitted event for local-loop-input')
     a = p.parse_args()
     assert a.runner_source if a.target == 'arm64' else a.runner

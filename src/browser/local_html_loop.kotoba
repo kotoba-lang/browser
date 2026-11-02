@@ -1,0 +1,23 @@
+(ns browser.local-html-loop
+  (:require [browser.local-loop :as runtime] [browser.local-html-navigation :as nav])
+  (:export [prepare]))
+
+;; Prepare a shell frame and page wire together; the caller must authenticate
+;; and approve the response, then commit both as one host transaction. This
+;; function does not fetch, apply operations, or supply an approval.
+(defn field [d :document k :keyword] :document (option-or (document-get d k) (document-null)))
+(defn integer [d :document] :i64 (option-or (document-i64-value d) 0))
+(defn kind [d :document] :keyword (option-or (document-keyword-value d) :bad))
+(defn prepare [frame :document expected :i64 tab :string generation :i64 url :string body :string] [:option :document]
+  (let [revision (integer (field frame :revision))]
+    (if (or (< revision 1) (>= revision 9007199254740991) (not= revision expected))
+      (option-none-of [:option :document])
+      (let [prepared (nav/prepare (field frame :state) tab generation url body)]
+        (if (not= (kind (field prepared :kind)) :html-navigation/ok)
+          (option-none-of [:option :document])
+          (let [next (runtime/begin (field prepared :session) (+ revision 1))]
+            (if (not (option-some?-of [:option :document] next))
+              (option-none-of [:option :document])
+              (option-some-of [:option :document]
+                (document-map :frame (option-or next (document-null)) :page-wire (field prepared :wire)
+                              :tab (document-string tab) :generation (document-i64 generation))))))))))
