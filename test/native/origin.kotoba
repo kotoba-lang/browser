@@ -27,4 +27,10 @@
         (not (string=? (origin/origin "https://evil.example\\@victim.example/path") "https://evil.example")) 20
         (not (string=? (:path (origin/parse-url "https://example.com\\docs")) "/docs")) 21
         (origin/same-origin? "https://evil.example\\@victim.example/path" "https://victim.example/") 22
+        (origin/same-origin? "https://faß.de/" "https://fass.de/") 23
+        (origin/same-origin? "https://faß.de/" "https://faß.de/") 24
+        (origin/same-origin? "https://example.com:65536/" "https://example.com:65536/") 25
+        (origin/same-origin? "https://example.com:443:443/" "https://example.com:443:443/") 26
+        (origin/same-origin? "https://example%2ecom/" "https://example%2ecom/") 27
+        (not (origin/same-origin? "https://é@EXAMPLE.com:443/" "https://example.com/")) 28
         :else 0))

@@ -186,18 +186,55 @@
 (defn origin [url :string] :string
   (:origin (parse-url url)))
 
+(defn ascii-host-char? [cp :i64] :bool
+  (or (and (>= cp 65) (<= cp 90)) (and (>= cp 97) (<= cp 122))
+      (and (>= cp 48) (<= cp 57)) (= cp 45) (= cp 46)))
+
+;; This is an intentionally narrow admission check, not URL canonicalization.
+;; Inspect the original host before case folding: Unicode case folding is not
+;; IDNA and can collapse distinct web origins (for example faß.de / fass.de).
+;; IPv6, percent encoding and other host syntax stay unsupported until a real
+;; URL parser establishes their identities.
+(defn ascii-authority? [s :string i :i64 host-length :i64 port? :bool digits :i64 port :i64] :bool
+  (if (>= i (string-length s))
+    (and (> host-length 0) (or (not port?) (> digits 0)))
+    (let [cp (string-code-point-at s i)]
+      (cond (and (not port?) (= cp 58))
+            (ascii-authority? s (+ i 1) host-length true 0 0)
+            (and (not port?) (ascii-host-char? cp))
+            (ascii-authority? s (+ i 1) (+ host-length 1) false 0 0)
+            (and port? (>= cp 48) (<= cp 57) (< digits 5)
+                 (<= (+ (* port 10) (- cp 48)) 65535))
+            (ascii-authority? s (+ i 1) host-length true (+ digits 1) (+ (* port 10) (- cp 48)))
+            :else false))))
+
+(defn supported-authority? [url :string] :bool
+  (let [colon (scheme-scan url 1)]
+    (if (< colon 0) false
+      (let [rest (string-substring url (+ colon 1) (string-length url))]
+        (if (not (starts-with-slashes rest)) false
+          (let [scheme (string-fold-case (string-substring url 0 colon))
+                w (string-substring rest 2 (string-length rest))
+                end (authority-end w 0 (web-scheme? scheme))
+                raw (string-substring w 0 end)
+                at (last-index-of raw 64 (- 0 1) 0)
+                host (if (>= at 0) (string-substring raw (+ at 1) (string-length raw)) raw)]
+            (ascii-authority? host 0 0 false 0 0)))))))
+
 (defn same-origin? [a :string b :string] :bool
   ;; Opaque and unsupported origins have no stable identity in this model.
   ;; Reject them instead of comparing their shared serialized placeholder.
-  (let [pa (parse-url a)
-        pb (parse-url b)
-        scheme (:scheme pa)]
-    (and (or (string=? scheme "http") (string=? scheme "https")
-             (string=? scheme "ws") (string=? scheme "wss")
-             (string=? scheme "kotoba"))
-         (> (string-length (:authority pa)) 0)
-         (> (string-length (:authority pb)) 0)
-         (string=? (:origin pa) (:origin pb)))))
+  (if (and (supported-authority? a) (supported-authority? b))
+    (let [pa (parse-url a)
+          pb (parse-url b)
+          scheme (:scheme pa)]
+      (and (or (string=? scheme "http") (string=? scheme "https")
+               (string=? scheme "ws") (string=? scheme "wss")
+               (string=? scheme "kotoba"))
+           (> (string-length (:authority pa)) 0)
+           (> (string-length (:authority pb)) 0)
+           (string=? (:origin pa) (:origin pb))))
+    false))
 
 (defn internal? [url :string] :bool
   ;; nil scheme in the .cljc is "" here; neither equals "kotoba".
