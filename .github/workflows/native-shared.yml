@@ -30,11 +30,30 @@ jobs:
           ref: 06439c784f72d0078bc4d4ade65a338e6d4bf2ee
           path: _amu-worker
           persist-credentials: false
+      - name: Compile selfhost Worker protocol probe
+        run: |
+          python3 - <<'PYCODE'
+          import hashlib
+          from pathlib import Path
+          compiler = Path('_amu-worker/bin/amu-linux-x86_64')
+          assert hashlib.sha256(compiler.read_bytes()).hexdigest() == '8d30be7c4847ee85cb82c1b38bcae4de764abe75e41ca0e3d80319f1b1fa72b5'
+          PYCODE
+          mkdir -p "$RUNNER_TEMP/worker-probe"
+          cp test/native/local_worker_transport_probe.kotoba "$RUNNER_TEMP/worker-probe/probe.kotoba"
+          cd "$RUNNER_TEMP/worker-probe"
+          env PATH=/nonexistent KEXE_ALLOW=35,37,38,39 KEXE_CAP_RESOURCES_35="$PWD" KEXE_STACK_BYTES=8388608 \
+            "$GITHUB_WORKSPACE/_amu-worker/bin/amu-linux-x86_64" compile probe.kotoba --target wasm32-browser --output probe.wasm
+          python3 - <<'PYCODE'
+          import hashlib
+          from pathlib import Path
+          assert hashlib.sha256(Path('probe.wasm').read_bytes()).hexdigest() == 'd5c7f141bc4a567d43a496e6ca22d513c6f3982a94039ab63dd3e6b273554e43'
+          PYCODE
       - name: Verify Browser actor integration with pinned Amu stdio
         run: >-
           python3 scripts/check-local-worker-actor.py --browser "$(command -v google-chrome)"
           --stdio "$PWD/_amu-worker/runtime/wasm32-browser-local-stdio.js"
-          --output "$RUNNER_TEMP/worker-actor"
+          --worker-host "$PWD/_amu-worker/runtime/wasm32-browser-static-host.js"
+          --wasm "$RUNNER_TEMP/worker-probe/probe.wasm" --output "$RUNNER_TEMP/worker-actor"
       - name: Validate synthetic HTML responses
         run: python3 scripts/check-local-html-response.py --browser "$(command -v google-chrome)" --output "$RUNNER_TEMP/html-response"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
