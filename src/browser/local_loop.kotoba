@@ -1,0 +1,36 @@
+(ns browser.local-loop
+  (:require [browser.local-view :as view]
+            [browser.local-dom-events :as events]
+            [browser.local-dom-wire :as wire]
+            [browser.local-event-wire :as input]
+            [kotoba.wasm.dom :as dom])
+  (:export [begin step]))
+
+(defn field [d :document key :keyword] :document
+  (option-or (document-get d key) (document-null)))
+(defn item [d :document i :i64] :document
+  (option-or (document-vector-at d i) (document-null)))
+
+;; The embedding runtime owns this frame and its revision. A UI callback is
+;; not an authority grant; input must name the exact current revision.
+(defn begin [state :document revision :i64] [:option :document]
+  (if (or (< revision 1) (> revision 9007199254740991)) (option-none-of [:option :document])
+    (let [snapshot (view/render state)
+          batches (item (dom/consume-op-transaction snapshot) 0)
+          encoded (wire/encode state snapshot batches)]
+      (if (option-some?-of [:option :string] encoded)
+        (option-some-of [:option :document]
+          (document-map :state state :revision (document-i64 revision) :snapshot snapshot
+                        :wire (document-string (option-or encoded ""))))
+        (option-none-of [:option :document])))))
+
+(defn step [frame :document expected :i64 event-wire :string] [:option :document]
+  (let [revision (option-or (document-i64-value (field frame :revision)) 0)
+        state (field frame :state) snapshot (field frame :snapshot)
+        event (input/decode event-wire)]
+    (if (or (< revision 1) (>= revision 9007199254740991) (not= expected revision)
+            (not (option-some?-of [:option :document] event)))
+      (option-none-of [:option :document])
+      (let [next (events/dispatch state snapshot (option-or event (document-null)))]
+        (if (document-equal? next state) (option-none-of [:option :document])
+          (begin next (+ revision 1)))))))

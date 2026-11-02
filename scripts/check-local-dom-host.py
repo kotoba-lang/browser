@@ -2,10 +2,30 @@
 """Run the offline DOM host fixture in a real Chromium-family browser."""
 import argparse
 import hashlib
+from html.parser import HTMLParser
 import json
 from pathlib import Path
 import shutil
 import subprocess
+
+
+class EventWire(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.recording = False
+        self.value = ''
+
+    def handle_starttag(self, tag, attrs):
+        if tag == 'pre' and dict(attrs).get('id') == 'event-wire':
+            self.recording = True
+
+    def handle_endtag(self, tag):
+        if tag == 'pre':
+            self.recording = False
+
+    def handle_data(self, data):
+        if self.recording:
+            self.value += data
 
 
 def main():
@@ -47,6 +67,11 @@ def main():
     (output / 'rendered.html').write_text(proc.stdout)
     (output / 'browser.stderr').write_text(proc.stderr)
     assert proc.returncode == 0 and '<pre id="result">PASS</pre>' in proc.stdout, (proc.returncode, proc.stdout[-2000:])
+    if not args.wire:
+        event = EventWire()
+        event.feed(proc.stdout)
+        assert event.value == 'B1|:ui/text|11|3|1|0|0|😀'
+        (output / 'event-wire.txt').write_text(event.value, encoding='utf-8')
     receipt = dict(status='PASS_OFFLINE_DOM_HOST_FIXTURE', browser=version.stdout.strip(),
                    sources={str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest() for p in sources},
                    wireSha256=wire_hash, externalConnections='CSP connect-src none and DNS resolver refusal',

@@ -63,12 +63,16 @@ def main(a):
                                    ('local-dom-replay', a.browser, 'local_dom_replay.kotoba'),
                                    ('local-dom-commit', a.browser, 'local_dom_commit.kotoba'),
                                    ('local-controller', a.browser, 'local_controller.kotoba'),
-                                   ('local-dom-events', a.browser, 'local_dom_events.kotoba')]
+                                   ('local-dom-events', a.browser, 'local_dom_events.kotoba'),
+                                   ('local-loop', a.browser, 'local_loop.kotoba')]
     # The wire fixture writes its result through the explicitly granted local
     # stdout capability. The x86 scalar project runner does not support it.
     if a.case == 'local-dom-wire':
         assert a.target == 'arm64'
         test_cases.append(('local-dom-wire', a.browser, 'local_dom_wire.kotoba'))
+    if a.case == 'local-loop-input':
+        assert a.target == 'arm64' and a.event_wire
+        test_cases.append(('local-loop-input', a.browser, 'local_loop_input.kotoba'))
     for name, owner, filename in test_cases:
         if a.case and name != a.case:
             continue
@@ -104,7 +108,11 @@ def main(a):
             image = out / (name + '.bin')
             image.write_bytes(body)  # Unchanged compiler-emitted bytes, never an image writer.
             invoke = [a.runner.resolve(), image, 0, 0, 'x86_64', '-']
-        allow = '37' if name == 'local-dom-wire' else '-'
+        if name == 'local-loop-input':
+            wire = a.event_wire.read_text(encoding='utf-8')
+            assert len(wire.encode('utf-8')) <= 65664
+            invoke += [wire]
+        allow = '37' if name == 'local-dom-wire' else ('38' if name == 'local-loop-input' else '-')
         result = run(name + '-execute', invoke, dict(env, KEXE_STRUCTURED_REPORT='1', KEXE_ALLOW=allow))
         match = re.search(rb':result (-?[0-9]+)', result.stdout)
         assert match and int(match[1]) == 0, (name, result.stdout)
@@ -116,7 +124,7 @@ def main(a):
                           lock=pin(lock), sources={str(path): pin(path) for path in files}))
         (out / 'shared-native.json').write_text(json.dumps(dict(status='PASS_SHARED_COMPONENTS_NATIVE',
             target=a.target, host=[platform.system(), machine, platform.release()], compiler=pin(compiler),
-            cases=cases, complete=len(cases) == 14, emulation=False, kernelDesktopQualified=False,
+            cases=cases, complete=len(cases) == 15, emulation=False, kernelDesktopQualified=False,
             cssomQualified=False, itonamiDappsQualified=False, restorationQualified=False), indent=2) + '\n')
     print('PASS_SHARED_COMPONENTS_NATIVE', a.target, len(cases), flush=True)
 
@@ -131,7 +139,8 @@ if __name__ == '__main__':
     p.add_argument('--dom', type=Path, required=True)
     p.add_argument('--text', type=Path, required=True)
     p.add_argument('--output', type=Path, required=True)
-    p.add_argument('--case', choices=['text', 'dom', 'text-edit', 'chrome', 'origin', 'storage', 'local-session', 'local-view', 'local-text-view', 'local-multitab-text', 'local-dom-replay', 'local-dom-commit', 'local-controller', 'local-dom-events', 'local-dom-wire'])
+    p.add_argument('--case', choices=['text', 'dom', 'text-edit', 'chrome', 'origin', 'storage', 'local-session', 'local-view', 'local-text-view', 'local-multitab-text', 'local-dom-replay', 'local-dom-commit', 'local-controller', 'local-dom-events', 'local-dom-wire', 'local-loop', 'local-loop-input'])
+    p.add_argument('--event-wire', type=Path, help='Chrome-emitted event for local-loop-input')
     a = p.parse_args()
     assert a.runner_source if a.target == 'arm64' else a.runner
     main(a)

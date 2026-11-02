@@ -1,0 +1,20 @@
+(ns browser.native-local-loop-input-test
+  (:require [browser.local-session :as session]
+            [browser.local-loop :as runtime])
+  (:capabilities [:cli/args])
+  (:export [main]))
+
+(defn field [d :document key :keyword] :document
+  (option-or (document-get d key) (document-null)))
+(defn main [] :i64
+  (let [event (typed-cap-call :cli/args :string :string "0")
+        state (session/set-address (session/open-tab (session/open-tab (session/empty-session "p") "") "") "A😀B")
+        first (option-or (runtime/begin state 1) (document-null))
+        result (runtime/step first 1 event)]
+    (if (not (option-some?-of [:option :document] result)) 1
+      (let [next (option-or result (document-null))
+            editor (field (field next :state) :session/address-editor)]
+    (cond
+          (not (string=? (option-or (document-string-value (field editor :text/value)) "") "A😀B")) 2
+          (not= (option-or (document-i64-value (field editor :text/caret)) 0) 3) 3
+          :else 0)))))

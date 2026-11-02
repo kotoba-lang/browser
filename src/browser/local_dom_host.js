@@ -9,6 +9,8 @@ const ACTIONS = new Set([":tab/new", ":tab/close-active"]);
 const MAX_TEXT = 1_048_576;
 const composing = new WeakSet();
 const boundContainers = new WeakSet();
+const EVENT_TYPES = new Set([":ui/click", ":ui/text", ":ui/backspace", ":ui/delete", ":ui/move", ":ui/select-all",
+                             ":ui/composition-start", ":ui/composition-update", ":ui/composition-end", ":ui/submit"]);
 
 function idValue(value) {
   return Number.isSafeInteger(value) && value > 0 && value <= 256;
@@ -17,6 +19,30 @@ function idValue(value) {
 function checkedText(value) {
   if (typeof value !== "string" || value.length > MAX_TEXT) throw new Error("invalid text");
   return value;
+}
+
+// Seven ASCII-delimited header fields followed by raw UTF-8 text. Text may
+// contain the delimiter. The guest independently validates this entire wire.
+export function encodeLocalEvent(message) {
+  if (!message || !EVENT_TYPES.has(message.type) || !idValue(message.target)) throw new Error("invalid event");
+  const anchor = message["selection-anchor"] ?? -1;
+  const focus = message["selection-focus"] ?? -1;
+  if (!Number.isSafeInteger(anchor) || !Number.isSafeInteger(focus) ||
+      !((anchor === -1 && focus === -1) || (anchor >= 0 && focus >= 0 && anchor <= MAX_TEXT && focus <= MAX_TEXT))) throw new Error("invalid event selection");
+  const delta = message.delta ?? 0;
+  const extend = message.extend ?? false;
+  if (!Number.isSafeInteger(delta) || delta < -1 || delta > 1 || typeof extend !== "boolean" ||
+      (message.type !== ":ui/move" && (delta !== 0 || extend))) throw new Error("invalid event movement");
+  const text = message.text ?? "";
+  if (typeof text !== "string" || (![":ui/text", ":ui/composition-update", ":ui/composition-end"].includes(message.type) && text !== "")) throw new Error("invalid event text");
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if (c >= 0xd800 && c <= 0xdbff) {
+      if (++i >= text.length || text.charCodeAt(i) < 0xdc00 || text.charCodeAt(i) > 0xdfff) throw new Error("invalid unicode");
+    } else if (c >= 0xdc00 && c <= 0xdfff) throw new Error("invalid unicode");
+  }
+  if (new TextEncoder().encode(text).length > 65536) throw new Error("event text limit");
+  return ["B1", message.type, message.target, anchor, focus, delta, extend ? 1 : 0].join("|") + "|" + text;
 }
 
 // Build an entirely detached tree, validate every operation and only then

@@ -1,4 +1,4 @@
-import { bindLocalInput, commitLocalProjection } from "../../src/browser/local_dom_host.js";
+import { bindLocalInput, commitLocalProjection, encodeLocalEvent } from "../../src/browser/local_dom_host.js";
 
 const mount = document.getElementById("mount");
 const result = document.getElementById("result");
@@ -75,6 +75,16 @@ try {
   check(received[0].type === ":ui/click" && received[0].target === 5, "button event");
   check(insert.defaultPrevented && received[1].type === ":ui/text" && received[1].text === "😀" &&
         received[1]["selection-anchor"] === 3 && received[1]["selection-focus"] === 1, "text selection event");
+  const encodedInput = encodeLocalEvent(received[1]);
+  check(encodedInput === "B1|:ui/text|11|3|1|0|0|😀", "event wire");
+  check(encodeLocalEvent({ type: ":ui/text", target: 11, text: "a|b\n日本" }).endsWith("|a|b\n日本"), "event text framing");
+  let invalidEvent = false;
+  try { encodeLocalEvent({ type: ":ui/submit", target: 11, text: "x" }); } catch (_) { invalidEvent = true; }
+  check(invalidEvent, "invalid event wire");
+  const wire = document.createElement("pre");
+  wire.id = "event-wire";
+  wire.textContent = encodedInput;
+  document.body.appendChild(wire);
   check(del.defaultPrevented && received[2].type === ":ui/delete", "forward delete event");
   check(left.defaultPrevented && received[3].type === ":ui/move" && received[3].delta === -1 && received[3].extend, "move event");
   check(received[4].type === ":ui/composition-start" && received[5].text === "日本" && received[6].type === ":ui/composition-end", "composition events");
