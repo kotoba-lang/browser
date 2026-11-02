@@ -16,6 +16,7 @@
 (defn input-action [kind :keyword] :keyword
   (cond (= kind :ui/text) :address/insert
         (= kind :ui/backspace) :address/backspace
+        (= kind :ui/delete) :address/delete
         (= kind :ui/move) :address/move
         (= kind :ui/select-all) :address/select-all
         (= kind :ui/composition-start) :address/composition-start

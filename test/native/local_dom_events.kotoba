@@ -34,6 +34,9 @@
                               :text (document-string "https://example.com/日本")))
         old-input (bridge/dispatch typed frame1 (event :ui/backspace input-id))
         frame2 (view/render typed)
+        forward (bridge/dispatch typed frame2
+                  (document-map :type (document-keyword :ui/delete) :target (document-i64 input-id)
+                                :selection-anchor (document-i64 8) :selection-focus (document-i64 8)))
         submitted (bridge/dispatch typed frame2 (event :ui/submit input-id))
         frame3 (view/render submitted)
         forged (bridge/dispatch submitted frame3 (event :ui/confirm input-id))
@@ -85,4 +88,5 @@
           (not (string=? (session/active-url background-closed) "https://example.com/日本")) 17
           (<= many-input 32) 18
           (not (string=? (text (field (field many-typed :session/address-editor) :text/value)) "many")) 19
+          (not (string=? (text (field (field forward :session/address-editor) :text/value)) "https://xample.com/日本")) 20
           :else 0)))

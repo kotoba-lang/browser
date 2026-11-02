@@ -1,4 +1,4 @@
-import { commitLocalProjection } from "../../src/browser/local_dom_host.js";
+import { bindLocalInput, commitLocalProjection } from "../../src/browser/local_dom_host.js";
 
 const mount = document.getElementById("mount");
 const result = document.getElementById("result");
@@ -46,10 +46,41 @@ try {
   check(mount.querySelector("input").value === "日本", "input value");
   check(mount.querySelector("pre").textContent === "<script>not markup</script>", "text");
   check(!mount.querySelector("script"), "markup executed");
-  commitLocalProjection(mount, [shell.slice(0, 32), shell.slice(32)]);
+  const projection = commitLocalProjection(mount, [shell.slice(0, 32), shell.slice(32)]);
   check(mount.querySelectorAll("nav button").length === 4, "shell tabs");
   check(mount.querySelector('[data-tab-id="tab-1"]').getAttribute("aria-selected") === "true", "selected tab");
   check(mount.querySelector('[data-role="address"]').value === "https://example.com/", "shell input");
+  const received = [];
+  const unbind = bindLocalInput(mount, projection, message => received.push(message));
+  const input = mount.querySelector('[data-role="address"]');
+  mount.querySelector('[data-tab-id="tab-2"]').click();
+  input.setSelectionRange(1, 3, "backward");
+  const insert = new InputEvent("beforeinput", { bubbles: true, cancelable: true, inputType: "insertText", data: "😀" });
+  input.dispatchEvent(insert);
+  const del = new InputEvent("beforeinput", { bubbles: true, cancelable: true, inputType: "deleteContentForward" });
+  input.dispatchEvent(del);
+  const left = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "ArrowLeft", shiftKey: true });
+  input.dispatchEvent(left);
+  input.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true, data: "" }));
+  input.dispatchEvent(new CompositionEvent("compositionupdate", { bubbles: true, data: "日本" }));
+  input.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: "日本" }));
+  const clipboard = new DataTransfer();
+  clipboard.setData("text/plain", "貼付");
+  const paste = new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: clipboard });
+  input.dispatchEvent(paste);
+  const enter = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter" });
+  input.dispatchEvent(enter);
+  const unsupported = new InputEvent("beforeinput", { bubbles: true, cancelable: true, inputType: "historyUndo" });
+  input.dispatchEvent(unsupported);
+  check(received[0].type === ":ui/click" && received[0].target === 5, "button event");
+  check(insert.defaultPrevented && received[1].type === ":ui/text" && received[1].text === "😀" &&
+        received[1]["selection-anchor"] === 3 && received[1]["selection-focus"] === 1, "text selection event");
+  check(del.defaultPrevented && received[2].type === ":ui/delete", "forward delete event");
+  check(left.defaultPrevented && received[3].type === ":ui/move" && received[3].delta === -1 && received[3].extend, "move event");
+  check(received[4].type === ":ui/composition-start" && received[5].text === "日本" && received[6].type === ":ui/composition-end", "composition events");
+  check(paste.defaultPrevented && received[7].type === ":ui/text" && received[7].text === "貼付", "paste event");
+  check(enter.defaultPrevented && received[8].type === ":ui/submit", "submit event");
+  check(unsupported.defaultPrevented && received.length === 9, "unsupported edit");
   reject([[...op, [":dom/create-element", 5, ":script"]]], "script tag");
   reject([[...op, [":dom/set-attr", 1, ":onclick", "alert(1)"]]], "event attribute");
   reject([[...op, [":dom/set-attr", 1, ":data-action", ":navigation/confirm"]]], "forged action");
@@ -61,6 +92,9 @@ try {
   reject([[...op, [":dom/set-attr", 2, ":value", "x".repeat(1_048_577)]]], "oversized value");
   reject([[]], "empty batch");
   reject([op, op, op, op, op, op, op, op, op], "too many batches");
+  commitLocalProjection(mount, [op]);
+  check(projection.resolve(input) === null, "stale projection target");
+  unbind();
   result.textContent = "PASS";
 } catch (error) {
   result.textContent = "FAIL: " + error.message;

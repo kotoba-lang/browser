@@ -13,6 +13,13 @@
 (defn has-text? [d :document] :bool
   (option-some?-of [:option :string] (document-string-value (field d :text))))
 
+(defn with-selection [state :document event :document] :document
+  (let [anchor (document-i64-value (field event :selection-anchor))
+        focus (document-i64-value (field event :selection-focus))]
+    (if (and (option-some?-of [:option :i64] anchor) (option-some?-of [:option :i64] focus))
+      (session/address-select state (option-or anchor 0) (option-or focus 0))
+      state)))
+
 (defn dispatch [state :document event :document] :document
   (if (not= (document-kind event) :map) state
    (let [kind (action event)]
@@ -22,16 +29,17 @@
           (= kind :tab/focus)
           (if (has-text? event) (session/focus-tab state (text (field event :text))) state)
           (= kind :address/insert)
-          (if (has-text? event) (session/address-insert state (text (field event :text))) state)
-          (= kind :address/backspace) (session/address-backspace state)
+          (if (has-text? event) (session/address-insert (with-selection state event) (text (field event :text))) state)
+          (= kind :address/backspace) (session/address-backspace (with-selection state event))
+          (= kind :address/delete) (session/address-delete (with-selection state event))
           (= kind :address/select-all) (session/address-select-all state)
           (= kind :address/move)
           (let [delta (document-i64-value (field event :delta))]
             (if (option-some?-of [:option :i64] delta)
-              (session/address-move state (option-or delta 0)
+              (session/address-move (with-selection state event) (option-or delta 0)
                                     (option-or (document-bool-value (field event :extend)) false))
               state))
-          (= kind :address/composition-start) (session/address-composition-start state)
+          (= kind :address/composition-start) (session/address-composition-start (with-selection state event))
           (= kind :address/composition-update)
           (if (has-text? event) (session/address-composition-update state (text (field event :text))) state)
           (= kind :address/composition-end)

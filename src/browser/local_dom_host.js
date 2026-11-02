@@ -1,6 +1,6 @@
 // Offline host for a complete Browser shell projection. The wire uses arrays
 // and keyword spellings (for example ":dom/create-element"); conversion
-// from the Kotoba document ABI is a separate, not-yet-implemented boundary.
+// from the Wasm document ABI remains a separate boundary.
 // This module performs no network, persistence or permission operations.
 const TAGS = new Set([":main", ":nav", ":button", ":input", ":section", ":pre"]);
 const ATTRS = new Set([":aria-label", ":aria-selected", ":data-action", ":data-tab-id", ":data-role", ":value"]);
@@ -24,6 +24,7 @@ export function commitLocalProjection(container, batches) {
     throw new Error("invalid projection");
   }
   const nodes = new Map();
+  const nodeIds = new WeakMap();
   const parents = new Set();
   let root = null;
   let count = 0;
@@ -34,10 +35,14 @@ export function commitLocalProjection(container, batches) {
       const [kind, id, value, extra] = op;
       if (kind === ":dom/create-element") {
         if (op.length !== 3 || nodes.has(id) || !TAGS.has(value)) throw new Error("invalid element");
-        nodes.set(id, document.createElement(value.slice(1)));
+        const node = document.createElement(value.slice(1));
+        nodes.set(id, node);
+        nodeIds.set(node, id);
       } else if (kind === ":dom/create-text") {
         if (op.length !== 3 || nodes.has(id)) throw new Error("invalid text node");
-        nodes.set(id, document.createTextNode(checkedText(value)));
+        const node = document.createTextNode(checkedText(value));
+        nodes.set(id, node);
+        nodeIds.set(node, id);
       } else if (kind === ":dom/set-root") {
         const node = nodes.get(id);
         if (op.length !== 2 || root || !(node instanceof Element) || parents.has(id)) throw new Error("invalid root");
@@ -78,4 +83,67 @@ export function commitLocalProjection(container, batches) {
     throw new Error("incomplete projection");
   }
   container.replaceChildren(root);
+  // The handle becomes stale as soon as another projection replaces this
+  // root. It does not prove a guest's identity or approve any operation.
+  return Object.freeze({
+    resolve(target) {
+      if (root.parentNode !== container || container.childNodes.length !== 1 || !(target instanceof Node) || !root.contains(target)) return null;
+      let node = target;
+      while (node && node !== root && !(node instanceof HTMLButtonElement) && !(node instanceof HTMLInputElement)) node = node.parentNode;
+      const id = nodeIds.get(node);
+      return id ? { id, node } : null;
+    },
+  });
+}
+
+// Deliver local UI intent only. The receiver must serialize events, bind them
+// to its trusted snapshot and reject stale events through the Kotoba bridge.
+// Unsupported cancelable edits are prevented to avoid diverging from the
+// model. Browser-native composition can remain non-cancelable and requires an
+// IME-aware host loop.
+export function bindLocalInput(container, projection, deliver) {
+  if (!(container instanceof Element) || typeof projection?.resolve !== "function" || typeof deliver !== "function") throw new Error("invalid input binding");
+  function route(event) {
+    if (event.defaultPrevented) return;
+    const resolved = projection.resolve(event.target);
+    if (!resolved) return;
+    const { id, node } = resolved;
+    if (event.type === "click" && node instanceof HTMLButtonElement) {
+      deliver({ type: ":ui/click", target: id });
+      return;
+    }
+    if (!(node instanceof HTMLInputElement) || node.getAttribute("data-role") !== "address") return;
+    let message = null;
+    let cancel = false;
+    if (event.type === "beforeinput" && !event.isComposing) {
+      if (event.inputType === "insertText" && typeof event.data === "string") message = { type: ":ui/text", target: id, text: event.data };
+      if (event.inputType === "deleteContentBackward") message = { type: ":ui/backspace", target: id };
+      if (event.inputType === "deleteContentForward") message = { type: ":ui/delete", target: id };
+      cancel = true;
+    } else if (event.type === "paste" && event.clipboardData) {
+      message = { type: ":ui/text", target: id, text: event.clipboardData.getData("text/plain") };
+      cancel = true;
+    } else if (event.type === "keydown" && !event.isComposing) {
+      if (event.key === "Enter") message = { type: ":ui/submit", target: id };
+      else if (event.key === "ArrowLeft" || event.key === "ArrowRight") message = { type: ":ui/move", target: id, delta: event.key === "ArrowLeft" ? -1 : 1, extend: event.shiftKey };
+      else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "a") message = { type: ":ui/select-all", target: id };
+      cancel = message !== null;
+    } else if (event.type === "compositionstart") message = { type: ":ui/composition-start", target: id };
+    else if (event.type === "compositionupdate" || event.type === "compositionend") {
+      message = { type: event.type === "compositionupdate" ? ":ui/composition-update" : ":ui/composition-end", target: id, text: event.data || "" };
+    }
+    if (cancel && event.cancelable) event.preventDefault();
+    if (message) {
+      if ([":ui/text", ":ui/backspace", ":ui/delete", ":ui/move", ":ui/composition-start"].includes(message.type) &&
+          Number.isInteger(node.selectionStart) && Number.isInteger(node.selectionEnd)) {
+        const backward = node.selectionDirection === "backward";
+        message["selection-anchor"] = backward ? node.selectionEnd : node.selectionStart;
+        message["selection-focus"] = backward ? node.selectionStart : node.selectionEnd;
+      }
+      deliver(message);
+    }
+  }
+  const types = ["click", "beforeinput", "paste", "keydown", "compositionstart", "compositionupdate", "compositionend"];
+  for (const type of types) container.addEventListener(type, route);
+  return () => { for (const type of types) container.removeEventListener(type, route); };
 }

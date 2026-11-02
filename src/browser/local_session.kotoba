@@ -4,7 +4,7 @@
             [browser.text-edit :as edit])
   (:export [empty-session open-tab focus-tab close-tab set-address commit-address
             pending-generation confirm-navigation confirm-text-navigation cancel-navigation
-            address-insert address-backspace address-move address-select-all
+            address-insert address-backspace address-delete address-select address-move address-select-all
             address-composition-start address-composition-update address-composition-end
             active-url put-value get-value delete-value]))
 
@@ -111,6 +111,12 @@
 
 (defn address-backspace [session :document] :document
   (with-editor session (edit/delete-backward (editor-state session))))
+
+(defn address-delete [session :document] :document
+  (with-editor session (edit/delete-forward (editor-state session))))
+
+(defn address-select [session :document start :i64 end :i64] :document
+  (with-editor session (edit/select (editor-state session) start end)))
 
 (defn address-move [session :document delta :i64 extend? :bool] :document
   (with-editor session (edit/move-caret (editor-state session) delta

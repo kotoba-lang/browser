@@ -30,7 +30,13 @@
         input (item (field tree :children) 1)
         committed (session/confirm-navigation malformed "tab-1" 1 "https://example.com/日本")
         tab2 (controller/dispatch committed (event :tab/new))
-        focused (controller/dispatch tab2 (text-event :tab/focus "tab-1"))]
+        focused (controller/dispatch tab2 (text-event :tab/focus "tab-1"))
+        emoji (session/address-insert (session/open-tab empty "") "A😀B")
+        replaced (controller/dispatch emoji (document-map :type (document-keyword :address/insert)
+                                  :text (document-string "X") :selection-anchor (document-i64 3)
+                                  :selection-focus (document-i64 1)))
+        deleted (controller/dispatch replaced (document-map :type (document-keyword :address/delete)
+                                  :selection-anchor (document-i64 1) :selection-focus (document-i64 1)))]
     (cond (not= (session/pending-generation opened "tab-1") 0) 1
           (not= (session/pending-generation blocked "tab-1") 0) 2
           (not= (session/pending-generation submitted "tab-1") 1) 3
@@ -40,4 +46,6 @@
           (not= (session/pending-generation tab2 "tab-2") 0) 7
           (not (string=? (session/active-url focused) "https://example.com/日本")) 8
           (not (document-equal? submitted scalar)) 9
+          (not (string=? (text (field (field replaced :session/address-editor) :text/value)) "AXB")) 10
+          (not (string=? (text (field (field deleted :session/address-editor) :text/value)) "AB")) 11
           :else 0)))
