@@ -1,10 +1,64 @@
 """Exercise the experimental HTML actor over local pipes; peer authentication is not implemented."""
+import io
 import json
 import os
 from pathlib import Path
 import select
 import subprocess
 import time
+
+
+def snapshot_actor_control(command, env, timeout):
+    url = 'https://example.test/猫'
+    size = len(url.encode('utf-8'))
+    snapshot = f'BSS1|2|1|1|{size}|{url}0|1|1|{size}|{url}'
+    payloads = ['S1|99', 'R1|1|BSS1|bad', 'R1|1|' + 'x' * 70000,
+                'R1|1|' + 'x' * 131195, 'S1|1',
+                'R1|1|' + snapshot, 'R1|2|' + snapshot, 'S1|2']
+    data = b''.join(str(len(value.encode())).encode() + b'\n' + value.encode() for value in payloads) + b'0\n'
+    proc = subprocess.run(list(map(str, command)), input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                          env=env, timeout=timeout)
+    assert proc.returncode == 0 and not proc.stderr, (proc.returncode, proc.stderr[-1000:])
+    stream = io.BytesIO(proc.stdout)
+    def frame(expected_revision):
+        header = stream.readline().rstrip(b'\r\n').split()
+        assert len(header) == 3 and header[0] == b'FRAME' and int(header[1]) == expected_revision, header
+        return json.loads(stream.read(int(header[2])))
+    def saved(expected_revision):
+        header = stream.readline().rstrip(b'\r\n').split()
+        assert len(header) == 3 and header[0] == b'SFRAME' and int(header[1]) == expected_revision, header
+        return stream.read(int(header[2])).decode('utf-8')
+    frame(1)
+    for _ in range(4): assert stream.readline().rstrip(b'\r\n') == b'REJECT'
+    assert saved(1) == 'BSS1|1|0|0|'
+    restored = frame(2)
+    assert any(op[0] == ':dom/set-attr' and op[2] == ':value' and op[3] == url for batch in restored for op in batch)
+    assert stream.readline().rstrip(b'\r\n') == b'REJECT'
+    assert saved(2) == snapshot
+    assert b':status :ok :result 0' in stream.read()
+    return proc.stdout
+
+
+def snapshot_actor_large_control(command, env, timeout):
+    prefix = 'https://example.test/'
+    url = prefix + 'x' * (4096 - len(prefix))
+    history = ('4096|' + url) * 14
+    snapshot = 'BSS1|16|1|1|4096|' + url + '0|14|14|' + history
+    payloads = ['R1|1|' + snapshot, 'S1|2']
+    data = b''.join(str(len(value.encode())).encode() + b'\n' + value.encode() for value in payloads) + b'0\n'
+    proc = subprocess.run(list(map(str, command)), input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                          env=env, timeout=timeout)
+    assert proc.returncode == 0 and not proc.stderr, (proc.returncode, proc.stderr[-1000:])
+    stream = io.BytesIO(proc.stdout)
+    for rev in (1, 2):
+        header = stream.readline().rstrip(b'\r\n').split()
+        assert len(header) == 3 and header[0] == b'FRAME' and int(header[1]) == rev, header
+        json.loads(stream.read(int(header[2])))
+    header = stream.readline().rstrip(b'\r\n').split()
+    assert len(header) == 3 and header[0] == b'SFRAME' and header[1] == b'2', header
+    assert stream.read(int(header[2])).decode('utf-8') == snapshot
+    assert b':status :ok :result 0' in stream.read()
+    return proc.stdout
 
 
 def run_actor(command, env, output, timeout=90):
@@ -130,5 +184,9 @@ def run_actor(command, env, output, timeout=90):
                             stderr=subprocess.PIPE, env=dict(env, KEXE_ALLOW='37,39'), timeout=timeout)
     combined = denied.stdout + denied.stderr
     assert b':wire 41' in combined and b':refused' in combined and b'PFRAME ' not in combined
+    snapshot_result = snapshot_actor_control(command, dict(env, KEXE_STRUCTURED_REPORT='1', KEXE_ALLOW='37,39,41'), max(timeout, 180))
+    Path(str(output) + '.snapshot').write_bytes(snapshot_result)
+    snapshot_large = snapshot_actor_large_control(command, dict(env, KEXE_STRUCTURED_REPORT='1', KEXE_ALLOW='37,39,41'), max(timeout, 180))
+    Path(str(output) + '.snapshot-large').write_bytes(snapshot_large)
     Path(str(output) + '.invalid').write_bytes(invalid.stdout + invalid.stderr)
     Path(str(output) + '.denied').write_bytes(combined)

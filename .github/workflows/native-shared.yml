@@ -133,6 +133,13 @@ jobs:
           --browser "$PWD" --dom "$PWD/_dom/lib/kotoba.domGpu"
           --text "$PWD/_text/lib/kotoba.text" --html "$PWD/_html/lib/kotoba.htmldom"
           --output "$RUNNER_TEMP/html-actor"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: native-actor-snapshot-controls
+          path: |
+            ${{ runner.temp }}/html-actor/local-html-actor-execute.stdout.snapshot
+            ${{ runner.temp }}/html-actor/local-html-actor-execute.stdout.snapshot-large
+          if-no-files-found: error
       - name: Generate native session snapshot fixture
         run: >-
           python3 scripts/check-shared-native.py --case local-snapshot-wire
