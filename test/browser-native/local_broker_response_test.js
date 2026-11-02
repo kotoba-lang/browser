@@ -11,16 +11,19 @@ const broker = createClientOperationBroker({runtime, requestedCapabilities:[op.c
   hostSupportedOperations:[[op.capability, op.service, op.operation]], consentHost});
 const selector = {capability:op.capability, service:op.service, operation:op.operation};
 let state = {status:'ready', message:'', encoded:''};
+let savedResponse = null;
 window.brokerFixture = {
   state() { const dialog = document.querySelector('dialog.kotoba-client-consent'); return {...state, open:dialog.open,
     scope:dialog.querySelector('.kotoba-client-consent-scope').textContent}; },
   start(path, context = {revision:4, generation:1, tab:'tab-1'}) {
     state = {status:'pending', message:'', encoded:''};
+    savedResponse = null;
     const url = 'https://service.invalid' + path;
     broker.invoke(selector, {input:url, init:{method:'GET'}})
-      .then(response => encodeLocalHtmlResponse(response, {...context, url}))
+      .then(response => { savedResponse = response.clone(); return encodeLocalHtmlResponse(response, {...context, url}); })
       .then(encoded => { state = {status:'ok', message:'', encoded}; })
       .catch(error => { state = {status:'error', message:String(error.message), encoded:''}; });
   },
+  takeResponse() { const response = savedResponse; savedResponse = null; return response; },
 };
 document.getElementById('result').textContent = 'READY';

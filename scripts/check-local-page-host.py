@@ -24,7 +24,8 @@ def main():
     fixture = root / 'test/browser-native/local_page_host.html'
     sources = [fixture, root / 'test/browser-native/local_page_host_test.js',
                root / 'test/browser-native/page_fixture.js', root / 'test/browser-native/page_frame_fixture.js', root / 'src/browser/local_page_host.js',
-               root / 'src/browser/local_dom_host.js', root / 'src/browser/local_actor_host.js']
+               root / 'src/browser/local_dom_host.js', root / 'src/browser/local_actor_host.js',
+               root / 'src/browser/local_html_response.js']
     wire_sha = frame_sha = None
     if args.wire or args.frame:
         stage = output / 'app'

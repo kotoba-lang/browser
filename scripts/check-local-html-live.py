@@ -46,7 +46,7 @@ def run(args):
                 actor.more(deadline)
             raw, actor.buf = actor.buf[:size], actor.buf[size:]
             return (json.loads(raw[:shell_size]), json.loads(raw[shell_size:shell_size + page_size]) if page_size else None,
-                    json.loads(raw[shell_size + page_size:]) if is_notice else None)
+                    json.loads(raw[shell_size + page_size:]) if is_notice else None, header + b'\n' + raw)
 
         def send(raw):
             data = raw.encode('utf-8')
@@ -70,7 +70,7 @@ def run(args):
                 stage = Path(profile) / 'fixture'
                 files = ['test/browser-native/local_html_broker_live.html', 'test/browser-native/local_html_live_test.js',
                          'test/browser-native/local_broker_response_test.js', 'src/browser/local_dom_host.js',
-                         'src/browser/local_page_host.js', 'src/browser/local_html_response.js']
+                         'src/browser/local_page_host.js', 'src/browser/local_actor_host.js', 'src/browser/local_html_response.js']
                 for name in files:
                     dst = stage / name; dst.parent.mkdir(parents=True, exist_ok=True); shutil.copyfile(ROOT / name, dst)
                 testdir = stage / 'test/browser-native'
@@ -104,7 +104,7 @@ def run(args):
                 if time.monotonic() >= deadline: raise TimeoutError('fixture load')
                 time.sleep(.05)
             def present(pair):
-                evaluate('window.htmlLive.present(' + json.dumps(pair[0], ensure_ascii=True) + ',' + json.dumps(pair[1], ensure_ascii=True) + ')')
+                evaluate('window.htmlLive.feed(' + json.dumps(list(pair[3])) + ')')
             def take():
                 deadline = time.monotonic() + 10
                 while True:
@@ -113,7 +113,8 @@ def run(args):
                     if time.monotonic() >= deadline: raise TimeoutError('UI event')
                     time.sleep(.05)
             def advance(revision):
-                send(str(revision - 1) + '|' + take()); value = frame(revision); present(value); return value
+                payload = take().encode('utf-8'); actor.proc.stdin.write(payload); actor.proc.stdin.flush()
+                value = frame(revision); present(value); return value
             def snap(): return evaluate('window.htmlLive.snapshot()')
             def click(selector):
                 rect = evaluate('(()=>{const r=document.querySelector(' + json.dumps(selector) + ').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()')
@@ -127,6 +128,7 @@ def run(args):
             browser.call('Input.dispatchKeyEvent', {'type':'keyUp', 'key':'Enter', 'code':'Enter', 'windowsVirtualKeyCode':13}, session)
             submitted = advance(4)
             assert submitted[2] == {'tab':'tab-1', 'generation':1, 'url':url}, submitted[2]
+            assert evaluate('window.htmlLive.notice()') == dict(revision=4, **submitted[2])
             # The wrong response is locally injected; the approved case below is intercepted.
             wrong = 'https://other.example/'
             send(f'H1|4|1|tab-1|{len(wrong.encode())}|{wrong}{html}')
@@ -158,7 +160,9 @@ def run(args):
                 click('dialog.kotoba-client-consent button:first-of-type')
                 denied = broker_wait(lambda state: state['status'] == 'error')
                 assert 'not approved' in denied['message'] and not requests and snap()['page'] is None
-                send('C1|4|1|tab-1'); present(frame(5))
+                assert evaluate('window.htmlLive.cancel()') is True
+                actor.proc.stdin.write(take().encode('utf-8')); actor.proc.stdin.flush()
+                present(frame(5))
                 assert snap() == {'url':'', 'page':None, 'tabs':1}, snap()
                 send(f'H1|5|1|tab-1|{len(url.encode())}|{url}{html}')
                 assert actor.line(time.monotonic() + 30) == b'REJECT'
@@ -167,6 +171,7 @@ def run(args):
                 browser.call('Input.dispatchKeyEvent', {'type':'keyUp', 'key':'Enter', 'code':'Enter', 'windowsVirtualKeyCode':13}, session)
                 retried = advance(7)
                 assert retried[2] == {'tab':'tab-1', 'generation':2, 'url':url}, retried[2]
+                assert evaluate('window.htmlLive.notice()') == dict(revision=7, **retried[2])
                 response_revision, response_generation = 7, 2
                 start_broker = broker_call(retried[2], response_revision)
                 time.sleep(.25)
@@ -178,9 +183,11 @@ def run(args):
                 assert accepted['status'] == 'ok', accepted
                 assert len(requests) == 1 and requests[0]['url'] == url and requests[0]['method'] == 'GET'
                 assert not any(h in requests[0]['headers'] for h in ('authorization', 'cookie', 'referer'))
-                response = accepted['encoded']
+                assert evaluate('window.htmlLive.deliver(window.brokerFixture.takeResponse())', True) is True
+                response = take()
             else:
-                response = evaluate('window.htmlLive.encodeFixture(' + json.dumps(url) + ',' + json.dumps(html, ensure_ascii=True) + ')', True)
+                assert evaluate('window.htmlLive.deliverFixture(' + json.dumps(url) + ',' + json.dumps(html, ensure_ascii=True) + ')', True) is True
+                response = take()
             header, payload = response.split('\n', 1)
             assert int(header) == len(payload.encode('utf-8')) and payload.startswith(f'H1|{response_revision}|{response_generation}|tab-1|')
             actor.proc.stdin.write(response.encode('utf-8')); actor.proc.stdin.flush()
@@ -196,7 +203,7 @@ def run(args):
             tail, _ = actor.proc.communicate(timeout=30); actor.log.extend(tail)
             assert actor.proc.returncode == 0 and b':status :ok :result 0' in actor.log
             source_names = ['scripts/check-local-html-live.py', 'scripts/check-local-native-live.py',
-                            'test/browser-native/local_html_live_test.js', 'src/browser/local_dom_host.js',
+                            'test/browser-native/local_html_live_test.js', 'src/browser/local_dom_host.js', 'src/browser/local_actor_host.js',
                             'src/browser/local_page_host.js', 'src/browser/local_html_response.js']
             source_names += (['test/browser-native/local_html_broker_live.html', 'test/browser-native/local_broker_response_test.js']
                              if args.broker else ['test/browser-native/local_html_live.html'])

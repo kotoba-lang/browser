@@ -158,6 +158,82 @@ try {
     if (!rejected) throw new Error('closed tab navigation handle remained valid');
     host.close(); div.remove();
   }
+  {
+    const div = document.createElement('div'); document.body.appendChild(div);
+    const notices = [], writes = [];
+    const host = createLocalActorHost({mount:div, write:x => writes.push(x), onNavigation:x => notices.push(x)});
+    const withTab = JSON.stringify([[...shell[0], [':dom/create-element',4,':button'],
+      [':dom/set-attr',4,':data-tab-id','tab-1'], [':dom/append-child',1,4]]]);
+    const n = encoder.encode(withTab).length;
+    const notice = JSON.stringify({tab:'tab-1', generation:1, url:'https://one.example/'});
+    host.output(1, encoder.encode(`FRAME 1 ${n}\n${withTab}`));
+    div.querySelector('input').dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', bubbles:true, cancelable:true}));
+    host.output(1, encoder.encode(`NFRAME 2 ${n} 0 ${encoder.encode(notice).length}\n${withTab}${notice}`));
+    function response(body, type = 'text/html; charset=utf-8') {
+      const r = new Response(body, {headers:{'content-type':type}});
+      Object.defineProperty(r, 'url', {value:'https://one.example/'});
+      return r;
+    }
+    let forged = false, invalid = false;
+    try { await host.deliverHtml({...notices[0]}, response('<p>x</p>')); } catch (_) { forged = true; }
+    try { await host.deliverHtml(notices[0], response('x', 'text/plain')); } catch (_) { invalid = true; }
+    if (!forged || !invalid || writes.length !== 1) throw new Error('unmatched or invalid response accepted');
+    if (!await host.deliverHtml(notices[0], response('<p>x</p>')) || writes.length !== 2 ||
+        !writes[1].endsWith('H1|2|1|tab-1|20|https://one.example/<p>x</p>') || !host.state().waiting) {
+      throw new Error('HTML response delivery mismatch');
+    }
+    const page = JSON.stringify(batches);
+    host.output(1, encoder.encode(`PFRAME 3 ${n} ${encoder.encode(page).length}\n${withTab}${page}`));
+    let replay = false;
+    try { await host.deliverHtml(notices[0], response('<p>x</p>')); } catch (_) { replay = true; }
+    if (!replay || host.state().waiting) throw new Error('HTML response replay accepted');
+    host.close(); div.remove();
+  }
+  {
+    const div = document.createElement('div'); document.body.appendChild(div);
+    const notices = []; let error = false;
+    const host = createLocalActorHost({mount:div, write:() => {}, onNavigation:x => notices.push(x), onError:() => {error = true;}});
+    const withTab = JSON.stringify([[...shell[0], [':dom/create-element',4,':button'],
+      [':dom/set-attr',4,':data-tab-id','tab-1'], [':dom/append-child',1,4]]]);
+    const n = encoder.encode(withTab).length;
+    const notice = JSON.stringify({tab:'tab-1', generation:1, url:'https://one.example/'});
+    host.output(1, encoder.encode(`FRAME 1 ${n}\n${withTab}`));
+    div.querySelector('input').dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', bubbles:true, cancelable:true}));
+    host.output(1, encoder.encode(`NFRAME 2 ${n} 0 ${encoder.encode(notice).length}\n${withTab}${notice}`));
+    const response = new Response('<p>x</p>', {headers:{'content-type':'text/html'}});
+    Object.defineProperty(response, 'url', {value:'https://one.example/'});
+    await host.deliverHtml(notices[0], response);
+    const stable = div.firstChild;
+    try { host.output(1, encoder.encode(`FRAME 3 ${n}\n${withTab}`)); } catch (_) {}
+    if (!error || !host.state().closed || div.firstChild !== stable) throw new Error('page-less HTML acknowledgement accepted');
+    div.remove();
+  }
+  {
+    const div = document.createElement('div'); document.body.appendChild(div);
+    const notices = [], writes = [];
+    const host = createLocalActorHost({mount:div, write:x => writes.push(x), onNavigation:x => notices.push(x)});
+    const withTab = JSON.stringify([[...shell[0], [':dom/create-element',4,':button'],
+      [':dom/set-attr',4,':data-tab-id','tab-1'], [':dom/append-child',1,4]]]);
+    const n = encoder.encode(withTab).length;
+    const notice = JSON.stringify({tab:'tab-1', generation:1, url:'https://one.example/'});
+    host.output(1, encoder.encode(`FRAME 1 ${n}\n${withTab}`));
+    div.querySelector('input').dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', bubbles:true, cancelable:true}));
+    host.output(1, encoder.encode(`NFRAME 2 ${n} 0 ${encoder.encode(notice).length}\n${withTab}${notice}`));
+    let release;
+    const stream = new ReadableStream({start(controller) { release = () => { controller.enqueue(encoder.encode('<p>x</p>')); controller.close(); }; }});
+    const slow = new Response(stream, {headers:{'content-type':'text/html'}});
+    Object.defineProperty(slow, 'url', {value:'https://one.example/'});
+    const delivery = host.deliverHtml(notices[0], slow);
+    let duplicate = false;
+    try { await host.deliverHtml(notices[0], new Response('x')); } catch (_) { duplicate = true; }
+    if (!duplicate || writes.length !== 1) throw new Error('concurrent HTML response accepted');
+    div.querySelector('input').dispatchEvent(new InputEvent('beforeinput', {bubbles:true, cancelable:true, inputType:'insertText', data:'x'}));
+    host.output(1, encoder.encode(`FRAME 3 ${n}\n${withTab}`));
+    release(); let stale = false;
+    try { await delivery; } catch (_) { stale = true; }
+    if (!stale || writes.length !== 2 || host.state().waiting) throw new Error('stale asynchronous HTML response accepted');
+    host.close(); div.remove();
+  }
   if (nativeFrame !== null) {
     const nativeMount = document.createElement('div'); document.body.appendChild(nativeMount);
     let nativePage = null;
