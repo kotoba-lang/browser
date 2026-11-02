@@ -36,7 +36,7 @@ jobs:
         with:
           # Draft dependency: kotoba PR #1173, not yet merged.
           repository: kotoba-lang/kotoba
-          ref: a76128a28ba573847c91fe604c6b9a2bcf55ee18
+          ref: fad5749cfb69b2ffb4f15dfa5bfc372c220b1eb7
           path: _shared/domowner
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1

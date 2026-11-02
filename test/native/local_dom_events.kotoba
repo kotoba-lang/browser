@@ -16,6 +16,9 @@
 (defn event [kind :keyword target :i64] :document
   (document-map :type (document-keyword kind) :target (document-i64 target)))
 
+(defn open-many [state :document remaining :i64] :document
+  (if (= remaining 0) state (open-many (session/open-tab state "") (- remaining 1))))
+
 (defn main [] :i64
   (let [empty (session/empty-session "p")
         frame0 (view/render empty)
@@ -55,7 +58,13 @@
         delayed (session/confirm-text-navigation closed "tab-3" 2 "https://pending.example/" "late")
         bad-close (session/close-tab closed "missing")
         bg (session/close-tab closed "tab-2")
-        final (session/close-tab bg "tab-1")]
+        final (session/close-tab bg "tab-1")
+        many (open-many empty 13)
+        many-frame (view/render many)
+        many-input (id (item (children (dom/tree many-frame)) 1))
+        many-typed (bridge/dispatch many many-frame
+                     (document-map :type (document-keyword :ui/text)
+                                   :target (document-i64 many-input) :text (document-string "many")))]
     (cond (not (document-equal? opened stale)) 1
           (not (document-equal? typed old-input)) 2
           (not= (session/pending-generation submitted "tab-1") 1) 3
@@ -74,4 +83,6 @@
           (not (document-equal? (field editing :session/address-editor)
                                 (field background-closed :session/address-editor))) 16
           (not (string=? (session/active-url background-closed) "https://example.com/日本")) 17
+          (<= many-input 32) 18
+          (not (string=? (text (field (field many-typed :session/address-editor) :text/value)) "many")) 19
           :else 0)))
