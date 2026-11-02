@@ -108,7 +108,8 @@ class Actor:
         while len(self.buf) < size:
             self.more(deadline)
         raw, self.buf = self.buf[:size], self.buf[size:]
-        return json.loads(raw)
+        json.loads(raw)  # Validate the actor frame before forwarding exact bytes.
+        return raw
 
     def send(self, revision, wire):
         payload = (str(revision) + '|' + wire).encode()
@@ -147,8 +148,11 @@ def run(args):
                 if time.monotonic() >= deadline:
                     raise TimeoutError('fixture did not load')
                 time.sleep(.05)
-            def present(rev, batches):
-                evaluate('window.nativeLive.present(' + str(rev) + ',' + json.dumps(batches, ensure_ascii=True) + ')')
+            def present(rev, payload):
+                frame = f'FRAME {rev} {len(payload)}\n'.encode() + payload
+                # Split headers, payload and potentially UTF-8 code points across messages.
+                for chunk in (frame[:7], frame[7:-1], frame[-1:]):
+                    evaluate('window.nativeLive.feed(' + json.dumps(list(chunk)) + ')')
             def event():
                 deadline = time.monotonic() + 10
                 while True:
@@ -164,14 +168,21 @@ def run(args):
                     browser.call('Input.dispatchMouseEvent', dict(type=kind, x=rect['x'], y=rect['y'], button='left', clickCount=1), session)
             def advance(rev):
                 e = event()
-                assert e['revision'] == rev - 1, e
-                actor.send(e['revision'], e['wire'])
+                header, payload = e.split('\n', 1)
+                assert int(header) == len(payload.encode()) and payload.startswith(str(rev - 1) + '|B1|'), e
+                actor.proc.stdin.write(e.encode())
+                actor.proc.stdin.flush()
                 present(rev, actor.frame(rev))
             def snap():
                 return evaluate('window.nativeLive.snapshot()')
+            first_frame = f'FRAME 1 {len(first)}\n'.encode() + first
+            assert evaluate('window.nativeLive.negative(' + json.dumps(list(first_frame)) + ')') is True
             present(1, first)
             click('button')
+            click('button')
+            assert evaluate('window.nativeLive.busy()') == 1
             advance(2)
+            assert evaluate('window.nativeLive.take()') is None
             click('input')
             browser.call('Input.insertText', {'text': 'A😀B'}, session)
             advance(3)

@@ -1,23 +1,38 @@
 // Test bridge only: application state and revisions remain in the native actor.
-import { bindLocalInput, commitLocalProjection, encodeLocalEvent } from '../../src/browser/local_dom_host.js';
+import { createLocalActorHost } from '../../src/browser/local_actor_host.js';
 const mount = document.getElementById('mount');
-let revision = 0;
-let unbind;
 const events = [];
+let busy = 0;
+const host = createLocalActorHost({ mount, write: input => events.push(input), onBusy: () => busy++ });
 window.nativeLive = {
-  present(next, batches) {
-    if (next !== revision + 1) throw new Error('unexpected revision');
-    if (unbind) unbind();
-    const projection = commitLocalProjection(mount, batches);
-    revision = next;
-    unbind = bindLocalInput(mount, projection, message => {
-      events.push({ revision, wire: encodeLocalEvent(message) });
-    });
-  },
+  feed(bytes) { host.output(1, Uint8Array.from(bytes)); },
   take() { return events.shift() || null; },
+  busy() { return busy; },
+  negative(first) {
+    const enc = new TextEncoder();
+    const cases = [enc.encode('REJECT\n'), enc.encode('FRAME 2 2\n[]'),
+      enc.encode('FRAME 1 1048577\n'), Uint8Array.of(70,82,65,77,69,32,49,32,49,10,255),
+      enc.encode('FRAME 1 1\n{')];
+    return cases.every(bytes => {
+      const div = document.createElement('div'); document.body.appendChild(div);
+      let error = false, wrote = false;
+      const instance = createLocalActorHost({mount:div, write:() => { wrote = true; }, onError:() => { error = true; }});
+      try { instance.output(1, bytes); } catch (_) {}
+      const ok = error && instance.state().closed && !wrote && div.childNodes.length === 0;
+      div.remove(); return ok;
+    }) && (() => {
+      const div = document.createElement('div'); document.body.appendChild(div);
+      let error = false;
+      const instance = createLocalActorHost({mount:div, write:() => {}, onError:() => { error = true; }});
+      instance.output(1, Uint8Array.from(first));
+      try { instance.output(1, Uint8Array.from(first)); } catch (_) {}
+      const ok = error && instance.state().closed && instance.state().revision === 1;
+      div.remove(); return ok;
+    })();
+  },
   snapshot() {
     const input = mount.querySelector('input');
-    return { revision, value: input?.value ?? null,
+    return { revision: host.state().revision, value: input?.value ?? null,
       focused: document.activeElement === input,
       start: input?.selectionStart ?? null, end: input?.selectionEnd ?? null };
   },
