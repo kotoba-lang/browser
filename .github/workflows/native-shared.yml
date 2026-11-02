@@ -29,6 +29,30 @@ jobs:
             ${{ runner.temp }}/local-dom-host/*.html
             ${{ runner.temp }}/local-dom-host/*.stderr
           if-no-files-found: warn
+  native-wire-chrome:
+    name: Native DOM wire to Chrome
+    needs: native-shared
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: native-dom-wire-arm64
+          path: ${{ runner.temp }}/native-dom-wire
+      - name: Render native output in Chrome
+        run: python3 scripts/check-local-dom-host.py --browser "$(command -v google-chrome)" --wire "$RUNNER_TEMP/native-dom-wire/wire.json" --output "$RUNNER_TEMP/native-wire-chrome"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: native-wire-chrome
+          path: |
+            ${{ runner.temp }}/native-wire-chrome/*.json
+            ${{ runner.temp }}/native-wire-chrome/*.html
+            ${{ runner.temp }}/native-wire-chrome/*.stderr
+          if-no-files-found: warn
   native-shared:
     name: Native text-edit (${{ matrix.target }})
     runs-on: ${{ matrix.runner }}
@@ -152,6 +176,15 @@ jobs:
       - name: Execute local DOM events on x86
         if: matrix.target == 'x86_64'
         run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-dom-events --output "$RUNNER_TEMP/dom-events-native"
+      - name: Emit admitted DOM wire on ARM
+        if: matrix.target == 'arm64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-dom-wire --output "$RUNNER_TEMP/dom-wire-native"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: matrix.target == 'arm64'
+        with:
+          name: native-dom-wire-arm64
+          path: ${{ runner.temp }}/dom-wire-native/wire.json
+          if-no-files-found: error
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:

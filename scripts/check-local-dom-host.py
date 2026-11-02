@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import shutil
 import subprocess
 
 
@@ -11,12 +12,30 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--browser', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path)
+    parser.add_argument('--wire', type=Path, help='native-emitted JSON operation batches')
     args = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
-    fixture = root / 'test/browser-native/local_dom_host.html'
-    sources = [fixture, fixture.with_name('local_dom_host_test.js'), root / 'src/browser/local_dom_host.js']
+    suffix = 'local_dom_wire_host' if args.wire else 'local_dom_host'
+    html = root / ('test/browser-native/' + suffix + '.html')
+    test = root / ('test/browser-native/' + suffix + '_test.js')
+    host = root / 'src/browser/local_dom_host.js'
+    sources = [html, test, host]
+    fixture = html
+    wire_hash = None
+    if args.wire:
+        raw = args.wire.read_bytes()
+        assert len(raw) <= 1048576 and isinstance(json.loads(raw), list)
+        wire_hash = hashlib.sha256(raw).hexdigest()
+        stage = output / 'app'
+        for source in sources:
+            target = stage / source.relative_to(root)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, target)
+        fixture = stage / html.relative_to(root)
+        (fixture.parent / 'wire_fixture.js').write_text(
+            'export default JSON.parse(' + json.dumps(raw.decode('utf-8'), ensure_ascii=True) + ');\n')
     browser = args.browser.resolve()
     command = [str(browser), '--headless', '--disable-gpu', '--no-first-run',
                '--disable-background-networking', '--disable-default-apps', '--disable-sync',
@@ -30,9 +49,9 @@ def main():
     assert proc.returncode == 0 and '<pre id="result">PASS</pre>' in proc.stdout, (proc.returncode, proc.stdout[-2000:])
     receipt = dict(status='PASS_OFFLINE_DOM_HOST_FIXTURE', browser=version.stdout.strip(),
                    sources={str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest() for p in sources},
-                   externalConnections='CSP connect-src none and DNS resolver refusal',
+                   wireSha256=wire_hash, externalConnections='CSP connect-src none and DNS resolver refusal',
                    qualified=['detached projection commit', 'malformed transaction rejection'],
-                   notQualified=['Kotoba document wire encoding', 'guest provenance', 'host event routing',
+                   notQualified=['supplied wire provenance', 'Wasm document ABI', 'host event routing',
                                  'network and consent', 'dapp integration', 'real-user interaction'])
     (output / 'receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
     print(receipt['status'], receipt['browser'])

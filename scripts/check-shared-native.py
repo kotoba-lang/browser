@@ -50,7 +50,7 @@ def main(a):
             assert result.returncode == 0 and not result.stderr, (name, result.returncode, result.stderr[-1000:])
         return result
 
-    for name, owner, filename in [('text', a.text, 'text.kotoba'),
+    test_cases = [('text', a.text, 'text.kotoba'),
                                    ('dom', a.dom, 'dom.kotoba'),
                                    ('text-edit', a.browser, 'text-edit.kotoba'),
                                    ('chrome', a.browser, 'chrome.kotoba'),
@@ -63,7 +63,13 @@ def main(a):
                                    ('local-dom-replay', a.browser, 'local_dom_replay.kotoba'),
                                    ('local-dom-commit', a.browser, 'local_dom_commit.kotoba'),
                                    ('local-controller', a.browser, 'local_controller.kotoba'),
-                                   ('local-dom-events', a.browser, 'local_dom_events.kotoba')]:
+                                   ('local-dom-events', a.browser, 'local_dom_events.kotoba')]
+    # The wire fixture writes its result through the explicitly granted local
+    # stdout capability. The x86 scalar project runner does not support it.
+    if a.case == 'local-dom-wire':
+        assert a.target == 'arm64'
+        test_cases.append(('local-dom-wire', a.browser, 'local_dom_wire.kotoba'))
+    for name, owner, filename in test_cases:
         if a.case and name != a.case:
             continue
         entry = (owner / 'test/native' / filename).resolve()
@@ -98,9 +104,14 @@ def main(a):
             image = out / (name + '.bin')
             image.write_bytes(body)  # Unchanged compiler-emitted bytes, never an image writer.
             invoke = [a.runner.resolve(), image, 0, 0, 'x86_64', '-']
-        result = run(name + '-execute', invoke, dict(env, KEXE_STRUCTURED_REPORT='1', KEXE_ALLOW='-'))
+        allow = '37' if name == 'local-dom-wire' else '-'
+        result = run(name + '-execute', invoke, dict(env, KEXE_STRUCTURED_REPORT='1', KEXE_ALLOW=allow))
         match = re.search(rb':result (-?[0-9]+)', result.stdout)
         assert match and int(match[1]) == 0, (name, result.stdout)
+        if name == 'local-dom-wire':
+            lines = [line[6:] for line in result.stdout.splitlines() if line.startswith(b'WIRE1 ')]
+            assert len(lines) == 1 and isinstance(json.loads(lines[0]), list)
+            (out / 'wire.json').write_bytes(lines[0])
         cases.append(dict(name=name, verdict=0, artifact=pin(artifact), executable=pin(image),
                           lock=pin(lock), sources={str(path): pin(path) for path in files}))
         (out / 'shared-native.json').write_text(json.dumps(dict(status='PASS_SHARED_COMPONENTS_NATIVE',
@@ -120,7 +131,7 @@ if __name__ == '__main__':
     p.add_argument('--dom', type=Path, required=True)
     p.add_argument('--text', type=Path, required=True)
     p.add_argument('--output', type=Path, required=True)
-    p.add_argument('--case', choices=['text', 'dom', 'text-edit', 'chrome', 'origin', 'storage', 'local-session', 'local-view', 'local-text-view', 'local-multitab-text', 'local-dom-replay', 'local-dom-commit', 'local-controller', 'local-dom-events'])
+    p.add_argument('--case', choices=['text', 'dom', 'text-edit', 'chrome', 'origin', 'storage', 'local-session', 'local-view', 'local-text-view', 'local-multitab-text', 'local-dom-replay', 'local-dom-commit', 'local-controller', 'local-dom-events', 'local-dom-wire'])
     a = p.parse_args()
     assert a.runner_source if a.target == 'arm64' else a.runner
     main(a)
