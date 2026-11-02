@@ -39,6 +39,13 @@ try {
   const semanticExpected = document.createElement('div');
   semanticExpected.innerHTML = '<p>one<hr><blockquote><small>two</small></blockquote>';
   if (!root.firstChild.isEqualNode(semanticExpected)) throw new Error('semantic page projection mismatch');
+  const preOps = [[[':dom/create-element',1,':div'], [':dom/set-root',1],
+    [':dom/create-element',2,':pre'], [':dom/create-text',3,'  Code\n  Text'],
+    [':dom/append-child',2,3], [':dom/append-child',1,2]]];
+  commitLocalPageProjection(root, preOps);
+  const preExpected = document.createElement('div');
+  preExpected.innerHTML = '<pre>\n  Code\n  Text</pre>';
+  if (!root.firstChild.isEqualNode(preExpected) || root.querySelector('pre').textContent !== '  Code\n  Text') throw new Error('pre projection mismatch');
   const commentOps = [[[':dom/create-element',1,':div'], [':dom/set-root',1],
     [':dom/create-text',2,'before'], [':dom/create-comment',3,'猫 & <'], [':dom/create-text',4,'after'],
     [':dom/append-child',1,2], [':dom/append-child',1,3], [':dom/append-child',1,4]]];
