@@ -3,7 +3,7 @@
             [browser.storage :as storage]
             [browser.text-edit :as edit])
   (:export [empty-session open-tab focus-tab set-address commit-address
-            pending-generation confirm-navigation cancel-navigation
+            pending-generation confirm-navigation confirm-text-navigation cancel-navigation
             address-insert address-backspace address-move address-select-all
             address-composition-start address-composition-update address-composition-end
             active-url put-value get-value delete-value]))
@@ -54,6 +54,7 @@
                 :session/partition (document-string partition)
                 :session/pending (document-map)
                 :session/committed (document-map)
+                :session/pages (document-map)
                 :session/address-editor (editor-document (edit/empty-state))
                 :session/next-generation (document-i64 1)))
 
@@ -155,9 +156,26 @@
             cleared (document-assoc session :session/pending
                                     (document-dissoc (field session :session/pending) (document-string tab-id)))
             updated (document-assoc cleared :session/chrome next)]
-        (document-assoc updated :session/committed
-                        (document-assoc (field session :session/committed)
-                                        (document-string tab-id) (document-string url))))
+        (document-assoc
+          (document-assoc updated :session/pages
+                          (document-dissoc (field session :session/pages) (document-string tab-id)))
+          :session/committed
+          (document-assoc (field session :session/committed)
+                          (document-string tab-id) (document-string url))))
+      session)))
+
+(defn confirm-text-navigation [session :document tab-id :string generation :i64 url :string body :string] :document
+  ;; Only for an already-authorized, decoded text/plain response supplied by
+  ;; the host. Text is data, not HTML; the host owns MIME/charset validation,
+  ;; response limits, authorization and protection against forged responses.
+  (let [pending (pending-entry session tab-id)]
+    (if (and (> generation 0)
+             (= generation (integer (field pending :generation)))
+             (string=? url (text (field pending :url))))
+      (let [confirmed (confirm-navigation session tab-id generation url)]
+        (document-assoc confirmed :session/pages
+                        (document-assoc (field confirmed :session/pages)
+                                        (document-string tab-id) (document-string body))))
       session)))
 
 (defn active-url [session :document] :string

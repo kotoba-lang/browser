@@ -1,0 +1,28 @@
+(ns browser.native-local-text-view-test
+  (:require [browser.local-session :as session]
+            [browser.local-view :as view]
+            [kotoba.wasm.dom :as dom])
+  (:export [main]))
+
+(defn field [d :document k :keyword] :document
+  (option-or (document-get d k) (document-null)))
+(defn item [d :document i :i64] :document
+  (option-or (document-vector-at d i) (document-null)))
+(defn text [d :document] :string
+  (option-or (document-string-value d) ""))
+
+(defn main [] :i64
+  (let [s (session/open-tab (session/empty-session "p") "https://example.com/")
+        wrong (session/confirm-text-navigation s "tab-1" 1 "https://evil.example/" "wrong")
+        ok (session/confirm-text-navigation wrong "tab-1" 1 "https://example.com/" "<script>safe</script> 日本")
+        again (session/commit-address ok)
+        stale (session/confirm-text-navigation again "tab-1" 1 "https://example.com/" "stale")
+        cleared (session/confirm-navigation again "tab-1" 2 "https://example.com/")
+        tree (dom/tree (view/render stale))
+        page (item (field tree :children) 2)
+        pre (item (field page :children) 0)]
+    (cond (not= (session/pending-generation wrong "tab-1") 1) 1
+          (not= (session/pending-generation stale "tab-1") 2) 2
+          (not (string=? (text (item (field pre :children) 0)) "<script>safe</script> 日本")) 3
+          (document-contains (field cleared :session/pages) (document-string "tab-1")) 4
+          :else 0)))

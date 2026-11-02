@@ -66,5 +66,12 @@
         d7 (dom/append-child d6 root-id address-id)
         page (dom/create-element d7 :section)
         page-id (number (item page 0))
-        d8 (dom/set-attribute (item page 1) page-id :data-role (document-string "page"))]
-    (dom/append-child d8 root-id page-id)))
+        d8 (dom/set-attribute (item page 1) page-id :data-role (document-string "page"))
+        d9 (dom/append-child d8 root-id page-id)
+        body (document-get (field session :session/pages) (document-string active))]
+    (if (option-some?-of [:option :document] body)
+      (let [pre (dom/create-element d9 :pre)
+            pre-id (number (item pre 0))
+            attached (dom/append-child (item pre 1) page-id pre-id)]
+        (append-text attached pre-id (text (option-or body (document-null)))))
+      d9)))

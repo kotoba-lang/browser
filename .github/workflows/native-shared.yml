@@ -96,6 +96,12 @@ jobs:
       - name: Execute local view on x86
         if: matrix.target == 'x86_64'
         run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/dom" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-view --output "$RUNNER_TEMP/view-native"
+      - name: Execute local text page on ARM
+        if: matrix.target == 'arm64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/dom" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-text-view --output "$RUNNER_TEMP/text-view-native"
+      - name: Execute local text page on x86
+        if: matrix.target == 'x86_64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/dom" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-text-view --output "$RUNNER_TEMP/text-view-native"
       - name: Execute local controller on ARM
         if: matrix.target == 'arm64'
         run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/dom" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-controller --output "$RUNNER_TEMP/controller-native"
@@ -137,6 +143,10 @@ jobs:
             ${{ runner.temp }}/view-native/*.ksl
             ${{ runner.temp }}/view-native/*.stdout
             ${{ runner.temp }}/view-native/*.stderr
+            ${{ runner.temp }}/text-view-native/*.json
+            ${{ runner.temp }}/text-view-native/*.ksl
+            ${{ runner.temp }}/text-view-native/*.stdout
+            ${{ runner.temp }}/text-view-native/*.stderr
             ${{ runner.temp }}/controller-native/*.json
             ${{ runner.temp }}/controller-native/*.ksl
             ${{ runner.temp }}/controller-native/*.stdout
