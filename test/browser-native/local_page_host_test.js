@@ -210,6 +210,29 @@ try {
   }
   {
     const div = document.createElement('div'); document.body.appendChild(div);
+    const notices = [], refusals = [], writes = [];
+    const host = createLocalActorHost({mount:div, write:x => writes.push(x), onNavigation:x => notices.push(x),
+                                      onNavigationError:x => refusals.push(x)});
+    const withTab = JSON.stringify([[...shell[0], [':dom/create-element',4,':button'],
+      [':dom/set-attr',4,':data-tab-id','tab-1'], [':dom/append-child',1,4]]]);
+    const n = encoder.encode(withTab).length;
+    const notice = JSON.stringify({tab:'tab-1', generation:1, url:'https://one.example/'});
+    host.output(1, encoder.encode(`FRAME 1 ${n}\n${withTab}`));
+    div.querySelector('input').dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', bubbles:true, cancelable:true}));
+    host.output(1, encoder.encode(`NFRAME 2 ${n} 0 ${encoder.encode(notice).length}\n${withTab}${notice}`));
+    const response = new Response('<script>unsupported</script>', {headers:{'content-type':'text/html'}});
+    Object.defineProperty(response, 'url', {value:'https://one.example/'});
+    await host.deliverHtml(notices[0], response);
+    const stable = div.firstChild;
+    for (const part of ['RE', 'JECT\n']) host.output(1, encoder.encode(part));
+    if (refusals.length !== 1 || refusals[0].operation !== 'response' || refusals[0].notice !== notices[0] ||
+        !Object.isFrozen(refusals[0]) || host.state().closed || host.state().waiting || host.state().revision !== 2 ||
+        div.firstChild !== stable || !host.cancelNavigation(notices[0])) throw new Error('actor refusal was not recoverable');
+    host.output(1, encoder.encode(`FRAME 3 ${n}\n${withTab}`));
+    host.close(); div.remove();
+  }
+  {
+    const div = document.createElement('div'); document.body.appendChild(div);
     const notices = [], writes = [];
     const host = createLocalActorHost({mount:div, write:x => writes.push(x), onNavigation:x => notices.push(x)});
     const withTab = JSON.stringify([[...shell[0], [':dom/create-element',4,':button'],

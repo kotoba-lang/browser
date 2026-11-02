@@ -12,8 +12,9 @@ const MAX_INPUT = 65700;
 const MAX_PENDING_TEXT = 32;
 const MAX_PENDING_BYTES = 65536;
 
-export function createLocalActorHost({ mount, write, onNavigation = () => {}, onBusy = () => {}, onError = () => {} }) {
-  if (!(mount instanceof Element) || typeof write !== 'function' || typeof onNavigation !== 'function' || typeof onBusy !== 'function' || typeof onError !== 'function') {
+export function createLocalActorHost({ mount, write, onNavigation = () => {}, onNavigationError = () => {}, onBusy = () => {}, onError = () => {} }) {
+  if (!(mount instanceof Element) || typeof write !== 'function' || typeof onNavigation !== 'function' ||
+      typeof onNavigationError !== 'function' || typeof onBusy !== 'function' || typeof onError !== 'function') {
     throw new Error('invalid local actor host');
   }
   let revision = 0, waiting = true, closed = false, unbind = null;
@@ -162,6 +163,20 @@ export function createLocalActorHost({ mount, write, onNavigation = () => {}, on
         if (nl < 0) { if (buffer.length > MAX_HEADER) throw new Error('actor header limit'); return; }
         if (nl > MAX_HEADER) throw new Error('actor header limit');
         const header = decoder.decode(buffer.subarray(0, nl));
+        if (header === 'REJECT') {
+          if (!waiting || !sent || ![':host/response', ':host/cancel'].includes(sent.type)) {
+            throw new Error('unexpected actor refusal');
+          }
+          const refused = sent;
+          buffer = buffer.slice(nl + 1);
+          sent = null;
+          waiting = false;
+          // The actor has not advanced its revision or changed state. Keep
+          // the displayed page and the notice so the trusted host can cancel
+          // or retry; this is a generic refusal, not a diagnostic from HTML.
+          onNavigationError(Object.freeze({notice: refused.notice, operation: refused.type === ':host/response' ? 'response' : 'cancel'}));
+          continue;
+        }
         const match = /^FRAME ([1-9][0-9]{0,15}) ([1-9][0-9]{0,6})$/.exec(header);
         const page = /^PFRAME ([1-9][0-9]{0,15}) ([1-9][0-9]{0,6}) ([1-9][0-9]{0,6})$/.exec(header);
         const nav = /^NFRAME ([1-9][0-9]{0,15}) ([1-9][0-9]{0,6}) (0|[1-9][0-9]{0,6}) ([1-9][0-9]{0,4})$/.exec(header);

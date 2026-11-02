@@ -3,10 +3,11 @@
 import { createLocalActorHost } from '../../src/browser/local_actor_host.js';
 const mount = document.getElementById('mount');
 let page = null, notice = null;
-const events = [];
+const events = [], refusals = [];
 const attach = Element.prototype.attachShadow;
 Element.prototype.attachShadow = function(options) { const root = attach.call(this, options); page = root; return root; };
-const host = createLocalActorHost({mount, write: message => events.push(message), onNavigation: item => { notice = item; }});
+const host = createLocalActorHost({mount, write: message => events.push(message), onNavigation: item => { notice = item; },
+                                   onNavigationError: item => refusals.push(item)});
 window.htmlLive = {
   feed(bytes) {
     page = null;
@@ -14,6 +15,7 @@ window.htmlLive = {
   },
   take() { return events.shift() ?? null; },
   notice() { return notice; },
+  refusals() { return refusals; },
   cancel() { return host.cancelNavigation(notice); },
   async deliver(response) { return host.deliverHtml(notice, response); },
   async deliverFixture(url, body) {

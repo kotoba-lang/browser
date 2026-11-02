@@ -172,6 +172,16 @@ def run(args):
                 retried = advance(7)
                 assert retried[2] == {'tab':'tab-1', 'generation':2, 'url':url}, retried[2]
                 assert evaluate('window.htmlLive.notice()') == dict(revision=7, **retried[2])
+                # A synthetic unsupported HTML response is refused by the
+                # native actor; the host must retain the frame and allow a
+                # later approved response for the same pending navigation.
+                assert evaluate('window.htmlLive.deliverFixture(' + json.dumps(url) + ',"<script>unsupported</script>")', True) is True
+                actor.proc.stdin.write(take().encode('utf-8')); actor.proc.stdin.flush()
+                assert actor.line(time.monotonic() + 30) == b'REJECT'
+                evaluate('window.htmlLive.feed(' + json.dumps(list(b'REJECT\n')) + ')')
+                refusals = evaluate('window.htmlLive.refusals()')
+                assert len(refusals) == 1 and refusals[0]['operation'] == 'response' and refusals[0]['notice']['generation'] == 2
+                assert snap() == {'url':url, 'page':None, 'tabs':1}, snap()
                 response_revision, response_generation = 7, 2
                 start_broker = broker_call(retried[2], response_revision)
                 time.sleep(.25)
