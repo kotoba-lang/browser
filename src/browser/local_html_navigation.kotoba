@@ -1,0 +1,22 @@
+(ns browser.local-html-navigation
+  (:require [browser.local-session :as session] [htmldom-fragment-wire :as html])
+  (:export [prepare]))
+
+;; Pure bridge for an already-authorized, decoded HTML response. The caller
+;; must verify provenance, MIME/charset, byte limits and operation consent.
+;; This function performs no network access and cannot grant authorization.
+;; A stale response or unsupported fragment leaves the session unchanged.
+(defn field [d :document k :keyword] :document (option-or (document-get d k) (document-null)))
+(defn text [d :document] :string (option-or (document-string-value d) ""))
+(defn result [kind :keyword state :document wire :document] :document
+  (document-map :kind (document-keyword kind) :session state :wire wire))
+(defn prepare [state :document tab :string generation :i64 url :string body :string] :document
+  (let [pending (option-or (document-get (field state :session/pending) (document-string tab)) (document-null))]
+    (if (or (<= generation 0) (not= generation (session/pending-generation state tab))
+            (not (string=? url (text (field pending :url)))))
+      (result :html-navigation/stale state (document-null))
+      (let [wire (html/encode body)]
+        (if (not (option-some?-of [:option :string] wire))
+          (result :html-navigation/unsupported state (document-null))
+          (result :html-navigation/ok (session/confirm-navigation state tab generation url)
+                  (document-string (option-or wire ""))))))))

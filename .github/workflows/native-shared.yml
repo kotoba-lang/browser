@@ -42,6 +42,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
           repository: kotoba-lang/kotoba
           ref: 496fab3774ec3820d465df8db7ff1fa6f6bf659b
           path: _html
@@ -58,6 +61,12 @@ jobs:
           ref: fad5749cfb69b2ffb4f15dfa5bfc372c220b1eb7
           path: _dom
           persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: kotoba-lang/kotoba
+          ref: b7719f723fbf94f11e19dcda12641f682e324e62
+          path: _text
+          persist-credentials: false
       - name: Build and run locked HTML fixture
         run: >-
           python3 _html/scripts/check-html-native.py --case html_fragment_wire
@@ -65,13 +74,29 @@ jobs:
           --compiler-sha256 73350746c1f86dcfbe8cf47723bd7bb1e33ee28f0e08e40bef2dd2b196f5a09b
           --runner-source "$PWD/_amu/seed/x86_64-kx64-runner.kotoba"
           --dom "$PWD/_dom/lib/kotoba.domGpu" --output "$RUNNER_TEMP/html-page"
+      - name: Build Browser navigation and page wire
+        run: >-
+          python3 scripts/check-shared-native.py --case local-html-navigation
+          --compiler "$PWD/_amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64
+          --runner-source "$PWD/_amu/seed/x86_64-kx64-runner.kotoba"
+          --browser "$PWD" --dom "$PWD/_dom/lib/kotoba.domGpu"
+          --text "$PWD/_text/lib/kotoba.text" --html "$PWD/_html/lib/kotoba.htmldom"
+          --output "$RUNNER_TEMP/nav-page"
+      - name: Compare independent wire output
+        run: |
+          python3 - <<'PYCODE'
+          import json, os
+          from pathlib import Path
+          temp = Path(os.environ['RUNNER_TEMP'])
+          assert json.loads((temp / 'html-page/semantic-wire.json').read_text()) == json.loads((temp / 'nav-page/wire.json').read_text())
+          PYCODE
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: native-html-page-wire
           path: |
-            ${{ runner.temp }}/html-page/semantic-wire.json
-            ${{ runner.temp }}/html-page/receipt.json
-            ${{ runner.temp }}/html-page/html_fragment_wire.ksl
+            ${{ runner.temp }}/nav-page/wire.json
+            ${{ runner.temp }}/nav-page/shared-native.json
+            ${{ runner.temp }}/nav-page/local-html-navigation.ksl
           if-no-files-found: error
   native-html-page-host:
     name: Native HTML wire to Chrome page
@@ -89,7 +114,7 @@ jobs:
       - name: Apply freshly generated HTML page
         run: >-
           python3 scripts/check-local-page-host.py --browser "$(command -v google-chrome)"
-          --wire "$RUNNER_TEMP/html-page/semantic-wire.json" --output "$RUNNER_TEMP/native-page-host"
+          --wire "$RUNNER_TEMP/html-page/wire.json" --output "$RUNNER_TEMP/native-page-host"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:

@@ -1,0 +1,32 @@
+(ns browser.native-html-navigation-test
+  (:require [browser.local-session :as session] [browser.local-html-navigation :as nav])
+  (:capabilities [:io/write])
+  (:export [main]))
+(defn field [d :document k :keyword] :document (option-or (document-get d k) (document-null)))
+(defn kind [d :document] :keyword (option-or (document-keyword-value (field d :kind)) :bad))
+(defn text [d :document] :string (option-or (document-string-value d) ""))
+(defn rejected? [r :document original :document expected :keyword] :bool
+  (and (= (kind r) expected) (document-equal? (field r :session) original) (= (document-kind (field r :wire)) :null)))
+(defn main [] :i64
+  (let [url "https://one.example/" body "<section><h1>Hi <em>世界</em></h1><p><strong>重要</strong> <code>x</code></p></section>"
+        state (session/open-tab (session/empty-session "local") url)
+        wrong-generation (nav/prepare state "tab-1" 2 url body)
+        wrong-tab (nav/prepare state "tab-2" 1 url body)
+        redirect (nav/prepare state "tab-1" 1 "https://other.example/" body)
+        invalid (nav/prepare state "tab-1" 1 url "<script>bad</script>")
+        ok (nav/prepare state "tab-1" 1 url body)
+        next (field ok :session) wire (text (field ok :wire))
+        replay (nav/prepare next "tab-1" 1 url body)
+        bg-url "https://two.example/" bg-state (session/focus-tab (session/open-tab next bg-url) "tab-1")
+        bg (nav/prepare bg-state "tab-2" 2 bg-url body)
+        bg-result (field bg :session)]
+    (if (not (and (rejected? wrong-generation state :html-navigation/stale)
+                  (rejected? wrong-tab state :html-navigation/stale)
+                  (rejected? redirect state :html-navigation/stale)
+                  (rejected? invalid state :html-navigation/unsupported)
+                  (= (kind ok) :html-navigation/ok) (= (session/pending-generation next "tab-1") 0)
+                  (string=? (session/active-url next) url) (> (string-length wire) 0)
+                  (rejected? replay next :html-navigation/stale)
+                  (= (kind bg) :html-navigation/ok) (string=? (session/active-url bg-result) url)
+                  (string=? (session/active-url (session/focus-tab bg-result "tab-2")) bg-url))) 1
+      (let [sent (typed-cap-call :io/write :string :string (string-concat "PAGE " (string-concat wire "\n")))] 0))))
