@@ -32,6 +32,10 @@
         wrong-tab (session/confirm-navigation pending "tab-2" 3 "https://two.example/next")
         redirect (session/confirm-navigation pending "tab-1" 3 "https://evil.example/")
         navigated (session/confirm-navigation pending "tab-1" 3 "https://two.example/next")
+        typing-pending (session/address-insert pending "!")
+        typing-confirmed (session/confirm-navigation typing-pending "tab-1" 3 "https://two.example/next")
+        composing-pending (session/address-composition-update (session/address-composition-start pending) "日本")
+        composing-confirmed (session/confirm-navigation composing-pending "tab-1" 3 "https://two.example/next")
         again (session/commit-address (session/set-address navigated "https://two.example/next"))
         old-response (session/confirm-navigation again "tab-1" 3 "https://two.example/next")
         confirmed (session/confirm-navigation again "tab-1" 4 "https://two.example/next")
@@ -46,7 +50,17 @@
         bg-pending (session/commit-address (session/set-address two "https://third.example/"))
         bg-focus (session/focus-tab bg-pending "tab-1")
         bg-confirmed (session/confirm-navigation bg-focus "tab-2" 3 "https://third.example/")
-        bg-active (session/focus-tab bg-confirmed "tab-2")]
+        bg-active (session/focus-tab bg-confirmed "tab-2")
+        base-edit (session/set-address two "https://example.com/")
+        typed (session/address-insert base-edit "あ😀")
+        moved (session/address-move typed -1 false)
+        erased (session/address-backspace moved)
+        unknown-erased (session/address-backspace (session/focus-tab moved "missing"))
+        compose (session/address-composition-update (session/address-composition-start erased) "日本")
+        blocked (session/commit-address compose)
+        finished (session/address-composition-end compose "日本")
+        submitted (session/commit-address finished)
+        selected (session/address-insert (session/address-select-all finished) "https://new.example/")]
     (cond (not (string=? (value empty) "")) 1
           (not (string=? (value first-open) "")) 10
           (not (string=? (text (field (tab first-open 0) :tab/url)) "")) 20
@@ -61,6 +75,9 @@
           (not (string=? (session/active-url navigated) "https://two.example/next")) 4
           (not (string=? (text (field intent :url)) "https://two.example/next")) 5
           (not (string=? (value navigated) "two")) 6
+          (not (string=? (text (field (field typing-confirmed :session/chrome) :chrome/url-input)) "https://two.example/next!")) 36
+          (not (option-or (document-bool-value (field (field composing-confirmed :session/address-editor) :text/composing)) false)) 37
+          (not (string=? (text (field (field composing-confirmed :session/address-editor) :text/composition)) "日本")) 38
           (not= (session/pending-generation old-response "tab-1") 4) 16
           (not= (session/pending-generation confirmed "tab-1") 0) 17
           (not (string=? (value cancelled) "two")) 18
@@ -75,4 +92,11 @@
           (not (string=? (text (field (tab bg-confirmed 1) :tab/url)) "https://third.example/")) 26
           (not (string=? (session/active-url bg-active) "https://third.example/")) 27
           (not (string=? (value bg-active) "")) 28
+          (not (string=? (text (field (field typed :session/chrome) :chrome/url-input)) "https://example.com/あ😀")) 29
+          (not (string=? (text (field (field erased :session/chrome) :chrome/url-input)) "https://example.com/😀")) 30
+          (not (string=? (text (field (field unknown-erased :session/chrome) :chrome/url-input)) "https://example.com/😀")) 35
+          (not= (session/pending-generation blocked "tab-2") 0) 31
+          (not (string=? (text (field (field finished :session/chrome) :chrome/url-input)) "https://example.com/日本😀")) 32
+          (not= (session/pending-generation submitted "tab-2") 3) 33
+          (not (string=? (text (field (field selected :session/chrome) :chrome/url-input)) "https://new.example/")) 34
           :else 0)))
