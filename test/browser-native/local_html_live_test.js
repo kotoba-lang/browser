@@ -24,6 +24,7 @@ window.htmlLive = {
     return host.deliverHtml(notice, response);
   },
   listItems() { return page ? Array.from(page.querySelectorAll('ul > li'), node => node.textContent) : []; },
+  deepStructure() { return !!page?.querySelector('div > div > div > div > div > section > h1 > em'); },
   snapshot() {
     const input = mount.querySelector('input');
     return {url: input?.value ?? null, page: page?.textContent ?? null, tabs: mount.querySelectorAll('nav [data-tab-id]').length};

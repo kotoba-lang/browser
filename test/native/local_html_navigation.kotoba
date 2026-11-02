@@ -14,6 +14,9 @@
         wrong-tab (nav/prepare state "tab-2" 1 url body)
         redirect (nav/prepare state "tab-1" 1 "https://other.example/" body)
         invalid (nav/prepare state "tab-1" 1 url "<script>bad</script>")
+        ;; The native document tree-value projection traps at this depth;
+        ;; navigation must instead preserve the complete flat operation wire.
+        deep (nav/prepare state "tab-1" 1 url "<div><div><div><div><div>deep</div></div></div></div></div>")
         ok (nav/prepare state "tab-1" 1 url body)
         next (field ok :session) wire (text (field ok :wire))
         replay (nav/prepare next "tab-1" 1 url body)
@@ -30,6 +33,7 @@
                   (rejected? wrong-tab state :html-navigation/stale)
                   (rejected? redirect state :html-navigation/stale)
                   (rejected? invalid state :html-navigation/unsupported)
+                  (= (kind deep) :html-navigation/ok) (> (string-length (text (field deep :wire))) 0)
                   (= (kind ok) :html-navigation/ok) (= (session/pending-generation next "tab-1") 0)
                   (string=? (session/active-url next) url) (> (string-length wire) 0)
                   (rejected? replay next :html-navigation/stale)

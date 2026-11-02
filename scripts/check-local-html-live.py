@@ -62,7 +62,7 @@ def run(args):
             fixture = ROOT / 'test/browser-native/local_html_live.html'
             # Exercise implicit paragraph and list-item endings in the native
             # parser before applying the resulting wire to the page host.
-            html = '<section><h1>Hi <em>世界</em></h1><p><strong>重要</strong> <code>x</code><ul><li>一<li>二</ul></section>'
+            html = '<div><div><div><div><section><h1>Hi <em>世界</em></h1><p><strong>重要</strong> <code>x</code><ul><li>一<li>二</ul></section></div></div></div></div>'
             if args.broker:
                 broker_bytes = args.broker.read_bytes()
                 assert hashlib.sha256(broker_bytes).hexdigest() == '7f760128c3a58098123c31ec3dd34b9c871932e3933f2c952facc4ab0e647212'
@@ -203,6 +203,7 @@ def run(args):
             present(frame(response_revision + 1))
             assert snap() == {'url':url, 'page':'Hi 世界重要 x一二', 'tabs':1}, snap()
             assert evaluate('window.htmlLive.listItems()') == ['一', '二']
+            assert evaluate('window.htmlLive.deepStructure()') is True
             click('input'); browser.call('Input.insertText', {'text':'x'}, session); present_frame = advance(response_revision + 2)
             assert present_frame[1] is not None and snap()['page'] == 'Hi 世界重要 x一二'
             click('button[data-action=":tab/new"]'); advance(response_revision + 3)
