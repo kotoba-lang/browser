@@ -115,6 +115,12 @@ jobs:
       - name: Execute multi-tab DOM replay on x86
         if: matrix.target == 'x86_64'
         run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-dom-replay --output "$RUNNER_TEMP/dom-replay-native"
+      - name: Execute DOM commit admission on ARM
+        if: matrix.target == 'arm64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-dom-commit --output "$RUNNER_TEMP/dom-commit-native"
+      - name: Execute DOM commit admission on x86
+        if: matrix.target == 'x86_64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-dom-commit --output "$RUNNER_TEMP/dom-commit-native"
       - name: Execute local controller on ARM
         if: matrix.target == 'arm64'
         run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-controller --output "$RUNNER_TEMP/controller-native"
@@ -168,6 +174,10 @@ jobs:
             ${{ runner.temp }}/dom-replay-native/*.ksl
             ${{ runner.temp }}/dom-replay-native/*.stdout
             ${{ runner.temp }}/dom-replay-native/*.stderr
+            ${{ runner.temp }}/dom-commit-native/*.json
+            ${{ runner.temp }}/dom-commit-native/*.ksl
+            ${{ runner.temp }}/dom-commit-native/*.stdout
+            ${{ runner.temp }}/dom-commit-native/*.stderr
             ${{ runner.temp }}/controller-native/*.json
             ${{ runner.temp }}/controller-native/*.ksl
             ${{ runner.temp }}/controller-native/*.stdout

@@ -1,0 +1,22 @@
+(ns browser.local-dom-commit
+  (:require [browser.local-view :as view]
+            [kotoba.wasm.dom :as dom])
+  (:export [prepare]))
+
+;; This is a pure admission step for one complete local shell projection.
+;; It does not apply DOM operations, authorize network requests or make the
+;; caller trusted. The host must use a trusted current state, validate the
+;; transport, and atomically apply or reject the returned operation stream.
+(defn item [d :document i :i64] :document
+  (option-or (document-vector-at d i) (document-null)))
+
+(defn prepare [state :document snapshot :document batches :document] [:option :document]
+  (let [expected (view/render state)
+        transaction (dom/consume-op-transaction expected)
+        expected-batches (item transaction 0)]
+    (if (and (= (document-kind batches) :vector)
+             (= (document-kind expected-batches) :vector)
+             (document-equal? snapshot expected)
+             (document-equal? batches expected-batches))
+      (option-some-of [:option :document] batches)
+      (option-none-of [:option :document]))))
