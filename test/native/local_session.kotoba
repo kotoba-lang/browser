@@ -15,21 +15,46 @@
 (defn main [] :i64
   (let [key (document-keyword :token)
         empty (session/put-value (session/empty-session "personal") key (document-string "forbidden"))
-        one (session/put-value (session/open-tab empty "https://one.example/a") key (document-string "one"))
-        two (session/put-value (session/open-tab one "https://two.example/") key (document-string "two"))
+        first-open (session/open-tab empty "https://one.example/a")
+        first-confirm (session/confirm-navigation first-open "tab-1" 1 "https://one.example/a")
+        one (session/put-value first-confirm key (document-string "one"))
+        second-open (session/open-tab one "https://two.example/")
+        second-confirm (session/confirm-navigation second-open "tab-2" 2 "https://two.example/")
+        two (session/put-value second-confirm key (document-string "two"))
         focused (session/focus-tab two "tab-1")
-        navigated (session/commit-address (session/set-address focused "https://two.example/next"))
-        intent (field (field navigated :session/chrome) :chrome/last-navigation)
-        opaque (session/open-tab navigated "mailto:person@example.com")
-        denied (session/put-value opaque key (document-string "secret"))
+        pending (session/commit-address (session/set-address focused "https://two.example/next"))
+        intent (field (field pending :session/chrome) :chrome/last-navigation)
+        stale (session/confirm-navigation pending "tab-1" 1 "https://two.example/next")
+        wrong-tab (session/confirm-navigation pending "tab-2" 3 "https://two.example/next")
+        redirect (session/confirm-navigation pending "tab-1" 3 "https://evil.example/")
+        navigated (session/confirm-navigation pending "tab-1" 3 "https://two.example/next")
+        again (session/commit-address (session/set-address navigated "https://two.example/next"))
+        old-response (session/confirm-navigation again "tab-1" 3 "https://two.example/next")
+        confirmed (session/confirm-navigation again "tab-1" 4 "https://two.example/next")
+        pending-cancel (session/commit-address (session/set-address confirmed "https://one.example/"))
+        cancelled (session/cancel-navigation pending-cancel "tab-1" 5)
+        late (session/confirm-navigation cancelled "tab-1" 5 "https://one.example/")
+        opaque (session/open-tab late "mailto:person@example.com")
+        opaque-ready (session/confirm-navigation opaque "tab-3" 6 "mailto:person@example.com")
+        denied (session/put-value opaque-ready key (document-string "secret"))
         restored (session/focus-tab denied "tab-2")
         deleted (session/delete-value restored key)]
     (cond (not (string=? (value empty) "")) 1
+          (not (string=? (value first-open) "")) 10
+          (not (string=? (value second-open) "")) 11
           (not (string=? (value focused) "one")) 2
           (not (string=? (value two) "two")) 3
+          (not (string=? (value pending) "one")) 12
+          (not (string=? (value stale) "one")) 13
+          (not (string=? (value (session/focus-tab wrong-tab "tab-1")) "one")) 14
+          (not (string=? (value redirect) "one")) 15
           (not (string=? (session/active-url navigated) "https://two.example/next")) 4
           (not (string=? (text (field intent :url)) "https://two.example/next")) 5
           (not (string=? (value navigated) "two")) 6
+          (not= (session/pending-generation old-response "tab-1") 4) 16
+          (not= (session/pending-generation confirmed "tab-1") 0) 17
+          (not (string=? (value cancelled) "two")) 18
+          (not (string=? (value late) "two")) 19
           (not (string=? (value denied) "")) 7
           (not (string=? (value restored) "two")) 8
           (not (string=? (value deleted) "")) 9
