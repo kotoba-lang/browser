@@ -40,6 +40,10 @@ jobs:
             --broker "$PWD/_broker/src/kotoba-client-runtime.js" --output "$RUNNER_TEMP/broker-https"
           python3 scripts/check-local-broker-https.py --negative-no-cert-exception --browser "$(command -v google-chrome)" \
             --broker "$PWD/_broker/src/kotoba-client-runtime.js" --output "$RUNNER_TEMP/broker-https-negative"
+      - name: Verify slow loopback HTTPS response cancellation
+        run: >-
+          python3 scripts/check-local-slow-html-https.py --browser "$(command -v google-chrome)"
+          --broker "$PWD/_broker/src/kotoba-client-runtime.js" --output "$RUNNER_TEMP/slow-html-https"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
@@ -56,6 +60,7 @@ jobs:
             ${{ runner.temp }}/broker-response/*.json
             ${{ runner.temp }}/broker-https/receipt.json
             ${{ runner.temp }}/broker-https-negative/negative-receipt.json
+            ${{ runner.temp }}/slow-html-https/receipt.json
           if-no-files-found: warn
   native-html-page-wire:
     name: Build native HTML page wire
