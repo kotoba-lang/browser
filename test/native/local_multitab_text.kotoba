@@ -21,7 +21,9 @@
         second-open (session/open-tab first-ready "https://two.example/")
         second-ready (session/confirm-text-navigation second-open "tab-2" 2 "https://two.example/" "<script>not markup</script> 日本")
         stale (session/confirm-text-navigation second-ready "tab-2" 2 "https://two.example/" "stale")
-        text-tree (dom/tree (view/render stale))
+        text-rendered (view/render stale)
+        transaction (dom/consume-op-transaction text-rendered)
+        text-tree (dom/tree text-rendered)
         text-page (item (field text-tree :children) 2)
         pre (item (field text-page :children) 0)
         edited (session/address-insert (session/focus-tab second-ready "tab-1") "<日本>")
@@ -46,4 +48,6 @@
           (<= (document-count (item consumed 0)) 0) 9
           (not= (document-count (field (item consumed 1) :ops)) 0) 10
           (not (string=? (text (item (field pre :children) 0)) "<script>not markup</script> 日本")) 11
+          (not= (document-count (item transaction 0)) 2) 12
+          (not= (document-count (field (item transaction 1) :ops)) 0) 13
           :else 0)))
