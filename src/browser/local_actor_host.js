@@ -6,18 +6,32 @@ import { bindLocalInput, commitLocalProjection, encodeLocalEvent } from './local
 const MAX_FRAME = 1048576;
 const MAX_HEADER = 64;
 const MAX_INPUT = 65700;
+const MAX_PENDING_TEXT = 32;
+const MAX_PENDING_BYTES = 65536;
 
 export function createLocalActorHost({ mount, write, onBusy = () => {}, onError = () => {} }) {
   if (!(mount instanceof Element) || typeof write !== 'function' || typeof onBusy !== 'function' || typeof onError !== 'function') {
     throw new Error('invalid local actor host');
   }
   let revision = 0, waiting = true, closed = false, unbind = null;
+  let projection = null, sent = null, pendingText = [], pendingBytes = 0;
   let buffer = new Uint8Array(), expected = null;
   const encoder = new TextEncoder(), decoder = new TextDecoder('utf-8', { fatal: true });
+  // Do not let a pointer move the displayed selection while the actor owns
+  // an outstanding edit; queued text is based on that selection.
+  function holdSelection(event) {
+    if (waiting && sent && event.target instanceof HTMLInputElement) {
+      if (event.cancelable) event.preventDefault();
+      onBusy();
+    }
+  }
+  mount.addEventListener('pointerdown', holdSelection, true);
 
   function fail(error) {
     if (!closed) {
       closed = true;
+      mount.removeEventListener('pointerdown', holdSelection, true);
+      pendingText = []; pendingBytes = 0;
       if (unbind) { try { unbind(); } catch (_) { /* active composition requires owner cleanup */ } }
       onError(error);
     }
@@ -25,12 +39,29 @@ export function createLocalActorHost({ mount, write, onBusy = () => {}, onError 
   }
   function intent(message) {
     if (closed) return;
-    if (waiting) { onBusy(); return; }
+    if (waiting) {
+      // Only consecutive text from the same unchanged selection can be
+      // rebased onto the actor's next confirmed caret. Other gestures must
+      // wait for a fresh projection; they are explicitly reported busy.
+      if (sent && sent.type === ':ui/text' && message.type === ':ui/text' &&
+          sent.target === message.target && sent['selection-anchor'] === message['selection-anchor'] &&
+          sent['selection-focus'] === message['selection-focus']) {
+        try {
+          encodeLocalEvent(message);
+          const size = encoder.encode(message.text).length;
+          if (pendingText.length < MAX_PENDING_TEXT && pendingBytes + size <= MAX_PENDING_BYTES) {
+            pendingText.push(message); pendingBytes += size; return;
+          }
+        } catch (_) { /* report input that cannot be queued */ }
+      }
+      onBusy(); return;
+    }
     try {
       const body = revision + '|' + encodeLocalEvent(message);
       const size = encoder.encode(body).length;
       if (size > MAX_INPUT) throw new Error('local actor input limit');
       waiting = true;
+      sent = message;
       write(size + '\n' + body);
     } catch (error) { fail(error); }
   }
@@ -38,10 +69,24 @@ export function createLocalActorHost({ mount, write, onBusy = () => {}, onError 
     if (!waiting || rev !== revision + 1 || !Number.isSafeInteger(rev)) throw new Error('unexpected actor revision');
     const batches = JSON.parse(decoder.decode(bytes));
     if (unbind) { unbind(); unbind = null; }
-    const projection = commitLocalProjection(mount, batches);
+    projection = commitLocalProjection(mount, batches);
     revision = rev;
     unbind = bindLocalInput(mount, projection, intent);
     waiting = false;
+    sent = null;
+    if (pendingText.length) {
+      const input = mount.querySelector('input[data-role="address"]');
+      const target = input && projection.resolve(input);
+      if (!target || target.id !== pendingText[0].target || document.activeElement !== input ||
+          !Number.isInteger(input.selectionStart) || !Number.isInteger(input.selectionEnd)) {
+        throw new Error('queued input target changed');
+      }
+      const next = pendingText.shift();
+      pendingBytes -= encoder.encode(next.text).length;
+      const backward = input.selectionDirection === 'backward';
+      intent({ ...next, 'selection-anchor': backward ? input.selectionEnd : input.selectionStart,
+                         'selection-focus': backward ? input.selectionStart : input.selectionEnd });
+    }
   }
   function parse() {
     while (buffer.length) {
@@ -80,7 +125,8 @@ export function createLocalActorHost({ mount, write, onBusy = () => {}, onError 
       if (closed) return;
       if (unbind) unbind();
       closed = true;
-      buffer = new Uint8Array();
+      mount.removeEventListener('pointerdown', holdSelection, true);
+      buffer = new Uint8Array(); pendingText = []; pendingBytes = 0;
       write('0\n');
     },
     state() { return { revision, waiting, closed }; },

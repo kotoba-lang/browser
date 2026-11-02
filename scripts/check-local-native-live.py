@@ -172,7 +172,9 @@ def run(args):
                 assert int(header) == len(payload.encode()) and payload.startswith(str(rev - 1) + '|B1|'), e
                 actor.proc.stdin.write(e.encode())
                 actor.proc.stdin.flush()
-                present(rev, actor.frame(rev))
+                payload = actor.frame(rev)
+                present(rev, payload)
+                return payload
             def snap():
                 return evaluate('window.nativeLive.snapshot()')
             first_frame = f'FRAME 1 {len(first)}\n'.encode() + first
@@ -181,31 +183,37 @@ def run(args):
             click('button')
             click('button')
             assert evaluate('window.nativeLive.busy()') == 1
-            advance(2)
+            second = advance(2)
             assert evaluate('window.nativeLive.take()') is None
+            second_frame = f'FRAME 2 {len(second)}\n'.encode() + second
+            assert evaluate('window.nativeLive.queueLimit(' + json.dumps(list(first_frame)) + ',' + json.dumps(list(second_frame)) + ')') is True
             click('input')
-            browser.call('Input.insertText', {'text': 'A😀B'}, session)
+            # Three browser input events arrive before any actor response.
+            for text in ('A', '😀', 'B'):
+                browser.call('Input.insertText', {'text': text}, session)
             advance(3)
+            advance(4)
+            advance(5)
             assert snap()['value'] == 'A😀B', snap()
             actor.send(1, 'B1|:ui/click|3|-1|-1|0|0|')
             assert actor.line(time.monotonic() + 10) == b'REJECT'
-            assert snap()['revision'] == 3
+            assert snap()['revision'] == 5
             evaluate("document.querySelector('input').setSelectionRange(1,3,'backward')")
             browser.call('Input.insertText', {'text': 'X'}, session)
-            advance(4)
+            advance(6)
             state = snap()
-            assert state == {'revision': 4, 'value': 'AXB', 'focused': True, 'start': 2, 'end': 2}, state
+            assert state == {'revision': 6, 'value': 'AXB', 'focused': True, 'start': 2, 'end': 2}, state
             browser.call('Input.insertText', {'text': '日本'}, session)
-            advance(5)
+            advance(7)
             state = snap()
-            assert state == {'revision': 5, 'value': 'AX日本B', 'focused': True, 'start': 4, 'end': 4}, state
+            assert state == {'revision': 7, 'value': 'AX日本B', 'focused': True, 'start': 4, 'end': 4}, state
             actor.proc.stdin.write(b'0\n')
             actor.proc.stdin.flush()
             tail, _ = actor.proc.communicate(timeout=30)
             actor.log.extend(tail)
             assert actor.proc.returncode == 0, bytes(actor.log[-1000:])
             assert b':status :ok :result 0' in actor.log, bytes(actor.log[-1000:])
-            print(json.dumps({'chrome': version, 'frames': 5, 'stale_rejected': True, 'final': state}, ensure_ascii=False))
+            print(json.dumps({'chrome': version, 'frames': 7, 'stale_rejected': True, 'final': state}, ensure_ascii=False))
     finally:
         if browser is not None:
             browser.close()

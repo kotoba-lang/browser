@@ -8,6 +8,21 @@ window.nativeLive = {
   feed(bytes) { host.output(1, Uint8Array.from(bytes)); },
   take() { return events.shift() || null; },
   busy() { return busy; },
+  queueLimit(first, second) {
+    const div = document.createElement('div'); document.body.appendChild(div);
+    const writes = []; let refused = 0;
+    const instance = createLocalActorHost({mount:div, write:s => writes.push(s), onBusy:() => refused++});
+    instance.output(1, Uint8Array.from(first));
+    div.querySelector('button').click();
+    instance.output(1, Uint8Array.from(second));
+    const input = div.querySelector('input'); input.focus();
+    for (let i = 0; i < 34; i++) input.dispatchEvent(new InputEvent('beforeinput', {bubbles:true, cancelable:true, inputType:'insertText', data:'x'}));
+    input.dispatchEvent(new InputEvent('beforeinput', {bubbles:true, cancelable:true, inputType:'insertText', data:'x'.repeat(65537)}));
+    const pointer = new PointerEvent('pointerdown', {bubbles:true, cancelable:true});
+    input.dispatchEvent(pointer);
+    const ok = writes.length === 2 && refused === 3 && pointer.defaultPrevented && instance.state().waiting;
+    instance.close(); div.remove(); return ok;
+  },
   negative(first) {
     const enc = new TextEncoder();
     const cases = [enc.encode('REJECT\n'), enc.encode('FRAME 2 2\n[]'),
