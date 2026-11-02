@@ -86,15 +86,16 @@ export function createLocalActorHost({ mount, write, onBusy = () => {}, onError 
       write(size + '\n' + body);
     } catch (error) { fail(error); }
   }
-  function frame(rev, bytes) {
+  function frame(rev, bytes, shellLength = null) {
     if (!waiting || rev !== revision + 1 || !Number.isSafeInteger(rev)) throw new Error('unexpected actor revision');
-    const batches = JSON.parse(decoder.decode(bytes));
+    const batches = JSON.parse(decoder.decode(shellLength === null ? bytes : bytes.subarray(0, shellLength)));
+    const pageBatches = shellLength === null ? undefined : JSON.parse(decoder.decode(bytes.subarray(shellLength)));
     const completed = sent;
     if (completed && (completed.type === ':ui/composition-start' || completed.type === ':ui/composition-update')) {
       // Validate each projection on a detached tree, but keep the actual
       // composing input alive until the browser's compositionend.
       const detached = document.createElement('div');
-      const checked = commitLocalProjection(detached, batches);
+      const checked = commitLocalProjection(detached, batches, pageBatches);
       const input = detached.querySelector('input[data-role="address"]');
       if (!input || checked.resolve(input)?.id !== completed.target) throw new Error('composition target changed');
       revision = rev; waiting = false; sent = null;
@@ -107,7 +108,7 @@ export function createLocalActorHost({ mount, write, onBusy = () => {}, onError 
     }
     if (completed && completed.type === ':ui/composition-end') { finishingComposition = false; compositionTarget = 0; }
     if (unbind) { unbind(); unbind = null; }
-    projection = commitLocalProjection(mount, batches);
+    projection = commitLocalProjection(mount, batches, pageBatches);
     revision = rev;
     unbind = bindLocalInput(mount, projection, intent);
     waiting = false;
@@ -134,18 +135,21 @@ export function createLocalActorHost({ mount, write, onBusy = () => {}, onError 
         if (nl > MAX_HEADER) throw new Error('actor header limit');
         const header = decoder.decode(buffer.subarray(0, nl));
         const match = /^FRAME ([1-9][0-9]{0,15}) ([1-9][0-9]{0,6})$/.exec(header);
-        if (!match) throw new Error('invalid actor header');
-        const rev = Number(match[1]), length = Number(match[2]);
+        const page = /^PFRAME ([1-9][0-9]{0,15}) ([1-9][0-9]{0,6}) ([1-9][0-9]{0,6})$/.exec(header);
+        if (!match && !page) throw new Error('invalid actor header');
+        const fields = match || page;
+        const rev = Number(fields[1]), shellLength = Number(fields[2]);
+        const length = shellLength + (page ? Number(page[3]) : 0);
         if (!Number.isSafeInteger(rev) || length > MAX_FRAME) throw new Error('actor frame limit');
-        expected = { rev, length };
+        expected = { rev, length, shellLength: page ? shellLength : null };
         buffer = buffer.slice(nl + 1);
       }
       if (buffer.length < expected.length) return;
-      const { rev, length } = expected;
+      const { rev, length, shellLength } = expected;
       const bytes = buffer.slice(0, length);
       buffer = buffer.slice(length);
       expected = null;
-      frame(rev, bytes);
+      frame(rev, bytes, shellLength);
     }
   }
   return Object.freeze({

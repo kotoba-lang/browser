@@ -23,7 +23,7 @@ def main():
     fixture = root / 'test/browser-native/local_page_host.html'
     sources = [fixture, root / 'test/browser-native/local_page_host_test.js',
                root / 'test/browser-native/page_fixture.js', root / 'src/browser/local_page_host.js',
-               root / 'src/browser/local_dom_host.js']
+               root / 'src/browser/local_dom_host.js', root / 'src/browser/local_actor_host.js']
     wire_sha = None
     if args.wire:
         raw = args.wire.read_bytes()

@@ -1,5 +1,6 @@
 import { commitLocalPageProjection } from '../../src/browser/local_page_host.js';
 import { commitLocalProjection } from '../../src/browser/local_dom_host.js';
+import { createLocalActorHost } from '../../src/browser/local_actor_host.js';
 import batches from './page_fixture.js';
 const result = document.getElementById('result');
 try {
@@ -57,5 +58,35 @@ try {
     try { commitLocalProjection(shellMount, [missing], batches); } catch (_) { denied = true; }
     if (!denied || shellMount.firstChild !== beforeShell) throw new Error('missing page mount accepted');
   } finally { Element.prototype.attachShadow = attach; shellMount.remove(); }
+  const actorMount = document.createElement('div'); document.body.appendChild(actorMount);
+  const writes = []; let actorError = false, latestPage = null;
+  const instance = createLocalActorHost({mount:actorMount, write:x => writes.push(x), onError:() => { actorError = true; }});
+  const encoder = new TextEncoder();
+  const makeFrame = (revision, page) => {
+    const shellWire = JSON.stringify(shell), pageWire = JSON.stringify(page);
+    return encoder.encode(`PFRAME ${revision} ${encoder.encode(shellWire).length} ${encoder.encode(pageWire).length}\n${shellWire}${pageWire}`);
+  };
+  const originalAttach = Element.prototype.attachShadow;
+  Element.prototype.attachShadow = function(options) { const shadow = originalAttach.call(this, options); latestPage = shadow; return shadow; };
+  try {
+    const first = makeFrame(1, batches);
+    for (let i = 0; i < first.length; i += 17) instance.output(1, first.slice(i, i + 17));
+    if (instance.state().revision !== 1 || !latestPage.firstChild.isEqualNode(expected)) throw new Error('page actor frame mismatch');
+    const actorInput = actorMount.querySelector('input'); actorInput.focus();
+    actorInput.dispatchEvent(new InputEvent('beforeinput', {bubbles:true, cancelable:true, inputType:'insertText', data:'x'}));
+    if (writes.length !== 1 || !instance.state().waiting) throw new Error('page actor did not queue input');
+    instance.output(1, makeFrame(2, batches));
+    if (instance.state().revision !== 2 || !latestPage.firstChild.isEqualNode(expected)) throw new Error('page lost after input');
+    const stable = actorMount.firstChild;
+    actorMount.querySelector('input').dispatchEvent(new InputEvent('beforeinput', {bubbles:true, cancelable:true, inputType:'insertText', data:'y'}));
+    try { instance.output(1, makeFrame(3, [[[':dom/create-element',1,':script']]])); } catch (_) {}
+    if (!actorError || !instance.state().closed || actorMount.firstChild !== stable) throw new Error('bad actor page committed');
+  } finally { Element.prototype.attachShadow = originalAttach; actorMount.remove(); }
+  for (const header of ['PFRAME 1 1 0\n', 'PFRAME 1 900000 900000\n', 'PFRAME 01 1 1\n']) {
+    const badMount = document.createElement('div'); let rejected = false;
+    const invalid = createLocalActorHost({mount:badMount, write:() => {}, onError:() => { rejected = true; }});
+    try { invalid.output(1, encoder.encode(header)); } catch (_) {}
+    if (!rejected || !invalid.state().closed || badMount.childNodes.length) throw new Error('invalid actor page header accepted');
+  }
   result.textContent = 'PASS';
 } catch (error) { result.textContent = 'FAIL: ' + error.message; }
