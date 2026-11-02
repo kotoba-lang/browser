@@ -32,6 +32,9 @@ export function commitLocalPageProjection(root, batches, onLink = () => {}) {
       } else if (kind === ':dom/create-text') {
         if (op.length !== 3 || nodes.has(id)) throw new Error('invalid page text node');
         nodes.set(id, document.createTextNode(textOk(value)));
+      } else if (kind === ':dom/create-comment') {
+        if (op.length !== 3 || nodes.has(id)) throw new Error('invalid page comment node');
+        nodes.set(id, document.createComment(textOk(value)));
       } else if (kind === ':dom/set-root') {
         const node = nodes.get(id);
         if (op.length !== 2 || page || !(node instanceof HTMLDivElement) || parents.has(id)) throw new Error('invalid page root');

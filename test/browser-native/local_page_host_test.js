@@ -30,6 +30,15 @@ try {
     [':dom/append-child',3,4], [':dom/append-child',2,3], [':dom/append-child',1,2]]];
   commitLocalPageProjection(root, listOps);
   if (root.querySelector('ol > li')?.textContent !== 'one') throw new Error('list projection mismatch');
+  const commentOps = [[[':dom/create-element',1,':div'], [':dom/set-root',1],
+    [':dom/create-text',2,'before'], [':dom/create-comment',3,'猫 & <'], [':dom/create-text',4,'after'],
+    [':dom/append-child',1,2], [':dom/append-child',1,3], [':dom/append-child',1,4]]];
+  commitLocalPageProjection(root, commentOps);
+  const children = root.firstChild.childNodes;
+  if (children.length !== 3 || children[0].nodeType !== Node.TEXT_NODE || children[0].data !== 'before' ||
+      children[1].nodeType !== Node.COMMENT_NODE || children[1].data !== '猫 & <' ||
+      children[2].nodeType !== Node.TEXT_NODE || children[2].data !== 'after' ||
+      root.firstChild.textContent !== 'beforeafter') throw new Error('comment projection mismatch');
   commitLocalPageProjection(root, batches);
   const before = root.firstChild;
   {
@@ -46,6 +55,8 @@ try {
     if (tab.defaultPrevented) throw new Error('link trapped keyboard focus');
     if (seen.length) throw new Error('synthetic link gesture accepted');
   }
+  refuse([[[':dom/create-element', 1, ':div'], [':dom/set-root', 1], [':dom/create-comment', 2, 'x'], [':dom/create-text', 3, 'y'], [':dom/append-child', 2, 3], [':dom/append-child', 1, 2]]]);
+  refuse([[[':dom/create-element', 1, ':div'], [':dom/set-root', 1], [':dom/create-comment', 2, 42], [':dom/append-child', 1, 2]]]);
   refuse([[[':dom/create-element', 1, ':script'], [':dom/set-root', 1]]]);
   refuse([[[':dom/create-element', 1, ':div'], [':dom/set-root', 1], [':dom/set-attr', 1, ':onclick', 'alert(1)']]]);
   refuse([[[':dom/create-element', 1, ':div'], [':dom/set-root', 1], [':dom/set-attr', 1, ':href', 'https://example.com']]]);
