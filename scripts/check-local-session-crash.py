@@ -22,6 +22,7 @@ def main():
     args = parser.parse_args()
     out = args.output.resolve(); out.mkdir(parents=True, exist_ok=False)
     requests = []
+    pauses = []
     with tempfile.TemporaryDirectory(prefix='session-crash-', dir=out) as profile:
         def launch():
             browser = live.Pipe(str(args.browser.resolve(strict=True)), profile)
@@ -32,6 +33,7 @@ def main():
             def events():
                 result = list(browser.events); browser.events.clear()
                 for event in result:
+                    if event.get('method') == 'Debugger.paused': pauses.append(event)
                     if event.get('method') == 'Fetch.requestPaused':
                         requests.append(event['params']['request']['url'])
                         browser.send('Fetch.failRequest', {'requestId':event['params']['requestId'], 'errorReason':'BlockedByClient'}, event.get('sessionId'))
@@ -56,9 +58,10 @@ def main():
             paused = None
             while time.monotonic() < deadline:
                 browser.call('Browser.getVersion')
-                for event in events():
-                    if event.get('method') == 'Debugger.paused': paused = event
-                if paused: break
+                events()
+                if pauses:
+                    paused = pauses.pop(0)
+                    break
                 time.sleep(.05)
             if not paused: raise TimeoutError('transaction did not pause')
             assert paused['params']['callFrames'][0]['functionName'] == 'IDBObjectStore.put', paused
