@@ -35,6 +35,69 @@ jobs:
             ${{ runner.temp }}/local-page-host/*.html
             ${{ runner.temp }}/local-page-host/*.stderr
           if-no-files-found: warn
+  native-html-page-wire:
+    name: Build native HTML page wire
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: kotoba-lang/kotoba
+          ref: 496fab3774ec3820d465df8db7ff1fa6f6bf659b
+          path: _html
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: kotoba-lang/amu
+          ref: d4d6841f129d846db13393a469645e1ca91fb568
+          path: _amu
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: kotoba-lang/kotoba
+          ref: fad5749cfb69b2ffb4f15dfa5bfc372c220b1eb7
+          path: _dom
+          persist-credentials: false
+      - name: Build and run locked HTML fixture
+        run: >-
+          python3 _html/scripts/check-html-native.py --case html_fragment_wire
+          --compiler "$PWD/_amu/seed/bootstrap/aarch64-linux-static-root.elf"
+          --compiler-sha256 73350746c1f86dcfbe8cf47723bd7bb1e33ee28f0e08e40bef2dd2b196f5a09b
+          --runner-source "$PWD/_amu/seed/x86_64-kx64-runner.kotoba"
+          --dom "$PWD/_dom/lib/kotoba.domGpu" --output "$RUNNER_TEMP/html-page"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: native-html-page-wire
+          path: |
+            ${{ runner.temp }}/html-page/semantic-wire.json
+            ${{ runner.temp }}/html-page/receipt.json
+            ${{ runner.temp }}/html-page/html_fragment_wire.ksl
+          if-no-files-found: error
+  native-html-page-host:
+    name: Native HTML wire to Chrome page
+    needs: native-html-page-wire
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: native-html-page-wire
+          path: ${{ runner.temp }}/html-page
+      - name: Apply freshly generated HTML page
+        run: >-
+          python3 scripts/check-local-page-host.py --browser "$(command -v google-chrome)"
+          --wire "$RUNNER_TEMP/html-page/semantic-wire.json" --output "$RUNNER_TEMP/native-page-host"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: native-html-page-host
+          path: |
+            ${{ runner.temp }}/native-page-host/*.json
+            ${{ runner.temp }}/native-page-host/*.html
+          if-no-files-found: warn
   chrome-event-native:
     name: Chrome event to native state
     needs: offline-dom-host

@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import shutil
 from pathlib import Path
 import sys
 import tempfile
@@ -14,6 +15,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--browser', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path)
+    parser.add_argument('--wire', type=Path, help='fresh native-generated JSON operation batches')
     args = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
     output = args.output.resolve()
@@ -21,6 +23,19 @@ def main():
     fixture = root / 'test/browser-native/local_page_host.html'
     sources = [fixture, root / 'test/browser-native/local_page_host_test.js',
                root / 'test/browser-native/page_fixture.js', root / 'src/browser/local_page_host.js']
+    wire_sha = None
+    if args.wire:
+        raw = args.wire.read_bytes()
+        if len(raw) > 1048576 or not isinstance(json.loads(raw), list):
+            raise ValueError('invalid native page wire')
+        wire_sha = hashlib.sha256(raw).hexdigest()
+        stage = output / 'app'
+        for source in sources:
+            destination = stage / source.relative_to(root)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, destination)
+        fixture = stage / fixture.relative_to(root)
+        (fixture.parent / 'page_fixture.js').write_text('export default JSON.parse(' + json.dumps(raw.decode('utf-8')) + ');\n')
     sys.dont_write_bytecode = True
     spec = importlib.util.spec_from_file_location('native_live', root / 'scripts/check-local-native-live.py')
     module = importlib.util.module_from_spec(spec)
@@ -46,7 +61,8 @@ def main():
             browser.close()
     receipt = {'status': 'PASS_OFFLINE_PAGE_HOST_FIXTURE', 'browser': version,
                'sources': {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest() for p in sources},
-               'fixtureProvenance': 'checked-in captured native output; separately verify native source lock',
+               'fixtureProvenance': 'supplied wire; verify native source lock separately' if args.wire else 'checked-in captured native output',
+               'wireSha256': wire_sha,
                'notQualified': ['live parser integration', 'navigation', 'network consent', 'Kotoba layout', 'general HTML isolation']}
     (output / 'receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
     print(receipt['status'], receipt['browser'])
