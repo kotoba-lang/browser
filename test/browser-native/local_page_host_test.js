@@ -1,6 +1,7 @@
 import { commitLocalPageProjection } from '../../src/browser/local_page_host.js';
 import { commitLocalProjection } from '../../src/browser/local_dom_host.js';
 import { createLocalActorHost } from '../../src/browser/local_actor_host.js';
+import { createLocalWorkerActor } from '../../src/browser/local_worker_actor.js';
 import batches from './page_fixture.js';
 import nativeFrame from './page_frame_fixture.js';
 const result = document.getElementById('result');
@@ -373,6 +374,46 @@ try {
     try { host.output(1, encoder.encode(`FRAME 2 ${encoder.encode(body).length}\n${body}`)); } catch (_) {}
     if (!await pending || !host.state().closed) throw new Error('wrong snapshot acknowledgement accepted');
     div.remove();
+  }
+  {
+    class FakeWorker extends EventTarget {
+      constructor() { super(); this.messages = []; this.terminated = false; }
+      postMessage(message) { this.messages.push(message); }
+      terminate() { this.terminated = true; }
+      send(data) { this.dispatchEvent(new MessageEvent('message', {data})); }
+    }
+    const module = await WebAssembly.compile(Uint8Array.from([0,97,115,109,1,0,0,0]));
+    const worker = new FakeWorker(), div = document.createElement('div'); document.body.appendChild(div);
+    const writes = [], errors = []; let output, disposed = false, stopped = false;
+    const actor = createLocalWorkerActor({mount:div, worker, module, fuel:1000,
+      createStdio:(_, options) => { output = options.onOutput; return {write:x => writes.push(x), dispose:() => {disposed = true;}}; },
+      onError:e => errors.push(e), onStop:() => {stopped = true;}});
+    const boot = worker.messages[0];
+    if (boot.module !== module || !boot.localStdio || !boot.localOutputAck || boot.allow.join(',') !== '37,39,41' || boot.bind.length) throw new Error('unsafe Worker configuration');
+    const body = JSON.stringify(shell); output(1, encoder.encode(`FRAME 1 ${encoder.encode(body).length}\n${body}`));
+    const pending = actor.host.requestSnapshot();
+    if (writes[0] !== '4\nS1|1') throw new Error('Worker stdin not connected');
+    output(1, encoder.encode('SFRAME 1 6\nBSS1|x'));
+    if ((await pending).wire !== 'BSS1|x') throw new Error('Worker stdout not connected');
+    actor.close();
+    if (writes.at(-1) !== '0\n' || worker.terminated) throw new Error('Worker shutdown mismatch');
+    output(1, encoder.encode('{:status :ok :result 0}\n'));
+    worker.send({exit:0, stdout:'', stderr:'', wasmTrap:null, report:'{:status :ok :result 0 :fuel {}}'});
+    if (!stopped || !disposed || !worker.terminated || errors.length) throw new Error('Worker completion mismatch');
+    div.remove();
+    const rejected = new FakeWorker(), rejectedMount = document.createElement('div'); let refused = false;
+    const blocked = createLocalWorkerActor({mount:rejectedMount, worker:rejected, module, fuel:1000,
+      createStdio:() => ({write:() => {}, dispose:() => {}}), onError:() => {refused = true;}});
+    rejected.send({cap:{wire:45}});
+    if (!refused || !rejected.terminated || !blocked.host.state().closed) throw new Error('Worker service request accepted');
+    for (const bad of [{localOutput:{fd:1,bytes:new Uint8Array()}}, {exit:0,stdout:'',stderr:'',wasmTrap:null,report:'{:status :ok :result 1}'}]) {
+      const other = new FakeWorker(); let rejected = false;
+      const wrapped = createLocalWorkerActor({mount:document.createElement('div'), worker:other, module, fuel:1000,
+        createStdio:() => ({write:() => {}, dispose:() => {}}), onError:() => {rejected = true;}});
+      if (bad.exit === 0) wrapped.close();
+      other.send(bad);
+      if (!rejected || !other.terminated) throw new Error('invalid Worker message accepted');
+    }
   }
   if (nativeFrame !== null) {
     const nativeMount = document.createElement('div'); document.body.appendChild(nativeMount);

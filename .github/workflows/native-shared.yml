@@ -24,6 +24,17 @@ jobs:
         run: python3 scripts/check-local-page-host.py --browser "$(command -v google-chrome)" --output "$RUNNER_TEMP/local-page-host"
       - name: Verify IndexedDB recovery after Chrome process interruption
         run: python3 scripts/check-local-session-crash.py --browser "$(command -v google-chrome)" --output "$RUNNER_TEMP/session-crash"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: kotoba-lang/amu
+          ref: 06439c784f72d0078bc4d4ade65a338e6d4bf2ee
+          path: _amu-worker
+          persist-credentials: false
+      - name: Verify Browser actor integration with pinned Amu stdio
+        run: >-
+          python3 scripts/check-local-worker-actor.py --browser "$(command -v google-chrome)"
+          --stdio "$PWD/_amu-worker/runtime/wasm32-browser-local-stdio.js"
+          --output "$RUNNER_TEMP/worker-actor"
       - name: Validate synthetic HTML responses
         run: python3 scripts/check-local-html-response.py --browser "$(command -v google-chrome)" --output "$RUNNER_TEMP/html-response"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -62,6 +73,7 @@ jobs:
             ${{ runner.temp }}/local-page-host/*.stderr
             ${{ runner.temp }}/html-response/*.json
             ${{ runner.temp }}/session-crash/receipt.json
+            ${{ runner.temp }}/worker-actor/receipt.json
             ${{ runner.temp }}/broker-response/*.json
             ${{ runner.temp }}/broker-https/receipt.json
             ${{ runner.temp }}/broker-https-negative/negative-receipt.json
