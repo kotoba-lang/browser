@@ -20,6 +20,8 @@ jobs:
           persist-credentials: false
       - name: Validate detached DOM transactions
         run: python3 scripts/check-local-dom-host.py --browser "$(command -v google-chrome)" --output "$RUNNER_TEMP/local-dom-host"
+      - name: Validate isolated page transactions
+        run: python3 scripts/check-local-page-host.py --browser "$(command -v google-chrome)" --output "$RUNNER_TEMP/local-page-host"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
@@ -29,6 +31,9 @@ jobs:
             ${{ runner.temp }}/local-dom-host/*.html
             ${{ runner.temp }}/local-dom-host/*.stderr
             ${{ runner.temp }}/local-dom-host/event-wire.txt
+            ${{ runner.temp }}/local-page-host/*.json
+            ${{ runner.temp }}/local-page-host/*.html
+            ${{ runner.temp }}/local-page-host/*.stderr
           if-no-files-found: warn
   chrome-event-native:
     name: Chrome event to native state
