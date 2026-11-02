@@ -34,9 +34,10 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          repository: kotoba-lang/dom-gpu
-          ref: c0be10ca6b0089e5fbe061eb76a6c23e61f61b22
-          path: _shared/dom
+          # Draft dependency: kotoba PR #1173, not yet merged.
+          repository: kotoba-lang/kotoba
+          ref: f9b8786204e1275cb3d3d217117869460009a656
+          path: _shared/domowner
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -62,58 +63,64 @@ jobs:
         run: python3 _native/amu/scripts/seed/check-x86-project-native.py --compiler "$PWD/_native/amu/bin/amu" --output "$RUNNER_TEMP/project-native"
       - name: Execute current owner source on ARM
         if: matrix.target == 'arm64'
-        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/dom" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case text-edit --output "$RUNNER_TEMP/owner-native"
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case text-edit --output "$RUNNER_TEMP/owner-native"
       - name: Execute current owner source on x86
         if: matrix.target == 'x86_64'
-        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/dom" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case text-edit --output "$RUNNER_TEMP/owner-native"
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case text-edit --output "$RUNNER_TEMP/owner-native"
       - name: Execute shared tab model on ARM
         if: matrix.target == 'arm64'
-        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/dom" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case chrome --output "$RUNNER_TEMP/chrome-native"
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case chrome --output "$RUNNER_TEMP/chrome-native"
       - name: Execute shared tab model on x86
         if: matrix.target == 'x86_64'
-        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/dom" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case chrome --output "$RUNNER_TEMP/chrome-native"
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case chrome --output "$RUNNER_TEMP/chrome-native"
       - name: Execute shared origin model on ARM
         if: matrix.target == 'arm64'
-        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/dom" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case origin --output "$RUNNER_TEMP/origin-native"
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case origin --output "$RUNNER_TEMP/origin-native"
       - name: Execute shared origin model on x86
         if: matrix.target == 'x86_64'
-        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/dom" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case origin --output "$RUNNER_TEMP/origin-native"
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case origin --output "$RUNNER_TEMP/origin-native"
       - name: Execute shared storage model on ARM
         if: matrix.target == 'arm64'
-        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/dom" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case storage --output "$RUNNER_TEMP/storage-native"
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case storage --output "$RUNNER_TEMP/storage-native"
       - name: Execute shared storage model on x86
         if: matrix.target == 'x86_64'
-        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/dom" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case storage --output "$RUNNER_TEMP/storage-native"
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case storage --output "$RUNNER_TEMP/storage-native"
       - name: Execute local session on ARM
         if: matrix.target == 'arm64'
-        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/dom" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-session --output "$RUNNER_TEMP/session-native"
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-session --output "$RUNNER_TEMP/session-native"
       - name: Execute local session on x86
         if: matrix.target == 'x86_64'
-        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/dom" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-session --output "$RUNNER_TEMP/session-native"
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-session --output "$RUNNER_TEMP/session-native"
       - name: Execute local view on ARM
         if: matrix.target == 'arm64'
-        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/dom" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-view --output "$RUNNER_TEMP/view-native"
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-view --output "$RUNNER_TEMP/view-native"
       - name: Execute local view on x86
         if: matrix.target == 'x86_64'
-        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/dom" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-view --output "$RUNNER_TEMP/view-native"
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-view --output "$RUNNER_TEMP/view-native"
       - name: Execute local text page on ARM
         if: matrix.target == 'arm64'
-        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/dom" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-text-view --output "$RUNNER_TEMP/text-view-native"
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-text-view --output "$RUNNER_TEMP/text-view-native"
       - name: Execute local text page on x86
         if: matrix.target == 'x86_64'
-        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/dom" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-text-view --output "$RUNNER_TEMP/text-view-native"
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-text-view --output "$RUNNER_TEMP/text-view-native"
+      - name: Execute multi-tab text page on ARM
+        if: matrix.target == 'arm64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-multitab-text --output "$RUNNER_TEMP/multitab-text-native"
+      - name: Execute multi-tab text page on x86
+        if: matrix.target == 'x86_64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-multitab-text --output "$RUNNER_TEMP/multitab-text-native"
       - name: Execute local controller on ARM
         if: matrix.target == 'arm64'
-        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/dom" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-controller --output "$RUNNER_TEMP/controller-native"
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-controller --output "$RUNNER_TEMP/controller-native"
       - name: Execute local controller on x86
         if: matrix.target == 'x86_64'
-        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/dom" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-controller --output "$RUNNER_TEMP/controller-native"
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-controller --output "$RUNNER_TEMP/controller-native"
       - name: Execute local DOM events on ARM
         if: matrix.target == 'arm64'
-        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/dom" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-dom-events --output "$RUNNER_TEMP/dom-events-native"
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-dom-events --output "$RUNNER_TEMP/dom-events-native"
       - name: Execute local DOM events on x86
         if: matrix.target == 'x86_64'
-        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/dom" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-dom-events --output "$RUNNER_TEMP/dom-events-native"
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-dom-events --output "$RUNNER_TEMP/dom-events-native"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
@@ -147,6 +154,10 @@ jobs:
             ${{ runner.temp }}/text-view-native/*.ksl
             ${{ runner.temp }}/text-view-native/*.stdout
             ${{ runner.temp }}/text-view-native/*.stderr
+            ${{ runner.temp }}/multitab-text-native/*.json
+            ${{ runner.temp }}/multitab-text-native/*.ksl
+            ${{ runner.temp }}/multitab-text-native/*.stdout
+            ${{ runner.temp }}/multitab-text-native/*.stderr
             ${{ runner.temp }}/controller-native/*.json
             ${{ runner.temp }}/controller-native/*.ksl
             ${{ runner.temp }}/controller-native/*.stdout
