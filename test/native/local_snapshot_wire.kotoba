@@ -1,0 +1,10 @@
+(ns browser.native-snapshot-wire-test
+  (:require [browser.local-session :as session] [browser.local-snapshot :as snapshot])
+  (:capabilities [:io/write]) (:export [main]))
+(defn main [] :i64
+  (let [opened (session/open-tab (session/empty-session "local") "https://example.test/猫")
+        confirmed (session/confirm-navigation opened "tab-1" 1 "https://example.test/猫")
+        value (snapshot/snapshot confirmed)]
+    (if (not (option-some?-of [:option :document] value)) 1
+      (let [wire (document-edn-print (option-or value (document-null)))
+            sent (typed-cap-call :io/write :string :string (string-concat "SNAP " (string-concat wire "\n")))] 0))))

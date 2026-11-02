@@ -133,6 +133,30 @@ jobs:
           --browser "$PWD" --dom "$PWD/_dom/lib/kotoba.domGpu"
           --text "$PWD/_text/lib/kotoba.text" --html "$PWD/_html/lib/kotoba.htmldom"
           --output "$RUNNER_TEMP/html-actor"
+      - name: Generate native session snapshot fixture
+        run: >-
+          python3 scripts/check-shared-native.py --case local-snapshot-wire
+          --compiler "$PWD/_amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64
+          --runner-source "$PWD/_amu/seed/x86_64-kx64-runner.kotoba"
+          --browser "$PWD" --dom "$PWD/_dom/lib/kotoba.domGpu" --text "$PWD/_text/lib/kotoba.text"
+          --output "$RUNNER_TEMP/snapshot-wire"
+      - name: Build native session restore fixture
+        run: >-
+          python3 scripts/check-shared-native.py --case local-snapshot-read
+          --event-wire "$RUNNER_TEMP/snapshot-wire/snapshot.edn"
+          --compiler "$PWD/_amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64
+          --runner-source "$PWD/_amu/seed/x86_64-kx64-runner.kotoba"
+          --browser "$PWD" --dom "$PWD/_dom/lib/kotoba.domGpu" --text "$PWD/_text/lib/kotoba.text"
+          --output "$RUNNER_TEMP/snapshot-reader"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: native-session-fixtures
+          path: |
+            ${{ runner.temp }}/snapshot-wire/snapshot.edn
+            ${{ runner.temp }}/snapshot-wire/shared-native.json
+            ${{ runner.temp }}/snapshot-reader/local-snapshot-read.elf
+            ${{ runner.temp }}/snapshot-reader/shared-native.json
+          if-no-files-found: error
       - name: Compare independent wire output
         run: |
           python3 - <<'PYCODE'
@@ -169,6 +193,25 @@ jobs:
         with:
           name: native-html-page-wire
           path: ${{ runner.temp }}/html-page
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: native-session-fixtures
+          path: ${{ runner.temp }}/session-fixtures
+      - name: Store native session snapshot and restart Chrome
+        run: >-
+          python3 scripts/check-local-session-store.py --browser "$(command -v google-chrome)"
+          --snapshot-file "$RUNNER_TEMP/session-fixtures/snapshot-wire/snapshot.edn"
+          --restored-file "$RUNNER_TEMP/session-restored.edn" --output "$RUNNER_TEMP/session-store"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: native-session-roundtrip
+          path: |
+            ${{ runner.temp }}/session-fixtures/snapshot-wire/snapshot.edn
+            ${{ runner.temp }}/session-fixtures/snapshot-reader/local-snapshot-read.elf
+            ${{ runner.temp }}/session-fixtures/snapshot-reader/shared-native.json
+            ${{ runner.temp }}/session-restored.edn
+            ${{ runner.temp }}/session-store/receipt.json
+          if-no-files-found: error
       - name: Apply freshly generated HTML page
         run: >-
           python3 scripts/check-local-page-host.py --browser "$(command -v google-chrome)"
@@ -181,6 +224,35 @@ jobs:
             ${{ runner.temp }}/native-page-host/*.json
             ${{ runner.temp }}/native-page-host/*.html
           if-no-files-found: warn
+  native-session-restoration-fixture:
+    name: Restore IndexedDB fixture in native process
+    needs: native-html-page-host
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: native-session-roundtrip
+          path: ${{ runner.temp }}/roundtrip
+      - name: Verify fixture bytes and restore
+        run: |
+          python3 - <<'PYCODE'
+          import hashlib, json, os, re, subprocess
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP']) / 'roundtrip'
+          original = (root / 'session-fixtures/snapshot-wire/snapshot.edn').read_bytes()
+          restored = (root / 'session-restored.edn').read_bytes()
+          receipt = json.loads((root / 'session-fixtures/snapshot-reader/shared-native.json').read_text())
+          image = root / 'session-fixtures/snapshot-reader/local-snapshot-read.elf'
+          case = receipt['cases'][0]
+          assert original == restored and case['inputSnapshot']['sha256'] == hashlib.sha256(restored).hexdigest()
+          assert case['executable']['sha256'] == hashlib.sha256(image.read_bytes()).hexdigest()
+          image.chmod(0o755)
+          env = dict(PATH='/nonexistent', KEXE_STACK_BYTES='8388608', KEXE_ALLOW='38', KEXE_STRUCTURED_REPORT='1')
+          run = subprocess.run([str(image), restored.decode('utf-8')], env=env, capture_output=True, timeout=60)
+          assert run.returncode == 0 and not run.stderr and re.search(rb':status :ok :result 0(?:\s|})', run.stdout), (run.returncode, run.stdout, run.stderr)
+          print('PASS_NATIVE_SESSION_FIXTURE_ROUNDTRIP')
+          PYCODE
   chrome-event-native:
     name: Chrome event to native state
     needs: offline-dom-host
