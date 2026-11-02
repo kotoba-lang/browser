@@ -211,9 +211,14 @@ export function bindLocalInput(container, projection, deliver) {
   }
   const types = ["click", "beforeinput", "paste", "keydown", "compositionstart", "compositionupdate", "compositionend"];
   for (const type of types) container.addEventListener(type, route);
-  return () => {
-    if (activeComposition.size) throw new Error("composition in progress");
+  let stopped = false;
+  return (cancelComposition = false) => {
+    if (stopped) return;
+    if (activeComposition.size && cancelComposition !== true) throw new Error("composition in progress");
+    for (const node of activeComposition) composing.delete(node);
+    activeComposition.clear();
     for (const type of types) container.removeEventListener(type, route);
     boundContainers.delete(container);
+    stopped = true;
   };
 }

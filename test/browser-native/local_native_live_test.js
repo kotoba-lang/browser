@@ -26,6 +26,30 @@ window.nativeLive = {
     const ok = writes.length === 2 && refused === 3 && pointer.defaultPrevented && instance.state().waiting;
     instance.close(); div.remove(); return ok;
   },
+  compositionCleanup(first) {
+    return ['close', 'error'].every(mode => {
+      const div = document.createElement('div'); document.body.appendChild(div);
+      const writes = []; let errors = 0;
+      const instance = createLocalActorHost({mount:div, write:s => writes.push(s), onError:() => errors++});
+      instance.output(1, Uint8Array.from(first));
+      const input = div.querySelector('input'); input.focus();
+      input.dispatchEvent(new CompositionEvent('compositionstart', {bubbles:true}));
+      if (mode === 'close') instance.close();
+      else { try { instance.output(1, new TextEncoder().encode('bad\n')); } catch (_) {} }
+      const written = writes.length;
+      input.dispatchEvent(new CompositionEvent('compositionend', {bubbles:true, data:'語'}));
+      let reused = false;
+      try {
+        const next = createLocalActorHost({mount:div, write:() => {}});
+        next.output(1, Uint8Array.from(first));
+        reused = true;
+        next.close();
+      } catch (_) {}
+      const ok = instance.state().closed && writes.length === written && reused &&
+        (mode === 'error' ? errors === 1 : errors === 0 && writes.at(-1) === '0\n');
+      div.remove(); return ok;
+    });
+  },
   negative(first) {
     const enc = new TextEncoder();
     const cases = [enc.encode('REJECT\n'), enc.encode('FRAME 2 2\n[]'),

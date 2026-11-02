@@ -135,6 +135,20 @@ try {
   newAddress.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: "日本" }));
   commitLocalProjection(mount, nextBatches);
   stopComposition();
+  const cleanProjection = commitLocalProjection(mount, nextBatches);
+  const cleanAddress = mount.querySelector('[data-role="address"]');
+  let staleEvents = 0;
+  const cancelBinding = bindLocalInput(mount, cleanProjection, () => staleEvents++);
+  cleanAddress.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+  cancelBinding(true);
+  const replacement = bindLocalInput(mount, cleanProjection, () => {});
+  cancelBinding(true); // An old disposer must not remove a newer binding.
+  let stillBound = false;
+  try { bindLocalInput(mount, cleanProjection, () => {}); } catch (_) { stillBound = true; }
+  cleanAddress.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+  check(stillBound && staleEvents === 1, "forced composition cleanup and stale disposer");
+  replacement();
+  commitLocalProjection(mount, nextBatches);
   check(firstFocus.resolve(oldAddress) === null, "old focused input stale");
   result.textContent = "PASS";
 } catch (error) {

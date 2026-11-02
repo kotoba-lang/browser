@@ -34,7 +34,7 @@ export function createLocalActorHost({ mount, write, onBusy = () => {}, onError 
       mount.removeEventListener('pointerdown', holdSelection, true);
       pendingText = []; pendingBytes = 0;
       pendingComposition = []; compositionBytes = 0;
-      if (unbind) { try { unbind(); } catch (_) { /* active composition requires owner cleanup */ } }
+      if (unbind) { unbind(true); unbind = null; }
       onError(error);
     }
     throw error;
@@ -161,7 +161,7 @@ export function createLocalActorHost({ mount, write, onBusy = () => {}, onError 
     },
     close() {
       if (closed) return;
-      if (unbind) unbind();
+      if (unbind) { unbind(true); unbind = null; }
       closed = true;
       mount.removeEventListener('pointerdown', holdSelection, true);
       buffer = new Uint8Array(); pendingText = []; pendingBytes = 0;
