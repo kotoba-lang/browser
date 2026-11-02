@@ -1,0 +1,53 @@
+(ns browser.local-dom-events
+  (:require [browser.local-view :as view]
+            [browser.local-controller :as controller])
+  (:export [dispatch]))
+
+;; This bridge accepts normalized UI events against the exact last rendered
+;; document. It cannot accept network responses or grant authority.
+(defn field [d :document k :keyword] :document
+  (option-or (document-get d k) (document-null)))
+(defn item [d :document i :i64] :document
+  (option-or (document-vector-at d i) (document-null)))
+(defn keyword-value [d :document] :keyword
+  (option-or (document-keyword-value d) :unknown))
+(defn text [d :document] :string
+  (option-or (document-string-value d) ""))
+
+(defn input-action [kind :keyword] :keyword
+  (cond (= kind :ui/text) :address/insert
+        (= kind :ui/backspace) :address/backspace
+        (= kind :ui/move) :address/move
+        (= kind :ui/select-all) :address/select-all
+        (= kind :ui/composition-start) :address/composition-start
+        (= kind :ui/composition-update) :address/composition-update
+        (= kind :ui/composition-end) :address/composition-end
+        (= kind :ui/submit) :address/submit
+        :else :unknown))
+
+(defn dispatch [state :document snapshot :document event :document] :document
+  (if (or (not= (document-kind event) :map)
+          (not (document-equal? snapshot (view/render state)))) state
+    (let [id (option-or (document-i64-value (field event :target)) 0)
+          nodes (field snapshot :nodes)]
+      (if (or (<= id 0) (> id (document-count nodes))) state
+        (let [node (item nodes (- id 1))
+              tag (keyword-value (field node :tag))
+              attrs (field node :attrs)
+              kind (keyword-value (field event :type))]
+          (if (not= (document-kind attrs) :map) state
+            (cond
+              (and (= kind :ui/click) (= tag :button)
+                   (= (keyword-value (field attrs :data-action)) :tab/new))
+              (controller/dispatch state (document-map :type (document-keyword :tab/new)))
+
+              (and (= kind :ui/click) (= tag :button)
+                   (option-some?-of [:option :string] (document-string-value (field attrs :data-tab-id))))
+              (controller/dispatch state (document-map :type (document-keyword :tab/focus)
+                                                        :text (field attrs :data-tab-id)))
+
+              (and (= tag :input) (string=? (text (field attrs :data-role)) "address")
+                   (not= (input-action kind) :unknown))
+              (controller/dispatch state (document-assoc event :type (document-keyword (input-action kind))))
+
+              :else state)))))))

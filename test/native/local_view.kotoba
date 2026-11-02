@@ -31,9 +31,9 @@
         input (item children 1)
         page (item children 2)
         consumed (dom/consume-ops rendered)]
-    (cond (not= (document-count (field empty-nav :children)) 0) 1
+    (cond (not= (document-count (field empty-nav :children)) 1) 1
           (not= (document-count children) 3) 2
-          (not= (document-count tabs) 2) 3
+          (not= (document-count tabs) 3) 3
           (not (bool (field (field tab1 :attrs) :aria-selected))) 4
           (bool (field (field tab2 :attrs) :aria-selected)) 5
           (not (string=? (text (item (field tab1 :children) 0)) "https://one.example/")) 6
