@@ -62,8 +62,8 @@ def run(args):
             fixture = ROOT / 'test/browser-native/local_html_live.html'
             # Exercise implicit paragraph and list-item endings in the native
             # parser before applying the resulting wire to the page host.
-            html = '<div><div><div><div><section><h1>Hi <em>世界</em></h1><p><strong>重要</strong> <code>x</code><ul><li>一<li>二</ul><a href="/next">Again</a><a href="javascript:alert(1)">Unsafe</a></section></div></div></div></div>'
-            next_html = '<section><h1>Next page</h1><p>Second document</p></section>'
+            html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>猫 &amp; 犬</title></head><body><div><div><div><div><section><h1>Hi <em>世界</em></h1><p><strong>重要</strong> <code>x</code><ul><li>一<li>二</ul><a href="/next">Again</a><a href="javascript:alert(1)">Unsafe</a></section></div></div></div></div></body></html>'
+            next_html = '<!doctype html><html><head><title>Next</title></head><body><section><h1>Next page</h1><p>Second document</p></section></body></html>'
             if args.broker:
                 broker_bytes = args.broker.read_bytes()
                 assert hashlib.sha256(broker_bytes).hexdigest() == '7f760128c3a58098123c31ec3dd34b9c871932e3933f2c952facc4ab0e647212'
@@ -204,6 +204,7 @@ def run(args):
             actor.proc.stdin.write(response.encode('utf-8')); actor.proc.stdin.flush()
             present(frame(response_revision + 1))
             assert snap() == {'url':url, 'page':'Hi 世界重要 x一二AgainUnsafe', 'tabs':1}, snap()
+            assert evaluate('window.htmlLive.tabTitle()') == '猫 & 犬'
             assert evaluate('window.htmlLive.listItems()') == ['一', '二']
             assert evaluate('window.htmlLive.deepStructure()') is True
             current = response_revision + 1
@@ -233,7 +234,7 @@ def run(args):
                 browser.call('Input.dispatchKeyEvent', {'type':'keyUp', 'key':'Enter', 'code':'Enter', 'windowsVirtualKeyCode':13}, session)
                 keyboard = advance(current + 1); current += 1
                 assert keyboard[2] == {'tab':'tab-1', 'generation':4, 'url':next_url}, keyboard[2]
-                def accept_notice(notice, revision, expected_url, expected_page):
+                def accept_notice(notice, revision, expected_url, expected_page, expected_title):
                     nonlocal phase
                     count = len(requests)
                     phase = 'allow-navigation'; evaluate(broker_call(notice, revision))
@@ -247,8 +248,9 @@ def run(args):
                     actor.proc.stdin.write(take().encode('utf-8')); actor.proc.stdin.flush()
                     present(frame(revision + 1))
                     assert snap() == {'url':expected_url, 'page':expected_page, 'tabs':1}, snap()
+                    assert evaluate('window.htmlLive.tabTitle()') == expected_title
                     return revision + 1
-                current = accept_notice(keyboard[2], current, next_url, 'Next pageSecond document')
+                current = accept_notice(keyboard[2], current, next_url, 'Next pageSecond document', 'Next')
                 click('button[data-action=":history/back"]')
                 back = advance(current + 1); current += 1
                 assert back[2] == {'tab':'tab-1', 'generation':5, 'url':url}
@@ -263,15 +265,15 @@ def run(args):
                 click('button[data-action=":history/back"]')
                 back = advance(current + 1); current += 1
                 assert back[2] == {'tab':'tab-1', 'generation':6, 'url':url}
-                current = accept_notice(back[2], current, url, 'Hi 世界重要 x一二AgainUnsafe')
+                current = accept_notice(back[2], current, url, 'Hi 世界重要 x一二AgainUnsafe', '猫 & 犬')
                 click('button[data-action=":history/forward"]')
                 forward = advance(current + 1); current += 1
                 assert forward[2] == {'tab':'tab-1', 'generation':7, 'url':next_url}
-                current = accept_notice(forward[2], current, next_url, 'Next pageSecond document')
+                current = accept_notice(forward[2], current, next_url, 'Next pageSecond document', 'Next')
                 click('button[data-action=":history/back"]')
                 back = advance(current + 1); current += 1
                 assert back[2] == {'tab':'tab-1', 'generation':8, 'url':url}
-                current = accept_notice(back[2], current, url, 'Hi 世界重要 x一二AgainUnsafe')
+                current = accept_notice(back[2], current, url, 'Hi 世界重要 x一二AgainUnsafe', '猫 & 犬')
                 assert len(requests) == 5 and all(not any(h in request['headers'] for h in ('authorization','cookie','referer')) for request in requests)
             click('input'); browser.call('Input.insertText', {'text':'x'}, session); present_frame = advance(current + 1)
             assert present_frame[1] is not None and snap()['page'] == 'Hi 世界重要 x一二AgainUnsafe'

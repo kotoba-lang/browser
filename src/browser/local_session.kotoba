@@ -6,7 +6,7 @@
             pending-generation request-history request-link confirm-navigation confirm-text-navigation cancel-navigation
             address-insert address-backspace address-delete address-select address-move address-select-all
             address-composition-start address-composition-update address-composition-end
-            active-url active-html-page remember-html-page put-value get-value delete-value]))
+            active-url active-html-page remember-html-page set-page-title put-value get-value delete-value]))
 
 ;; Pure local state only. A navigation intent is data, not permission to fetch.
 (defn field [d :document key :keyword] :document
@@ -266,6 +266,10 @@
     (if (or (string=? url "") (not (string=? committed url)) (string=? wire "")) session
       (document-assoc session :session/html-pages
                       (document-assoc (html-pages session) (document-string tab-id) (document-string wire))))))
+
+(defn set-page-title [session :document tab-id :string title :string] :document
+  (document-assoc session :session/chrome
+                  (chrome/finish-navigation (field session :session/chrome) tab-id title :idle)))
 
 (defn active-html-page [session :document] [:option :string]
   (let [state (field session :session/chrome)

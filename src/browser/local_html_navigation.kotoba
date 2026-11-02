@@ -15,9 +15,12 @@
     (if (or (<= generation 0) (not= generation (session/pending-generation state tab))
             (not (string=? url (text (field pending :url)))))
       (result :html-navigation/stale state (document-null))
-      (let [wire (html/encode body)]
-        (if (not (option-some?-of [:option :string] wire))
+      (let [page (html/encode-page body)]
+        (if (not (option-some?-of [:option :document] page))
           (result :html-navigation/unsupported state (document-null))
-          (let [value (option-or wire "") confirmed (session/confirm-navigation state tab generation url)]
-            (result :html-navigation/ok (session/remember-html-page confirmed tab url value)
-                    (document-string value))))))))
+          (let [decoded (option-or page (document-null)) value (text (field decoded :wire))
+                confirmed (session/confirm-navigation state tab generation url)]
+            (if (document-equal? confirmed state) (result :html-navigation/stale state (document-null))
+              (let [titled (session/set-page-title confirmed tab (text (field decoded :title)))]
+                (result :html-navigation/ok (session/remember-html-page titled tab url value)
+                        (document-string value))))))))))

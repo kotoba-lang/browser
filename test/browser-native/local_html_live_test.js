@@ -32,6 +32,7 @@ window.htmlLive = {
   },
   syntheticLink() { page?.querySelector('a')?.click(); return events.length; },
   focusLink() { const a = page?.querySelector('a'); a?.focus(); return !!a && page.activeElement === a; },
+  tabTitle() { return mount.querySelector('[data-tab-id="tab-1"]')?.textContent ?? null; },
   snapshot() {
     const input = mount.querySelector('input');
     return {url: input?.value ?? null, page: page?.textContent ?? null, tabs: mount.querySelectorAll('nav [data-tab-id]').length};
