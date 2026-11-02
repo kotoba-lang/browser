@@ -53,7 +53,8 @@ def main(a):
     for name, owner, filename in [('text', a.text, 'text.kotoba'),
                                    ('dom', a.dom, 'dom.kotoba'),
                                    ('text-edit', a.browser, 'text-edit.kotoba'),
-                                   ('chrome', a.browser, 'chrome.kotoba')]:
+                                   ('chrome', a.browser, 'chrome.kotoba'),
+                                   ('origin', a.browser, 'origin.kotoba')]:
         if a.case and name != a.case:
             continue
         entry = (owner / 'test/native' / filename).resolve()
@@ -95,7 +96,7 @@ def main(a):
                           lock=pin(lock), sources={str(path): pin(path) for path in files}))
         (out / 'shared-native.json').write_text(json.dumps(dict(status='PASS_SHARED_COMPONENTS_NATIVE',
             target=a.target, host=[platform.system(), machine, platform.release()], compiler=pin(compiler),
-            cases=cases, complete=len(cases) == 4, emulation=False, kernelDesktopQualified=False,
+            cases=cases, complete=len(cases) == 5, emulation=False, kernelDesktopQualified=False,
             cssomQualified=False, itonamiDappsQualified=False, restorationQualified=False), indent=2) + '\n')
     print('PASS_SHARED_COMPONENTS_NATIVE', a.target, len(cases), flush=True)
 
@@ -110,7 +111,7 @@ if __name__ == '__main__':
     p.add_argument('--dom', type=Path, required=True)
     p.add_argument('--text', type=Path, required=True)
     p.add_argument('--output', type=Path, required=True)
-    p.add_argument('--case', choices=['text', 'dom', 'text-edit', 'chrome'])
+    p.add_argument('--case', choices=['text', 'dom', 'text-edit', 'chrome', 'origin'])
     a = p.parse_args()
     assert a.runner_source if a.target == 'arm64' else a.runner
     main(a)

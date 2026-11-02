@@ -1,0 +1,15 @@
+(ns browser.native-origin-test
+  (:require [browser-origin :as origin])
+  (:export [main]))
+
+;; The origin subset must scan whole UTF-8 code points while finding the
+;; authority terminator and last userinfo separator.
+(defn main [] :i64
+  (cond (not (string=? (origin/origin "HTTPS://Example.com:443/path") "https://example.com")) 1
+        (not (string=? (origin/origin "https://éあ😀@EXAMPLE.com/path") "https://example.com")) 2
+        (not (string=? (origin/origin "https://éあ😀@sub@EXAMPLE.com:443/") "https://example.com")) 3
+        (not (string=? (origin/origin "https://éあ😀@example.com") "https://example.com")) 4
+        (not (origin/same-origin? "https://éあ😀@example.com/" "https://example.com:443/")) 5
+        (origin/same-origin? "https://éあ😀@attacker.example/" "https://example.com/") 6
+        (not (origin/internal? "kotoba://shell/apps")) 7
+        :else 0))

@@ -1,6 +1,6 @@
 (ns browser-origin
-  ;; No :export: schemas enable record-new/record-get; `main` is the KIR
-  ;; self-check entry. JVM-free amu admission compiles this whole module.
+  ;; `main` is a diagnostic entry; the public functions are also available
+  ;; to a source-locked native project.
   ;;
   ;; A `.kotoba` port of `browser.origin` (ADR-2607270100 §10 form A: pure
   ;; functions, no capabilities, kotoba/pure profile). Not a WHATWG URL
@@ -13,14 +13,14 @@
   ;; `str/ends-with?` / `str/starts-with?` of the host are hand-written
   ;; code-point scans, exactly as the css port does. Every needle here is
   ;; single-byte ASCII (':' 58, '/' 47, '@' 64, ':'+digits for default
-  ;; ports) and every cursor advance steps over whole one-byte code points,
-  ;; so string-code-point-at / string-substring can never trap on a
-  ;; split UTF-8 code point.
+  ;; ports). Scan offsets advance by each decoded code point's UTF-8 width,
+  ;; so a non-ASCII userinfo or host stays on a code-point boundary.
   ;;
   ;; parity: the fixtures in browser/test/browser/origin_test.cljk
   ;; (origin-normalizes-scheme-and-authority / same-origin-* /
   ;; parse-url-strips-userinfo / parse-url-normalizes-default-port /
   ;; parse-url-leaves-non-default-port) are reproduced in `main` below.
+  (:export [parse-url origin same-origin? internal?])
   (:schemas {:browser.origin/parsed [:record :browser.origin/parsed
                                      [[:url :string] [:scheme :string]
                                       [:authority :string] [:path :string]
@@ -50,22 +50,29 @@
 
 ;; --- primitive scans (code-point safe) -----------------------------------
 
+(defn utf8-width [cp :i64] :i64
+  (cond (< cp 128) 1
+        (< cp 2048) 2
+        (< cp 65536) 3
+        :else 4))
+
 (defn index-of-cp [s :string needle :i64 i :i64] :i64
-  ;; Byte index of the first `needle` at or after i, or -1. `needle` and every
-  ;; byte stepped over are single-byte ASCII (<0x80), so the cursor stays on
-  ;; a code-point boundary.
+  ;; Byte index of the first `needle` at or after i, or -1.
   (if (>= i (string-length s)) (- 0 1)
-      (if (= (string-code-point-at s i) needle) i
-          (index-of-cp s needle (+ i 1)))))
+      (let [cp (string-code-point-at s i)]
+        (if (= cp needle) i
+            (index-of-cp s needle (+ i (utf8-width cp)))))))
 
 (defn last-index-of [s :string needle :i64 acc :i64 i :i64] :i64
   ;; Byte index of the LAST `needle`, or acc (init -1). Forward scan tracking
   ;; the most recent hit; the .cljc's `(subs awi (inc at))` needs lastIndexOf,
   ;; e.g. `user@sub@host` -> host.
   (if (>= i (string-length s)) acc
-      (if (= (string-code-point-at s i) needle)
-        (last-index-of s needle i (+ i 1))
-        (last-index-of s needle acc (+ i 1)))))
+      (let [cp (string-code-point-at s i)
+            next (+ i (utf8-width cp))]
+        (if (= cp needle)
+          (last-index-of s needle i next)
+          (last-index-of s needle acc next)))))
 
 (defn scheme-scan [s :string i :i64] :i64
   ;; Index of the ':' (58) that closes a scheme run begun at index 1, or -1
@@ -164,14 +171,14 @@
 ;; --- public API ----------------------------------------------------------
 
 (defn origin [url :string] :string
-  (record-get (parse-url url) :origin))
+  (:origin (parse-url url)))
 
 (defn same-origin? [a :string b :string] :bool
   (string=? (origin a) (origin b)))
 
 (defn internal? [url :string] :bool
   ;; nil scheme in the .cljc is "" here; neither equals "kotoba".
-  (string=? (record-get (parse-url url) :scheme) "kotoba"))
+  (string=? (:scheme (parse-url url)) "kotoba"))
 
 (defn main []
   ;; Self-check: origin_test.clj fixtures via binary string-concat.
