@@ -90,6 +90,14 @@ jobs:
           --browser "$PWD" --dom "$PWD/_dom/lib/kotoba.domGpu"
           --text "$PWD/_text/lib/kotoba.text" --html "$PWD/_html/lib/kotoba.htmldom"
           --output "$RUNNER_TEMP/loop-page"
+      - name: Build native page-bearing actor frame
+        run: >-
+          python3 scripts/check-shared-native.py --case local-html-frame
+          --compiler "$PWD/_amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64
+          --runner-source "$PWD/_amu/seed/x86_64-kx64-runner.kotoba"
+          --browser "$PWD" --dom "$PWD/_dom/lib/kotoba.domGpu"
+          --text "$PWD/_text/lib/kotoba.text" --html "$PWD/_html/lib/kotoba.htmldom"
+          --output "$RUNNER_TEMP/frame-page"
       - name: Compare independent wire output
         run: |
           python3 - <<'PYCODE'
@@ -97,12 +105,19 @@ jobs:
           from pathlib import Path
           temp = Path(os.environ['RUNNER_TEMP'])
           assert json.loads((temp / 'html-page/semantic-wire.json').read_text()) == json.loads((temp / 'nav-page/wire.json').read_text()) == json.loads((temp / 'loop-page/wire.json').read_text())
+          frame = (temp / 'frame-page/pageframe.bin').read_bytes()
+          header, payload = frame.split(b'\n', 1)
+          marker, revision, shell_size, page_size = header.split()
+          assert marker == b'PFRAME' and revision == b'1' and len(payload) == int(shell_size) + int(page_size)
+          assert json.loads(payload[int(shell_size):]) == json.loads((temp / 'loop-page/wire.json').read_text())
+          (temp / 'loop-page/pageframe.bin').write_bytes(frame)
           PYCODE
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: native-html-page-wire
           path: |
             ${{ runner.temp }}/loop-page/wire.json
+            ${{ runner.temp }}/loop-page/pageframe.bin
             ${{ runner.temp }}/loop-page/shared-native.json
             ${{ runner.temp }}/loop-page/local-html-loop.ksl
           if-no-files-found: error
@@ -122,7 +137,7 @@ jobs:
       - name: Apply freshly generated HTML page
         run: >-
           python3 scripts/check-local-page-host.py --browser "$(command -v google-chrome)"
-          --wire "$RUNNER_TEMP/html-page/wire.json" --output "$RUNNER_TEMP/native-page-host"
+          --wire "$RUNNER_TEMP/html-page/wire.json" --frame "$RUNNER_TEMP/html-page/pageframe.bin" --output "$RUNNER_TEMP/native-page-host"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:

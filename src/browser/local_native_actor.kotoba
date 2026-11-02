@@ -1,6 +1,7 @@
 (ns browser.local-native-actor
   (:require [browser.local-session :as session]
-            [browser.local-loop :as runtime])
+            [browser.local-loop :as runtime]
+            [browser.local-actor-frame :as emitter])
   (:capabilities [:io/read :io/write :io/write-error])
   (:export [main]))
 
@@ -41,13 +42,6 @@
         (let [c (string-code-point-at s i)]
           (if (or (< c 48) (> c 57)) 0 (recur (+ i 1) (+ (* value 10) (- c 48)))))))))
 
-(defn emit-frame [frame :document] :i64
-  (let [revision (option-or (document-i64-value (field frame :revision)) 0)
-        wire (option-or (document-string-value (field frame :wire)) "")]
-    (write-flush (string-concat "FRAME " (string-concat (string-from-i64 revision)
-      (string-concat " " (string-concat (string-from-i64 (string-byte-length wire))
-        (string-concat "\n" wire))))))))
-
 (defn serve [frame :document] :i64
   (let [length (read-length 0 0)]
     (cond (= length -1) 0
@@ -59,10 +53,10 @@
                           event (if (< separator 0) "" (string-substring s (+ separator 1) (string-length s)))
                           next (runtime/step frame revision event)]
                       (if (option-some?-of [:option :document] next)
-                        (let [f (option-or next (document-null)) sent (emit-frame f)] (serve f))
+                        (let [f (option-or next (document-null)) sent (emitter/emit-frame f)] (serve f))
                         (let [sent (write-flush "REJECT\n")] (serve frame)))))))))
 
 (defn main [] :i64
   (let [initial (runtime/begin (session/empty-session "local") 1)]
     (if (not (option-some?-of [:option :document] initial)) 1
-      (let [frame (option-or initial (document-null)) sent (emit-frame frame)] (serve frame)))))
+      (let [frame (option-or initial (document-null)) sent (emitter/emit-frame frame)] (serve frame)))))

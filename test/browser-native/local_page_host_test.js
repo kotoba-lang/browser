@@ -2,6 +2,7 @@ import { commitLocalPageProjection } from '../../src/browser/local_page_host.js'
 import { commitLocalProjection } from '../../src/browser/local_dom_host.js';
 import { createLocalActorHost } from '../../src/browser/local_actor_host.js';
 import batches from './page_fixture.js';
+import nativeFrame from './page_frame_fixture.js';
 const result = document.getElementById('result');
 try {
   const mount = document.getElementById('mount');
@@ -87,6 +88,20 @@ try {
     const invalid = createLocalActorHost({mount:badMount, write:() => {}, onError:() => { rejected = true; }});
     try { invalid.output(1, encoder.encode(header)); } catch (_) {}
     if (!rejected || !invalid.state().closed || badMount.childNodes.length) throw new Error('invalid actor page header accepted');
+  }
+  if (nativeFrame !== null) {
+    const nativeMount = document.createElement('div'); document.body.appendChild(nativeMount);
+    let nativePage = null;
+    const attachNative = Element.prototype.attachShadow;
+    Element.prototype.attachShadow = function(options) { const shadow = attachNative.call(this, options); nativePage = shadow; return shadow; };
+    try {
+      const native = createLocalActorHost({mount:nativeMount, write:() => {}});
+      const bytes = Uint8Array.from(nativeFrame);
+      for (let i = 0; i < bytes.length; i += 19) native.output(1, bytes.slice(i, i + 19));
+      if (native.state().revision !== 1 || !nativePage || !nativePage.firstChild.isEqualNode(expected) ||
+          nativeMount.querySelector('input')?.value !== 'https://one.example/') throw new Error('native page frame mismatch');
+      native.close();
+    } finally { Element.prototype.attachShadow = attachNative; nativeMount.remove(); }
   }
   result.textContent = 'PASS';
 } catch (error) { result.textContent = 'FAIL: ' + error.message; }
