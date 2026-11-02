@@ -1,3 +1,5 @@
+import { commitLocalPageProjection } from './local_page_host.js';
+
 // Offline host for a complete Browser shell projection. The wire uses arrays
 // and keyword spellings (for example ":dom/create-element"); conversion
 // from the Wasm document ABI remains a separate boundary.
@@ -48,7 +50,7 @@ export function encodeLocalEvent(message) {
 // Build an entirely detached tree, validate every operation and only then
 // replace the live root. The caller must still authenticate the originating
 // guest and current state; valid syntax alone grants no authority.
-export function commitLocalProjection(container, batches) {
+export function commitLocalProjection(container, batches, pageBatches = undefined) {
   if (!(container instanceof Element) || !Array.isArray(batches) || batches.length > 8) {
     throw new Error("invalid projection");
   }
@@ -131,6 +133,14 @@ export function commitLocalProjection(container, batches) {
   if (keepFocus && composing.has(active)) throw new Error("composition in progress");
   const address = root.querySelector('input[data-role="address"]');
   if (keepFocus && (!address || !selections.has(address))) throw new Error("missing selection");
+  if (pageBatches !== undefined) {
+    // Stage the isolated page inside the detached shell before replacing the
+    // live root, so invalid shell or page operations leave both unchanged.
+    const pages = root.querySelectorAll('section[data-role="page"]');
+    if (pages.length !== 1 || pages[0].childNodes.length !== 0) throw new Error("invalid page mount");
+    const pageRoot = pages[0].attachShadow({ mode: "closed" });
+    commitLocalPageProjection(pageRoot, pageBatches);
+  }
   container.replaceChildren(root);
   if (keepFocus) {
     const selection = selections.get(address);

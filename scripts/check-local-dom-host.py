@@ -43,7 +43,7 @@ def main():
     html = root / ('test/browser-native/' + suffix + '.html')
     test = root / ('test/browser-native/' + suffix + '_test.js')
     host = root / 'src/browser/local_dom_host.js'
-    sources = [html, test, host]
+    sources = [html, test, host, root / 'src/browser/local_page_host.js']
     fixture = html
     wire_hash = None
     if args.wire:
