@@ -2,7 +2,7 @@
   (:require [browser-chrome :as chrome]
             [browser.storage :as storage]
             [browser.text-edit :as edit])
-  (:export [empty-session open-tab focus-tab set-address commit-address
+  (:export [empty-session open-tab focus-tab close-tab set-address commit-address
             pending-generation confirm-navigation confirm-text-navigation cancel-navigation
             address-insert address-backspace address-move address-select-all
             address-composition-start address-composition-update address-composition-end
@@ -83,6 +83,25 @@
              (string=? tab-id (text (field state :chrome/active-tab-id))))
       (with-chrome session next)
       session)))
+
+(defn close-tab [session :document tab-id :string] :document
+  (let [state (field session :session/chrome)
+        closed (chrome/close-tab state tab-id)]
+    (if (document-equal? state closed) session
+      (let [active? (string=? tab-id (text (field state :chrome/active-tab-id)))
+            cleared (document-assoc
+                      (document-assoc
+                        (document-assoc session :session/pending
+                          (document-dissoc (field session :session/pending) (document-string tab-id)))
+                        :session/committed
+                          (document-dissoc (field session :session/committed) (document-string tab-id)))
+                      :session/pages
+                        (document-dissoc (field session :session/pages) (document-string tab-id)))
+            updated (document-assoc cleared :session/chrome closed)
+            active (text (field closed :chrome/active-tab-id))]
+        (if active?
+          (if (string=? active "") (with-chrome updated closed) (focus-tab updated active))
+          updated)))))
 
 (defn set-address [session :document url :string] :document
   (with-chrome session (chrome/set-url-input (field session :session/chrome) url)))

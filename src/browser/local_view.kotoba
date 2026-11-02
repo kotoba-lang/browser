@@ -45,6 +45,13 @@
         d2 (append-text d1 id "New tab")]
     (dom/append-child d2 parent id)))
 
+(defn append-close-active [document :document parent :i64] :document
+  (let [result (dom/create-element document :button)
+        id (number (item result 0))
+        d1 (dom/set-attribute (item result 1) id :data-action (document-keyword :tab/close-active))
+        d2 (append-text d1 id "Close tab")]
+    (dom/append-child d2 parent id)))
+
 (defn render [session :document] :document
   (let [chrome (field session :session/chrome)
         tabs (field chrome :chrome/tabs)
@@ -56,7 +63,8 @@
         strip-id (number (item strip 0))
         d2 (dom/set-attribute (item strip 1) strip-id :aria-label (document-string "Tabs"))
         d3 (dom/append-child d2 root-id strip-id)
-        d4 (append-new-tab (append-tabs d3 strip-id tabs active 0) strip-id)
+        with-new (append-new-tab (append-tabs d3 strip-id tabs active 0) strip-id)
+        d4 (if (= (document-count tabs) 0) with-new (append-close-active with-new strip-id))
         address (dom/create-element d4 :input)
         address-id (number (item address 0))
         d5 (dom/set-attribute (item address 1) address-id :aria-label (document-string "Address"))

@@ -42,6 +42,10 @@
               (controller/dispatch state (document-map :type (document-keyword :tab/new)))
 
               (and (= kind :ui/click) (= tag :button)
+                   (= (keyword-value (field attrs :data-action)) :tab/close-active))
+              (controller/dispatch state (document-map :type (document-keyword :tab/close-active)))
+
+              (and (= kind :ui/click) (= tag :button)
                    (option-some?-of [:option :string] (document-string-value (field attrs :data-tab-id))))
               (controller/dispatch state (document-map :type (document-keyword :tab/focus)
                                                         :text (field attrs :data-tab-id)))

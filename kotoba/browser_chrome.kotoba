@@ -23,7 +23,7 @@
   ;; test/browser/chrome_test.cljk's two fixtures is pinned in `main`:
   ;;   url-bar-commit-produces-navigation-intent
   ;;   tabs-can-be-focused-and-finished
-  (:export [empty-chrome new-tab active-tab-index focus-tab set-url-input
+  (:export [empty-chrome new-tab active-tab-index focus-tab close-tab set-url-input
             commit-url commit-tab-url finish-navigation main]))
 
 ;; --- accessors (html_document.kotoba option idiom) -------------------------
@@ -107,6 +107,27 @@
          (document-assoc chrome
                          :chrome/active-tab-id (document-string tab-id))
          :chrome/url-input (document-string (get-s tab :tab/url)))))))
+
+(defn tabs-without [tabs :document index :i64 i :i64 result :document] :document
+  (if (>= i (document-count tabs)) result
+    (tabs-without tabs index (+ i 1)
+      (if (= i index) result (document-vector-conj result (tab-at-doc tabs i))))))
+
+(defn close-tab [chrome :document tab-id :string] :document
+  (let [tabs (get-d chrome :chrome/tabs)
+        i (scan-for-id tabs tab-id 0 (tab-count chrome))]
+    (if (< i 0) chrome
+      (let [remaining (tabs-without tabs i 0 (document-vector))
+            without (document-assoc chrome :chrome/tabs remaining)
+            next (if (string=? tab-id (get-s (get-d chrome :chrome/last-navigation) :tab/id))
+                   (document-dissoc without :chrome/last-navigation) without)
+            active? (string=? tab-id (get-s chrome :chrome/active-tab-id))
+            n (document-count remaining)]
+        (cond (not active?) next
+              (= n 0) (document-assoc
+                        (document-assoc next :chrome/active-tab-id (document-string ""))
+                        :chrome/url-input (document-string ""))
+              :else (focus-tab next (get-s (tab-at-doc remaining (if (< i n) i (- n 1))) :tab/id)))))))
 
 (defn set-url-input [chrome :document value :string] :document
   (document-assoc chrome :chrome/url-input (document-string value)))

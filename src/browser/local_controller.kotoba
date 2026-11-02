@@ -17,6 +17,8 @@
   (if (not= (document-kind event) :map) state
    (let [kind (action event)]
     (cond (= kind :tab/new) (session/open-tab state "")
+          (= kind :tab/close-active)
+          (session/close-tab state (text (field (field state :session/chrome) :chrome/active-tab-id)))
           (= kind :tab/focus)
           (if (has-text? event) (session/focus-tab state (text (field event :text))) state)
           (= kind :address/insert)
