@@ -1,0 +1,58 @@
+(ns browser.local-session
+  (:require [browser-chrome :as chrome]
+            [browser.storage :as storage])
+  (:export [empty-session open-tab focus-tab set-address commit-address
+            active-url put-value get-value delete-value]))
+
+;; Pure local state only. A navigation intent is data, not permission to fetch.
+(defn field [d :document key :keyword] :document
+  (option-or (document-get d key) (document-null)))
+
+(defn text [d :document] :string
+  (option-or (document-string-value d) ""))
+
+(defn empty-session [partition :string] :document
+  (document-map :session/chrome (chrome/empty-chrome)
+                :session/store (storage/empty-store)
+                :session/partition (document-string partition)))
+
+(defn open-tab [session :document url :string] :document
+  (document-assoc session :session/chrome
+                  (chrome/new-tab (field session :session/chrome) url)))
+
+(defn focus-tab [session :document tab-id :string] :document
+  (document-assoc session :session/chrome
+                  (chrome/focus-tab (field session :session/chrome) tab-id)))
+
+(defn set-address [session :document url :string] :document
+  (document-assoc session :session/chrome
+                  (chrome/set-url-input (field session :session/chrome) url)))
+
+(defn commit-address [session :document] :document
+  (document-assoc session :session/chrome
+                  (chrome/commit-url (field session :session/chrome))))
+
+(defn active-url [session :document] :string
+  (let [state (field session :session/chrome)
+        i (chrome/active-tab-index state)]
+    (if (< i 0) ""
+      (let [tabs (field state :chrome/tabs)
+            tab (option-or (document-vector-at tabs i) (document-null))]
+        (text (field tab :tab/url))))))
+
+(defn put-value [session :document key :document value :document] :document
+  (document-assoc session :session/store
+    (storage/put-value (field session :session/store)
+                       (text (field session :session/partition))
+                       (active-url session) key value)))
+
+(defn get-value [session :document key :document] [:option :document]
+  (storage/get-value (field session :session/store)
+                     (text (field session :session/partition))
+                     (active-url session) key))
+
+(defn delete-value [session :document key :document] :document
+  (document-assoc session :session/store
+    (storage/delete-value (field session :session/store)
+                          (text (field session :session/partition))
+                          (active-url session) key)))

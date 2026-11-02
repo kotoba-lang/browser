@@ -1,0 +1,36 @@
+(ns browser.native-local-session-test
+  (:require [browser.local-session :as session])
+  (:export [main]))
+
+(defn field [d :document k :keyword] :document
+  (option-or (document-get d k) (document-null)))
+
+(defn text [d :document] :string
+  (option-or (document-string-value d) ""))
+
+(defn value [s :document] :string
+  (text (option-or (session/get-value s (document-keyword :token))
+                   (document-null))))
+
+(defn main [] :i64
+  (let [key (document-keyword :token)
+        empty (session/put-value (session/empty-session "personal") key (document-string "forbidden"))
+        one (session/put-value (session/open-tab empty "https://one.example/a") key (document-string "one"))
+        two (session/put-value (session/open-tab one "https://two.example/") key (document-string "two"))
+        focused (session/focus-tab two "tab-1")
+        navigated (session/commit-address (session/set-address focused "https://two.example/next"))
+        intent (field (field navigated :session/chrome) :chrome/last-navigation)
+        opaque (session/open-tab navigated "mailto:person@example.com")
+        denied (session/put-value opaque key (document-string "secret"))
+        restored (session/focus-tab denied "tab-2")
+        deleted (session/delete-value restored key)]
+    (cond (not (string=? (value empty) "")) 1
+          (not (string=? (value focused) "one")) 2
+          (not (string=? (value two) "two")) 3
+          (not (string=? (session/active-url navigated) "https://two.example/next")) 4
+          (not (string=? (text (field intent :url)) "https://two.example/next")) 5
+          (not (string=? (value navigated) "two")) 6
+          (not (string=? (value denied) "")) 7
+          (not (string=? (value restored) "two")) 8
+          (not (string=? (value deleted) "")) 9
+          :else 0)))
