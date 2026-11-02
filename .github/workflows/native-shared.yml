@@ -24,6 +24,16 @@ jobs:
         run: python3 scripts/check-local-page-host.py --browser "$(command -v google-chrome)" --output "$RUNNER_TEMP/local-page-host"
       - name: Validate synthetic HTML responses
         run: python3 scripts/check-local-html-response.py --browser "$(command -v google-chrome)" --output "$RUNNER_TEMP/html-response"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: kotoba-lang/wasm-webcomponent
+          ref: e00ae75e1c589f76b4f53a88a5e3256c98c9e162
+          path: _broker
+          persist-credentials: false
+      - name: Verify canonical broker and response boundary offline
+        run: >-
+          python3 scripts/check-local-broker-response.py --browser "$(command -v google-chrome)"
+          --broker "$PWD/_broker/src/kotoba-client-runtime.js" --output "$RUNNER_TEMP/broker-response"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
@@ -37,6 +47,7 @@ jobs:
             ${{ runner.temp }}/local-page-host/*.html
             ${{ runner.temp }}/local-page-host/*.stderr
             ${{ runner.temp }}/html-response/*.json
+            ${{ runner.temp }}/broker-response/*.json
           if-no-files-found: warn
   native-html-page-wire:
     name: Build native HTML page wire

@@ -32,6 +32,7 @@ class Pipe:
         os.close(from_w)
         self.buf = b''
         self.next_id = 0
+        self.events = []
 
     def call(self, method, params=None, session=None, timeout=20):
         self.next_id += 1
@@ -44,6 +45,9 @@ class Pipe:
             while b'\0' in self.buf:
                 raw, self.buf = self.buf.split(b'\0', 1)
                 reply = json.loads(raw)
+                if 'id' not in reply:
+                    self.events.append(reply)
+                    continue
                 if reply.get('id') == self.next_id:
                     if 'error' in reply:
                         raise RuntimeError((method, reply['error']))
@@ -55,6 +59,13 @@ class Pipe:
             if not chunk:
                 raise RuntimeError('Chrome pipe closed')
             self.buf += chunk
+
+    def send(self, method, params=None, session=None):
+        self.next_id += 1
+        request = {'id': self.next_id, 'method': method, 'params': params or {}}
+        if session:
+            request['sessionId'] = session
+        os.write(self.to_w, json.dumps(request).encode() + b'\0')
 
     def close(self):
         try:
