@@ -1,0 +1,104 @@
+(ns browser.local-snapshot-codec
+  (:require [browser.local-snapshot :as snapshot])
+  (:export [encode decode]))
+
+;; Restricted length-prefixed UTF-8, not EDN. It carries only the validated
+;; snapshot schema. Parsing never evaluates code or reads arbitrary documents.
+;; Fields are canonical unsigned decimal followed by |; strings use a byte
+;; length then raw UTF-8. Indexes are offset by one so -1 is encoded as 0.
+(defn field [d :document k :keyword] :document (option-or (document-get d k) (document-null)))
+(defn at [d :document i :i64] :document (option-or (document-vector-at d i) (document-null)))
+(defn text [d :document] :string (option-or (document-string-value d) ""))
+(defn num [d :document] :i64 (option-or (document-i64-value d) -1))
+(defn width [c :i64] :i64 (cond (< c 128) 1 (< c 2048) 2 (< c 65536) 3 :else 4))
+(defn number-wire [n :i64] :string (string-concat (string-from-i64 n) "|"))
+(defn string-wire [s :string] :string (string-concat (number-wire (string-byte-length s)) s))
+(defn encode-history [items :document i :i64 out :string] :string
+  (if (>= i (document-count items)) out
+    (encode-history items (+ i 1) (string-concat out (string-wire (text (at items i)))))))
+(defn encode-tab [tab :document] :string
+  (let [history (field tab :history)]
+    (string-concat (string-wire (text (field tab :url)))
+      (string-concat (string-wire (text (field tab :title)))
+        (string-concat (number-wire (document-count history))
+          (string-concat (number-wire (+ 1 (num (field tab :index))))
+                         (encode-history history 0 "")))))))
+(defn encode-tabs [items :document i :i64 out :string] :string
+  (if (>= i (document-count items)) out
+    (encode-tabs items (+ i 1) (string-concat out (encode-tab (at items i))))))
+(defn encode [state :document] [:option :string]
+  (let [maybe (snapshot/snapshot state)]
+    (if (not (option-some?-of [:option :document] maybe)) (option-none-of [:option :string])
+      (let [value (option-or maybe (document-null)) tabs (field value :snapshot/tabs)
+            head (string-concat "BSS1|" (string-concat (number-wire (num (field value :snapshot/next-generation)))
+                    (string-concat (number-wire (+ 1 (num (field value :snapshot/active)))) (number-wire (document-count tabs)))))
+            result (encode-tabs tabs 0 head)]
+        (if (> (string-byte-length result) 131072) (option-none-of [:option :string])
+          (option-some-of [:option :string] result))))))
+(defn parse-number [s :string start :i64] :document
+  (let [n (string-length s)]
+    (loop [i start value 0 digits 0 leading-zero false]
+      (if (>= i n) (document-null)
+        (let [c (string-code-point-at s i)]
+          (cond (= c 124) (if (= digits 0) (document-null)
+                              (document-vector (document-i64 value) (document-i64 (+ i 1))))
+                (or (< c 48) (> c 57) (>= digits 16) (and leading-zero (> digits 0))) (document-null)
+                :else (let [digit (- c 48)]
+                        (if (or (> value 900719925474099) (and (= value 900719925474099) (> digit 1)))
+                          (document-null)
+                          (recur (+ i 1) (+ (* value 10) digit) (+ digits 1) (and (= digits 0) (= digit 0)))))))))))
+(defn boundary? [s :string i :i64 target :i64] :bool
+  (if (= i target) true
+    (if (> i target) false (boundary? s (+ i (width (string-code-point-at s i))) target))))
+(defn parse-string [s :string start :i64] :document
+  (let [size (parse-number s start)]
+    (if (= (document-kind size) :null) (document-null)
+      (let [count (num (at size 0)) from (num (at size 1)) end (+ from count)]
+        (if (or (> count 4096) (> end (string-length s)) (not (boundary? s from end))) (document-null)
+          (document-vector (document-string (string-substring s from end)) (document-i64 end) (document-i64 count)))))))
+(defn parse-history [s :string start :i64 count :i64 total :i64] :document
+  (loop [i 0 pos start bytes total items (document-vector)]
+    (if (= i count) (document-map :history items :pos (document-i64 pos) :bytes (document-i64 bytes))
+      (let [part (parse-string s pos)]
+        (if (= (document-kind part) :null) (document-null)
+          (let [next-bytes (+ bytes (num (at part 2)))]
+            (if (> next-bytes 65536) (document-null)
+              (recur (+ i 1) (num (at part 1)) next-bytes (document-vector-conj items (at part 0))))))))))
+(defn parse-tab [s :string start :i64 total :i64] :document
+  (let [url (parse-string s start)]
+    (if (= (document-kind url) :null) (document-null)
+      (let [title (parse-string s (num (at url 1)))]
+        (if (= (document-kind title) :null) (document-null)
+          (let [count (parse-number s (num (at title 1)))]
+            (if (or (= (document-kind count) :null) (> (num (at count 0)) 32)) (document-null)
+              (let [index (parse-number s (num (at count 1)))
+                    bytes (+ total (+ (num (at url 2)) (num (at title 2))))]
+                (if (or (= (document-kind index) :null) (> (num (at index 0)) 32) (> bytes 65536)) (document-null)
+                  (let [hist (parse-history s (num (at index 1)) (num (at count 0)) bytes)]
+                    (if (= (document-kind hist) :null) (document-null)
+                      (document-map :tab (document-map :url (at url 0) :title (at title 0)
+                                           :history (field hist :history) :index (document-i64 (- (num (at index 0)) 1)))
+                                    :pos (field hist :pos) :bytes (field hist :bytes)))))))))))))
+(defn parse-tabs [s :string start :i64 count :i64] :document
+  (loop [i 0 pos start bytes 0 tabs (document-vector)]
+    (if (= i count) (document-map :tabs tabs :pos (document-i64 pos))
+      (let [part (parse-tab s pos bytes)]
+        (if (= (document-kind part) :null) (document-null)
+          (recur (+ i 1) (num (field part :pos)) (num (field part :bytes))
+                 (document-vector-conj tabs (field part :tab))))))))
+(defn decode [wire :string partition :string] [:option :document]
+  (let [n (string-length wire)]
+    (if (or (> (string-byte-length wire) 131072) (< n 5) (not (string=? (string-substring wire 0 5) "BSS1|")))
+      (option-none-of [:option :document])
+      (let [generation (parse-number wire 5)]
+        (if (= (document-kind generation) :null) (option-none-of [:option :document])
+          (let [active (parse-number wire (num (at generation 1)))]
+            (if (or (= (document-kind active) :null) (> (num (at active 0)) 32)) (option-none-of [:option :document])
+              (let [count (parse-number wire (num (at active 1)))]
+                (if (or (= (document-kind count) :null) (> (num (at count 0)) 32)) (option-none-of [:option :document])
+                  (let [tabs (parse-tabs wire (num (at count 1)) (num (at count 0)))]
+                    (if (or (= (document-kind tabs) :null) (not= (num (field tabs :pos)) n)) (option-none-of [:option :document])
+                      (snapshot/restore (document-map :snapshot/version (document-i64 1)
+                                          :snapshot/next-generation (at generation 0)
+                                          :snapshot/active (document-i64 (- (num (at active 0)) 1))
+                                          :snapshot/tabs (field tabs :tabs)) partition))))))))))))

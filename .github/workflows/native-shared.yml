@@ -143,7 +143,7 @@ jobs:
       - name: Build native session restore fixture
         run: >-
           python3 scripts/check-shared-native.py --case local-snapshot-read
-          --event-wire "$RUNNER_TEMP/snapshot-wire/snapshot.edn"
+          --event-wire "$RUNNER_TEMP/snapshot-wire/snapshot.bss1"
           --compiler "$PWD/_amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64
           --runner-source "$PWD/_amu/seed/x86_64-kx64-runner.kotoba"
           --browser "$PWD" --dom "$PWD/_dom/lib/kotoba.domGpu" --text "$PWD/_text/lib/kotoba.text"
@@ -152,7 +152,7 @@ jobs:
         with:
           name: native-session-fixtures
           path: |
-            ${{ runner.temp }}/snapshot-wire/snapshot.edn
+            ${{ runner.temp }}/snapshot-wire/snapshot.bss1
             ${{ runner.temp }}/snapshot-wire/shared-native.json
             ${{ runner.temp }}/snapshot-reader/local-snapshot-read.elf
             ${{ runner.temp }}/snapshot-reader/shared-native.json
@@ -200,16 +200,16 @@ jobs:
       - name: Store native session snapshot and restart Chrome
         run: >-
           python3 scripts/check-local-session-store.py --browser "$(command -v google-chrome)"
-          --snapshot-file "$RUNNER_TEMP/session-fixtures/snapshot-wire/snapshot.edn"
-          --restored-file "$RUNNER_TEMP/session-restored.edn" --output "$RUNNER_TEMP/session-store"
+          --snapshot-file "$RUNNER_TEMP/session-fixtures/snapshot-wire/snapshot.bss1"
+          --restored-file "$RUNNER_TEMP/session-restored.bss1" --output "$RUNNER_TEMP/session-store"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: native-session-roundtrip
           path: |
-            ${{ runner.temp }}/session-fixtures/snapshot-wire/snapshot.edn
+            ${{ runner.temp }}/session-fixtures/snapshot-wire/snapshot.bss1
             ${{ runner.temp }}/session-fixtures/snapshot-reader/local-snapshot-read.elf
             ${{ runner.temp }}/session-fixtures/snapshot-reader/shared-native.json
-            ${{ runner.temp }}/session-restored.edn
+            ${{ runner.temp }}/session-restored.bss1
             ${{ runner.temp }}/session-store/receipt.json
           if-no-files-found: error
       - name: Apply freshly generated HTML page
@@ -240,8 +240,8 @@ jobs:
           import hashlib, json, os, re, subprocess
           from pathlib import Path
           root = Path(os.environ['RUNNER_TEMP']) / 'roundtrip'
-          original = (root / 'session-fixtures/snapshot-wire/snapshot.edn').read_bytes()
-          restored = (root / 'session-restored.edn').read_bytes()
+          original = (root / 'session-fixtures/snapshot-wire/snapshot.bss1').read_bytes()
+          restored = (root / 'session-restored.bss1').read_bytes()
           receipt = json.loads((root / 'session-fixtures/snapshot-reader/shared-native.json').read_text())
           image = root / 'session-fixtures/snapshot-reader/local-snapshot-read.elf'
           case = receipt['cases'][0]
@@ -439,6 +439,18 @@ jobs:
       - name: Execute session snapshot on x86
         if: matrix.target == 'x86_64'
         run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-snapshot --output "$RUNNER_TEMP/snapshot-native"
+      - name: Execute snapshot codec on ARM
+        if: matrix.target == 'arm64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-snapshot-codec --output "$RUNNER_TEMP/snapshot-codec-native"
+      - name: Execute snapshot codec on x86
+        if: matrix.target == 'x86_64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-snapshot-codec --output "$RUNNER_TEMP/snapshot-codec-native"
+      - name: Execute snapshot codec aggregate limit on ARM
+        if: matrix.target == 'arm64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-snapshot-codec-limit --output "$RUNNER_TEMP/snapshot-codec-limit"
+      - name: Execute snapshot codec field boundary on ARM
+        if: matrix.target == 'arm64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-snapshot-codec-boundary --output "$RUNNER_TEMP/snapshot-codec-boundary"
       - name: Execute local view on ARM
         if: matrix.target == 'arm64'
         run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-view --output "$RUNNER_TEMP/view-native"
@@ -528,6 +540,18 @@ jobs:
             ${{ runner.temp }}/snapshot-native/*.ksl
             ${{ runner.temp }}/snapshot-native/*.stdout
             ${{ runner.temp }}/snapshot-native/*.stderr
+            ${{ runner.temp }}/snapshot-codec-native/*.json
+            ${{ runner.temp }}/snapshot-codec-native/*.ksl
+            ${{ runner.temp }}/snapshot-codec-native/*.stdout
+            ${{ runner.temp }}/snapshot-codec-native/*.stderr
+            ${{ runner.temp }}/snapshot-codec-limit/*.json
+            ${{ runner.temp }}/snapshot-codec-limit/*.ksl
+            ${{ runner.temp }}/snapshot-codec-limit/*.stdout
+            ${{ runner.temp }}/snapshot-codec-limit/*.stderr
+            ${{ runner.temp }}/snapshot-codec-boundary/*.json
+            ${{ runner.temp }}/snapshot-codec-boundary/*.ksl
+            ${{ runner.temp }}/snapshot-codec-boundary/*.stdout
+            ${{ runner.temp }}/snapshot-codec-boundary/*.stderr
             ${{ runner.temp }}/view-native/*.json
             ${{ runner.temp }}/view-native/*.ksl
             ${{ runner.temp }}/view-native/*.stdout

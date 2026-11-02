@@ -72,6 +72,12 @@ def main(a):
                                    ('local-loop', a.browser, 'local_loop.kotoba')]
     # The wire fixture writes its result through the explicitly granted local
     # stdout capability. The x86 scalar project runner does not support it.
+    if a.case == 'local-snapshot-codec-boundary':
+        test_cases.append(('local-snapshot-codec-boundary', a.browser, 'local_snapshot_codec_boundary.kotoba'))
+    if a.case == 'local-snapshot-codec-limit':
+        test_cases.append(('local-snapshot-codec-limit', a.browser, 'local_snapshot_codec_limit.kotoba'))
+    if a.case == 'local-snapshot-codec':
+        test_cases.append(('local-snapshot-codec', a.browser, 'local_snapshot_codec.kotoba'))
     if a.case == 'local-snapshot-read':
         assert a.target == 'arm64' and a.event_wire
         test_cases.append(('local-snapshot-read', a.browser, 'local_snapshot_read.kotoba'))
@@ -129,7 +135,7 @@ def main(a):
             invoke = [a.runner.resolve(), image, 0, 0, 'x86_64', '-']
         if name in ('local-loop-input', 'local-snapshot-read'):
             wire = a.event_wire.read_text(encoding='utf-8')
-            assert len(wire.encode('utf-8')) <= 65664
+            assert len(wire.encode('utf-8')) <= (131072 if name == 'local-snapshot-read' else 65664)
             invoke += [wire]
         allow = '38' if name == 'local-snapshot-read' else ('37,39' if name == 'local-html-frame' else ('37' if name in ('local-dom-wire', 'local-html-navigation', 'local-html-loop', 'local-snapshot-wire') else ('37,38' if name == 'local-loop-input' else '-')))
         if name in ('local-native-actor', 'local-html-actor'):
@@ -141,8 +147,8 @@ def main(a):
             assert match and int(match[1]) == 0, (name, result.stdout)
         if name == 'local-snapshot-wire':
             lines = [line[5:] for line in result.stdout.splitlines() if line.startswith(b'SNAP ')]
-            assert len(lines) == 1 and lines[0].startswith(b'{:snapshot/') and len(lines[0]) <= 131072
-            (out / 'snapshot.edn').write_bytes(lines[0])
+            assert len(lines) == 1 and lines[0].startswith(b'BSS1|') and len(lines[0]) <= 131072
+            (out / 'snapshot.bss1').write_bytes(lines[0])
             denied = run(name + '-denied', invoke, dict(env, KEXE_STRUCTURED_REPORT='1', KEXE_ALLOW='-'), ok=False)
             assert b':wire 37 :refused :not-granted' in denied.stdout + denied.stderr
             assert not any(line.startswith(b'SNAP ') for line in denied.stdout.splitlines())
@@ -180,7 +186,7 @@ def main(a):
         elif name == 'local-snapshot-read':
             case_result.update(inputSnapshot=pin(a.event_wire))
         elif name == 'local-snapshot-wire':
-            case_result.update(outputSnapshot=pin(out / 'snapshot.edn'))
+            case_result.update(outputSnapshot=pin(out / 'snapshot.bss1'))
         elif name == 'local-html-frame':
             case_result.update(outputFrame=pin(out / 'pageframe.bin'))
         elif name in ('local-dom-wire', 'local-html-navigation', 'local-html-loop'):
@@ -204,7 +210,7 @@ if __name__ == '__main__':
     p.add_argument('--text', type=Path, required=True)
     p.add_argument('--html', type=Path, help='pinned kotoba.htmldom owner for HTML navigation')
     p.add_argument('--output', type=Path, required=True)
-    p.add_argument('--case', choices=['text', 'dom', 'text-edit', 'chrome', 'origin', 'storage', 'local-session', 'local-snapshot', 'local-snapshot-wire', 'local-snapshot-read', 'local-view', 'local-text-view', 'local-multitab-text', 'local-dom-replay', 'local-dom-commit', 'local-controller', 'local-dom-events', 'local-dom-wire', 'local-loop', 'local-loop-input', 'local-native-actor', 'local-html-navigation', 'local-html-loop', 'local-html-frame', 'local-html-actor'])
+    p.add_argument('--case', choices=['text', 'dom', 'text-edit', 'chrome', 'origin', 'storage', 'local-session', 'local-snapshot', 'local-snapshot-codec', 'local-snapshot-codec-limit', 'local-snapshot-codec-boundary', 'local-snapshot-wire', 'local-snapshot-read', 'local-view', 'local-text-view', 'local-multitab-text', 'local-dom-replay', 'local-dom-commit', 'local-controller', 'local-dom-events', 'local-dom-wire', 'local-loop', 'local-loop-input', 'local-native-actor', 'local-html-navigation', 'local-html-loop', 'local-html-frame', 'local-html-actor'])
     p.add_argument('--event-wire', type=Path, help='Chrome-emitted event for local-loop-input')
     a = p.parse_args()
     assert a.runner_source if a.target == 'arm64' else a.runner

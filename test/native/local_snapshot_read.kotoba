@@ -1,16 +1,12 @@
 (ns browser.native-snapshot-read-test
-  (:require [browser.local-session :as session] [browser.local-snapshot :as snapshot])
+  (:require [browser.local-session :as session] [browser.local-snapshot-codec :as codec])
   (:capabilities [:cli/args]) (:export [main]))
-;; Test fixture accepts only a trusted, known-good payload. The EDN reader is
-;; not yet qualified to consume arbitrary corrupted or attacker-controlled data.
 (defn field [d :document k :keyword] :document (option-or (document-get d k) (document-null)))
 (defn main [] :i64
-  (let [wire (typed-cap-call :cli/args :string :string "0")]
-    (if (> (string-byte-length wire) 131072) 1
-      (let [value (document-edn-read wire) restored (snapshot/restore value "restored")
-            state (option-or restored (document-null))]
-        (if (and (option-some?-of [:option :document] restored)
-                 (string=? (session/active-url state) "https://example.test/猫")
-                 (= (session/pending-generation state "tab-1") 0)
-                 (= (document-count (field state :session/pending)) 0)
-                 (= (document-count (field state :session/store)) 0)) 0 1)))))
+  (let [wire (typed-cap-call :cli/args :string :string "0")
+        restored (codec/decode wire "restored") state (option-or restored (document-null))]
+    (if (and (option-some?-of [:option :document] restored)
+             (string=? (session/active-url state) "https://example.test/猫")
+             (= (session/pending-generation state "tab-1") 0)
+             (= (document-count (field state :session/pending)) 0)
+             (= (document-count (field state :session/store)) 0)) 0 1)))
