@@ -6,7 +6,7 @@
             pending-generation confirm-navigation confirm-text-navigation cancel-navigation
             address-insert address-backspace address-delete address-select address-move address-select-all
             address-composition-start address-composition-update address-composition-end
-            active-url put-value get-value delete-value]))
+            active-url active-html-page remember-html-page put-value get-value delete-value]))
 
 ;; Pure local state only. A navigation intent is data, not permission to fetch.
 (defn field [d :document key :keyword] :document
@@ -55,6 +55,7 @@
                 :session/pending (document-map)
                 :session/committed (document-map)
                 :session/pages (document-map)
+                :session/html-pages (document-map)
                 :session/address-editor (editor-document (edit/empty-state))
                 :session/next-generation (document-i64 1)))
 
@@ -97,7 +98,9 @@
                           (document-dissoc (field session :session/committed) (document-string tab-id)))
                       :session/pages
                         (document-dissoc (field session :session/pages) (document-string tab-id)))
-            updated (document-assoc cleared :session/chrome closed)
+            cleared-html (document-assoc cleared :session/html-pages
+                          (document-dissoc (html-pages cleared) (document-string tab-id)))
+            updated (document-assoc cleared-html :session/chrome closed)
             active (text (field closed :chrome/active-tab-id))]
         (if active?
           (if (string=? active "") (with-chrome updated closed) (focus-tab updated active))
@@ -182,8 +185,10 @@
                                     (document-dissoc (field session :session/pending) (document-string tab-id)))
             updated (document-assoc cleared :session/chrome next)]
         (document-assoc
-          (document-assoc updated :session/pages
-                          (document-dissoc (field session :session/pages) (document-string tab-id)))
+          (document-assoc
+            (document-assoc updated :session/pages
+                            (document-dissoc (field session :session/pages) (document-string tab-id)))
+            :session/html-pages (document-dissoc (html-pages session) (document-string tab-id)))
           :session/committed
           (document-assoc (field session :session/committed)
                           (document-string tab-id) (document-string url))))
@@ -211,6 +216,26 @@
         (text (option-or (document-get (field session :session/committed)
                                        (document-string tab-id))
                          (document-null)))))))
+
+;; Older sessions may not contain the HTML page map.
+(defn html-pages [session :document] :document
+  (let [pages (field session :session/html-pages)]
+    (if (= (document-kind pages) :map) pages (document-map))))
+
+;; Only an already-confirmed tab/URL can retain a host-supplied page wire.
+;; This records data; it is not an authorization or a network operation.
+(defn remember-html-page [session :document tab-id :string url :string wire :string] :document
+  (let [committed (text (option-or (document-get (field session :session/committed) (document-string tab-id)) (document-null)))]
+    (if (or (string=? url "") (not (string=? committed url)) (string=? wire "")) session
+      (document-assoc session :session/html-pages
+                      (document-assoc (html-pages session) (document-string tab-id) (document-string wire))))))
+
+(defn active-html-page [session :document] [:option :string]
+  (let [state (field session :session/chrome)
+        tab-id (text (field state :chrome/active-tab-id))]
+    (if (or (< (chrome/active-tab-index state) 0) (string=? (active-url session) ""))
+      (option-none-of [:option :string])
+      (document-string-value (option-or (document-get (html-pages session) (document-string tab-id)) (document-null))))))
 
 (defn put-value [session :document key :document value :document] :document
   (document-assoc session :session/store

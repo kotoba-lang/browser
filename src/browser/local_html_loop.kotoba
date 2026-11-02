@@ -19,5 +19,5 @@
             (if (not (option-some?-of [:option :document] next))
               (option-none-of [:option :document])
               (option-some-of [:option :document]
-                (document-map :frame (option-or next (document-null)) :page-wire (field prepared :wire)
+                (document-map :frame (option-or next (document-null)) :page-wire (field (option-or next (document-null)) :page-wire)
                               :tab (document-string tab) :generation (document-i64 generation))))))))))

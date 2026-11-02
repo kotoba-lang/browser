@@ -18,8 +18,14 @@
         next (field ok :session) wire (text (field ok :wire))
         replay (nav/prepare next "tab-1" 1 url body)
         bg-url "https://two.example/" bg-state (session/focus-tab (session/open-tab next bg-url) "tab-1")
-        bg (nav/prepare bg-state "tab-2" 2 bg-url body)
-        bg-result (field bg :session)]
+        bg (nav/prepare bg-state "tab-2" 2 bg-url "<p>two</p>")
+        bg-result (field bg :session) bg-wire (text (field bg :wire))
+        bg-focused (session/focus-tab bg-result "tab-2")
+        edited (session/address-insert bg-result "x")
+        closed (session/close-tab bg-focused "tab-2")
+        next-url "https://one.example/next"
+        pending (session/commit-address (session/set-address closed next-url))
+        plain (session/confirm-navigation pending "tab-1" 3 next-url)]
     (if (not (and (rejected? wrong-generation state :html-navigation/stale)
                   (rejected? wrong-tab state :html-navigation/stale)
                   (rejected? redirect state :html-navigation/stale)
@@ -28,5 +34,13 @@
                   (string=? (session/active-url next) url) (> (string-length wire) 0)
                   (rejected? replay next :html-navigation/stale)
                   (= (kind bg) :html-navigation/ok) (string=? (session/active-url bg-result) url)
-                  (string=? (session/active-url (session/focus-tab bg-result "tab-2")) bg-url))) 1
+                  (string=? (session/active-url bg-focused) bg-url)
+                  (string=? (option-or (session/active-html-page bg-result) "") wire)
+                  (string=? (option-or (session/active-html-page bg-focused) "") bg-wire)
+                  (not (string=? bg-wire wire))
+                  (string=? (option-or (session/active-html-page edited) "") wire)
+                  (string=? (option-or (session/active-html-page closed) "") wire)
+                  (= (document-count (field closed :session/html-pages)) 1)
+                  (string=? (option-or (session/active-html-page pending) "") wire)
+                  (not (option-some?-of [:option :string] (session/active-html-page plain))))) 1
       (let [sent (typed-cap-call :io/write :string :string (string-concat "PAGE " (string-concat wire "\n")))] 0))))

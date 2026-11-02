@@ -18,5 +18,6 @@
       (let [wire (html/encode body)]
         (if (not (option-some?-of [:option :string] wire))
           (result :html-navigation/unsupported state (document-null))
-          (result :html-navigation/ok (session/confirm-navigation state tab generation url)
-                  (document-string (option-or wire ""))))))))
+          (let [value (option-or wire "") confirmed (session/confirm-navigation state tab generation url)]
+            (result :html-navigation/ok (session/remember-html-page confirmed tab url value)
+                    (document-string value))))))))

@@ -14,7 +14,11 @@
         bad (html/prepare frame 10 "tab-1" 1 url "<script>bad</script>")
         ok (html/prepare frame 10 "tab-1" 1 url body)
         result (option-or ok (document-null)) next (field result :frame)
-        wire (text (field result :page-wire)) next-state (field next :state)]
+        wire (text (field result :page-wire)) next-state (field next :state)
+        bg-url "https://two.example/" bg-state (session/focus-tab (session/open-tab next-state bg-url) "tab-1")
+        bg-frame (option-or (runtime/begin bg-state 11) (document-null))
+        bg (html/prepare bg-frame 11 "tab-2" 2 bg-url "<p>two</p>")
+        bg-page (text (field (option-or bg (document-null)) :page-wire))]
     (if (not (and (option-some?-of [:option :document] initial)
                   (not (option-some?-of [:option :document] stale))
                   (not (option-some?-of [:option :document] old))
@@ -23,5 +27,7 @@
                   (string=? (session/active-url next-state) url)
                   (= (session/pending-generation next-state "tab-1") 0)
                   (> (string-length (text (field next :wire))) 0)
-                  (> (string-length wire) 0))) 1
+                  (> (string-length wire) 0)
+                  (string=? wire (text (field next :page-wire)))
+                  (option-some?-of [:option :document] bg) (string=? bg-page wire))) 1
       (let [sent (typed-cap-call :io/write :string :string (string-concat "PAGE " (string-concat wire "\n")))] 0))))
