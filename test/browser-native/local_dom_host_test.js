@@ -95,6 +95,37 @@ try {
   commitLocalProjection(mount, [op]);
   check(projection.resolve(input) === null, "stale projection target");
   unbind();
+  const firstFocus = commitLocalProjection(mount, [shell.slice(0, 32), shell.slice(32)]);
+  const oldAddress = mount.querySelector('[data-role="address"]');
+  oldAddress.focus();
+  check(document.activeElement === oldAddress, "initial focus");
+  const next = shell.map(row => row.slice());
+  next.find(row => row[0] === ":dom/set-attr" && row[2] === ":value")[3] = "A😀B";
+  next.push([":dom/set-attr", 11, ":data-selection-start", 1],
+            [":dom/set-attr", 11, ":data-selection-end", 3],
+            [":dom/set-attr", 11, ":data-caret", 1]);
+  const nextBatches = [next.slice(0, 32), next.slice(32)];
+  const nextProjection = commitLocalProjection(mount, nextBatches);
+  const newAddress = mount.querySelector('[data-role="address"]');
+  check(document.activeElement === newAddress && newAddress.value === "A😀B" &&
+        newAddress.selectionStart === 1 && newAddress.selectionEnd === 3 &&
+        newAddress.selectionDirection === "backward", "restore focused selection");
+  const invalidSelection = next.map(row => row.slice());
+  invalidSelection.find(row => row[0] === ":dom/set-attr" && row[2] === ":data-caret")[3] = 2;
+  reject([invalidSelection.slice(0, 32), invalidSelection.slice(32)], "invalid surrogate selection");
+  const stopComposition = bindLocalInput(mount, nextProjection, () => {});
+  let duplicateRefused = false;
+  try { bindLocalInput(mount, nextProjection, () => {}); } catch (_) { duplicateRefused = true; }
+  check(duplicateRefused, "duplicate input binding");
+  newAddress.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+  reject(nextBatches, "composition redraw");
+  let prematureUnbind = false;
+  try { stopComposition(); } catch (_) { prematureUnbind = true; }
+  check(prematureUnbind, "composition unbind");
+  newAddress.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: "日本" }));
+  commitLocalProjection(mount, nextBatches);
+  stopComposition();
+  check(firstFocus.resolve(oldAddress) === null, "old focused input stale");
   result.textContent = "PASS";
 } catch (error) {
   result.textContent = "FAIL: " + error.message;

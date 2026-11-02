@@ -3,9 +3,12 @@
 // from the Wasm document ABI remains a separate boundary.
 // This module performs no network, persistence or permission operations.
 const TAGS = new Set([":main", ":nav", ":button", ":input", ":section", ":pre"]);
-const ATTRS = new Set([":aria-label", ":aria-selected", ":data-action", ":data-tab-id", ":data-role", ":value"]);
+const ATTRS = new Set([":aria-label", ":aria-selected", ":data-action", ":data-tab-id", ":data-role", ":value",
+                       ":data-selection-start", ":data-selection-end", ":data-caret"]);
 const ACTIONS = new Set([":tab/new", ":tab/close-active"]);
 const MAX_TEXT = 1_048_576;
+const composing = new WeakSet();
+const boundContainers = new WeakSet();
 
 function idValue(value) {
   return Number.isSafeInteger(value) && value > 0 && value <= 256;
@@ -25,6 +28,7 @@ export function commitLocalProjection(container, batches) {
   }
   const nodes = new Map();
   const nodeIds = new WeakMap();
+  const selections = new Map();
   const parents = new Set();
   let root = null;
   let count = 0;
@@ -56,6 +60,11 @@ export function commitLocalProjection(container, batches) {
         } else if (value === ":data-action") {
           if (!ACTIONS.has(extra)) throw new Error("invalid action");
           node.setAttribute("data-action", extra);
+        } else if ([":data-selection-start", ":data-selection-end", ":data-caret"].includes(value)) {
+          if (!(node instanceof HTMLInputElement) || !Number.isSafeInteger(extra) || extra < 0 || extra > MAX_TEXT) throw new Error("invalid selection");
+          const selection = selections.get(node) || {};
+          selection[value] = extra;
+          selections.set(node, selection);
         } else {
           const text = checkedText(extra);
           const name = value.slice(1);
@@ -82,7 +91,27 @@ export function commitLocalProjection(container, batches) {
   if (!root || parents.size !== nodes.size - 1 || [...nodes.values()].some(node => node !== root && !root.contains(node))) {
     throw new Error("incomplete projection");
   }
+  for (const [node, selection] of selections) {
+    const start = selection[":data-selection-start"], end = selection[":data-selection-end"], caret = selection[":data-caret"];
+    const midPair = p => p > 0 && p < node.value.length &&
+      node.value.charCodeAt(p - 1) >= 0xd800 && node.value.charCodeAt(p - 1) <= 0xdbff &&
+      node.value.charCodeAt(p) >= 0xdc00 && node.value.charCodeAt(p) <= 0xdfff;
+    if (!Number.isInteger(start) || !Number.isInteger(end) || !Number.isInteger(caret) ||
+        start > end || end > node.value.length || (caret !== start && caret !== end) ||
+        midPair(start) || midPair(end) || midPair(caret)) throw new Error("invalid selection bounds");
+  }
+  const active = document.activeElement;
+  const keepFocus = active instanceof HTMLInputElement && container.contains(active) && active.getAttribute("data-role") === "address";
+  if (keepFocus && composing.has(active)) throw new Error("composition in progress");
+  const address = root.querySelector('input[data-role="address"]');
+  if (keepFocus && (!address || !selections.has(address))) throw new Error("missing selection");
   container.replaceChildren(root);
+  if (keepFocus) {
+    const selection = selections.get(address);
+    const start = selection[":data-selection-start"], end = selection[":data-selection-end"], caret = selection[":data-caret"];
+    address.focus({ preventScroll: true });
+    address.setSelectionRange(start, end, caret === start && start !== end ? "backward" : "forward");
+  }
   // The handle becomes stale as soon as another projection replaces this
   // root. It does not prove a guest's identity or approve any operation.
   return Object.freeze({
@@ -103,6 +132,9 @@ export function commitLocalProjection(container, batches) {
 // IME-aware host loop.
 export function bindLocalInput(container, projection, deliver) {
   if (!(container instanceof Element) || typeof projection?.resolve !== "function" || typeof deliver !== "function") throw new Error("invalid input binding");
+  if (boundContainers.has(container)) throw new Error("input already bound");
+  boundContainers.add(container);
+  const activeComposition = new Set();
   function route(event) {
     if (event.defaultPrevented) return;
     const resolved = projection.resolve(event.target);
@@ -128,8 +160,16 @@ export function bindLocalInput(container, projection, deliver) {
       else if (event.key === "ArrowLeft" || event.key === "ArrowRight") message = { type: ":ui/move", target: id, delta: event.key === "ArrowLeft" ? -1 : 1, extend: event.shiftKey };
       else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "a") message = { type: ":ui/select-all", target: id };
       cancel = message !== null;
-    } else if (event.type === "compositionstart") message = { type: ":ui/composition-start", target: id };
+    } else if (event.type === "compositionstart") {
+      composing.add(node);
+      activeComposition.add(node);
+      message = { type: ":ui/composition-start", target: id };
+    }
     else if (event.type === "compositionupdate" || event.type === "compositionend") {
+      if (event.type === "compositionend") {
+        composing.delete(node);
+        activeComposition.delete(node);
+      }
       message = { type: event.type === "compositionupdate" ? ":ui/composition-update" : ":ui/composition-end", target: id, text: event.data || "" };
     }
     if (cancel && event.cancelable) event.preventDefault();
@@ -145,5 +185,9 @@ export function bindLocalInput(container, projection, deliver) {
   }
   const types = ["click", "beforeinput", "paste", "keydown", "compositionstart", "compositionupdate", "compositionend"];
   for (const type of types) container.addEventListener(type, route);
-  return () => { for (const type of types) container.removeEventListener(type, route); };
+  return () => {
+    if (activeComposition.size) throw new Error("composition in progress");
+    for (const type of types) container.removeEventListener(type, route);
+    boundContainers.delete(container);
+  };
 }

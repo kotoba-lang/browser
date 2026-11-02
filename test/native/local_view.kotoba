@@ -12,6 +12,8 @@
   (option-or (document-string-value d) ""))
 (defn bool [d :document] :bool
   (option-or (document-bool-value d) false))
+(defn number [d :document] :i64
+  (option-or (document-i64-value d) -1))
 
 (defn main [] :i64
   (let [empty-tree (dom/tree (view/render (session/empty-session "p")))
@@ -41,4 +43,7 @@
           (not (string=? (text (field (field page :attrs) :data-role)) "page")) 8
           (<= (document-count (item consumed 0)) 0) 9
           (not= (document-count (field (item consumed 1) :ops)) 0) 10
+          (not= (number (field (field input :attrs) :data-caret)) 24) 11
+          (not= (number (field (field input :attrs) :data-selection-start)) 24) 12
+          (not= (number (field (field input :attrs) :data-selection-end)) 24) 13
           :else 0)))

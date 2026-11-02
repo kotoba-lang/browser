@@ -54,6 +54,7 @@
 
 (defn render [session :document] :document
   (let [chrome (field session :session/chrome)
+        editor (field session :session/address-editor)
         tabs (field chrome :chrome/tabs)
         active (text (field chrome :chrome/active-tab-id))
         root (dom/create-element (dom/empty-document) :main)
@@ -71,7 +72,10 @@
         d6 (dom/set-attribute
              (dom/set-attribute d5 address-id :data-role (document-string "address"))
              address-id :value (field chrome :chrome/url-input))
-        d7 (dom/append-child d6 root-id address-id)
+        d6a (dom/set-attribute d6 address-id :data-selection-start (field editor :text/selection-start))
+        d6b (dom/set-attribute d6a address-id :data-selection-end (field editor :text/selection-end))
+        d6c (dom/set-attribute d6b address-id :data-caret (field editor :text/caret))
+        d7 (dom/append-child d6c root-id address-id)
         page (dom/create-element d7 :section)
         page-id (number (item page 0))
         d8 (dom/set-attribute (item page 1) page-id :data-role (document-string "page"))
