@@ -44,10 +44,11 @@
       (let [scheme (str/lower scheme)]
         (if (str/starts-with? rest "//")
           (let [without-slashes (subs rest 2)
+                web? (contains? #{"http" "https" "ws" "wss"} scheme)
                 end (reduce (fn [end delimiter]
                               (let [i (.indexOf without-slashes delimiter)]
                                 (if (neg? i) end (min end i))))
-                            (count without-slashes) ["/" "?" "#"])
+                            (count without-slashes) (cond-> ["/" "?" "#"] web? (conj "\\")))
                 authority-with-userinfo (subs without-slashes 0 end)
                 ;; Strip any "userinfo@" prefix before the host (WHATWG URL:
                 ;; everything up to the LAST "@" in the authority is
@@ -65,7 +66,10 @@
                             (subs authority-with-userinfo (inc at)))
                 authority (strip-default-port scheme (str/lower authority))
                 tail (subs without-slashes end)
-                path (if (str/starts-with? tail "/") tail (str "/" tail))]
+                path (cond
+                       (str/starts-with? tail "/") tail
+                       (and web? (str/starts-with? tail "\\")) (str "/" (subs tail 1))
+                       :else (str "/" tail))]
             {:url s
              :scheme scheme
              :authority authority

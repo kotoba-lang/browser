@@ -63,12 +63,16 @@
         (if (= cp needle) i
             (index-of-cp s needle (+ i (utf8-width cp)))))))
 
-(defn authority-end [s :string i :i64] :i64
-  ;; RFC-style authority ends before the first path, query, or fragment.
+(defn web-scheme? [scheme :string] :bool
+  (or (string=? scheme "http") (string=? scheme "https")
+      (string=? scheme "ws") (string=? scheme "wss")))
+
+(defn authority-end [s :string i :i64 web? :bool] :i64
+  ;; Web special schemes also treat backslash as a path separator.
   (if (>= i (string-length s)) i
       (let [cp (string-code-point-at s i)]
-        (if (or (= cp 47) (= cp 63) (= cp 35)) i
-            (authority-end s (+ i (utf8-width cp)))))))
+        (if (or (= cp 47) (= cp 63) (= cp 35) (and web? (= cp 92))) i
+            (authority-end s (+ i (utf8-width cp)) web?)))))
 
 (defn last-index-of [s :string needle :i64 acc :i64 i :i64] :i64
   ;; Byte index of the LAST `needle`, or acc (init -1). Forward scan tracking
@@ -148,7 +152,7 @@
                 rest (string-substring url (+ c 1) (string-length url))]
             (if (starts-with-slashes rest)
               (let [w (string-substring rest 2 (string-length rest))
-                    end (authority-end w 0)
+                    end (authority-end w 0 (web-scheme? scheme))
                     awi (string-substring w 0 end)
                     at (last-index-of awi 64 (- 0 1) 0)
                     host-part (if (>= at 0)
@@ -159,8 +163,11 @@
                                scheme (string-fold-case host-part))
                     tail (string-substring w end (string-length w))
                     path (if (= end (string-length w)) "/"
-                           (if (= (string-code-point-at w end) 47) tail
-                             (string-concat "/" tail)))]
+                           (let [cp (string-code-point-at w end)]
+                             (cond (= cp 47) tail
+                                   (and (web-scheme? scheme) (= cp 92))
+                                   (string-concat "/" (string-substring tail 1 (string-length tail)))
+                                   :else (string-concat "/" tail))))]
                 (record-new [:ref :browser.origin/parsed]
                             url
                             scheme

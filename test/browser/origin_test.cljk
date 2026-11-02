@@ -33,6 +33,12 @@
   (is (= "/#top" (:path (origin/parse-url "https://example.com#top"))))
   (is (origin/same-origin? "https://example.com?x" "https://example.com/")))
 
+(deftest web-backslash-terminates-the-authority
+  (is (= "https://evil.example" (origin/origin "https://evil.example\\@victim.example/path")))
+  (is (= "/docs" (:path (origin/parse-url "https://example.com\\docs"))))
+  (is (not (origin/same-origin? "https://evil.example\\@victim.example/path"
+                                "https://victim.example/"))))
+
 (deftest parse-url-strips-userinfo-from-authority
   ;; RFC 6454: an origin is scheme://host[:port] -- userinfo ("user@" or
   ;; "user:pass@") is never part of it. A URL shaped like

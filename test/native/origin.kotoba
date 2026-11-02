@@ -24,4 +24,7 @@
         (not (string=? (:path (origin/parse-url "https://example.com?x=1#top")) "/?x=1#top")) 17
         (not (string=? (:path (origin/parse-url "https://example.com#top")) "/#top")) 18
         (not (origin/same-origin? "https://example.com?x" "https://example.com/")) 19
+        (not (string=? (origin/origin "https://evil.example\\@victim.example/path") "https://evil.example")) 20
+        (not (string=? (:path (origin/parse-url "https://example.com\\docs")) "/docs")) 21
+        (origin/same-origin? "https://evil.example\\@victim.example/path" "https://victim.example/") 22
         :else 0))
