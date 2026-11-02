@@ -32,5 +32,24 @@ try {
   const large = new ReadableStream({start(controller) { controller.enqueue(new Uint8Array(60001)); }, cancel() { cancelled = true; }});
   await reject(response(large));
   if (!cancelled) throw new Error('oversized body was not cancelled');
+  let unhandledAbort = false;
+  const onUnhandled = event => { unhandledAbort = true; event.preventDefault(); };
+  window.addEventListener('unhandledrejection', onUnhandled);
+  const already = new AbortController(); already.abort();
+  let earlyCancelled = false;
+  const early = new ReadableStream({cancel() { earlyCancelled = true; }});
+  let earlyRejected = false;
+  try { await encodeLocalHtmlResponse(response(early), context, {signal:already.signal}); } catch (_) { earlyRejected = true; }
+  await new Promise(resolve => setTimeout(resolve, 50));
+  window.removeEventListener('unhandledrejection', onUnhandled);
+  if (!earlyRejected || !earlyCancelled || unhandledAbort) throw new Error('pre-aborted response was read or leaked rejection');
+  const active = new AbortController();
+  let activeCancelled = false;
+  const pending = new ReadableStream({cancel() { activeCancelled = true; }});
+  const pendingResult = encodeLocalHtmlResponse(response(pending), context, {signal:active.signal}).then(() => false, () => true);
+  active.abort();
+  if (!await pendingResult || !activeCancelled) throw new Error('pending response was not cancelled');
+  const normal = new AbortController();
+  if (!await encodeLocalHtmlResponse(response('<p>ok</p>'), context, {signal:normal.signal})) throw new Error('active signal rejected response');
   result.textContent = 'PASS';
 } catch (error) { result.textContent = 'FAIL: ' + error.message; }

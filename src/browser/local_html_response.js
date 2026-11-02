@@ -6,7 +6,7 @@ const MAX_URL_BYTES = 4096;
 const MAX_ACTOR_INPUT = 65700;
 const encoder = new TextEncoder();
 
-export async function encodeLocalHtmlResponse(response, { revision, generation, tab, url }) {
+export async function encodeLocalHtmlResponse(response, { revision, generation, tab, url }, { signal } = {}) {
   if (!(response instanceof Response) || !Number.isSafeInteger(revision) || revision < 1 ||
       !Number.isSafeInteger(generation) || generation < 1 || typeof tab !== 'string' ||
       !/^tab-[1-9][0-9]{0,9}$/.test(tab) || typeof url !== 'string') throw new Error('invalid HTML response context');
@@ -23,13 +23,25 @@ export async function encodeLocalHtmlResponse(response, { revision, generation, 
     throw new Error('HTML response length rejected');
   }
   if (!response.body) throw new Error('HTML response body missing');
+  if (signal !== undefined && !(signal instanceof AbortSignal)) throw new Error('invalid HTML response signal');
   const reader = response.body.getReader();
   const chunks = [];
-  let total = 0, timer;
+  let total = 0, timer, onAbort;
+  const aborted = new Promise((_, reject) => {
+    if (!signal) return;
+    onAbort = () => reject(new Error('HTML response aborted'));
+    signal.addEventListener('abort', onAbort, {once:true});
+    if (signal.aborted) onAbort();
+  });
+  // A pre-aborted signal can reject before the first read is raced.
+  // Mark that rejection handled even when the synchronous guard below wins.
+  aborted.catch(() => {});
   const deadline = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('HTML response timeout')), 30000); });
   try {
     while (true) {
-      const { value, done } = await Promise.race([reader.read(), deadline]);
+      if (signal?.aborted) throw new Error('HTML response aborted');
+      const { value, done } = await Promise.race([reader.read(), deadline, aborted]);
+      if (signal?.aborted) throw new Error('HTML response aborted');
       if (done) break;
       if (!(value instanceof Uint8Array)) throw new Error('invalid HTML response chunk');
       total += value.length;
@@ -39,7 +51,11 @@ export async function encodeLocalHtmlResponse(response, { revision, generation, 
   } catch (error) {
     reader.cancel().catch(() => {});
     throw error;
-  } finally { clearTimeout(timer); reader.releaseLock(); }
+  } finally {
+    clearTimeout(timer);
+    if (signal && onAbort) signal.removeEventListener('abort', onAbort);
+    reader.releaseLock();
+  }
   const bytes = new Uint8Array(total);
   let offset = 0;
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }

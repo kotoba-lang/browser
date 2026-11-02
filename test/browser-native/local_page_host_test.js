@@ -300,19 +300,41 @@ try {
     host.output(1, encoder.encode(`FRAME 1 ${n}\n${withTab}`));
     div.querySelector('input').dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', bubbles:true, cancelable:true}));
     host.output(1, encoder.encode(`NFRAME 2 ${n} 0 ${encoder.encode(notice).length}\n${withTab}${notice}`));
-    let release;
-    const stream = new ReadableStream({start(controller) { release = () => { controller.enqueue(encoder.encode('<p>x</p>')); controller.close(); }; }});
+    let cancelled = false;
+    const stream = new ReadableStream({cancel() { cancelled = true; }});
     const slow = new Response(stream, {headers:{'content-type':'text/html'}});
     Object.defineProperty(slow, 'url', {value:'https://one.example/'});
-    const delivery = host.deliverHtml(notices[0], slow);
+    const delivery = host.deliverHtml(notices[0], slow).then(() => false, () => true);
     let duplicate = false;
     try { await host.deliverHtml(notices[0], new Response('x')); } catch (_) { duplicate = true; }
     if (!duplicate || writes.length !== 1) throw new Error('concurrent HTML response accepted');
     div.querySelector('input').dispatchEvent(new InputEvent('beforeinput', {bubbles:true, cancelable:true, inputType:'insertText', data:'x'}));
     host.output(1, encoder.encode(`FRAME 3 ${n}\n${withTab}`));
-    release(); let stale = false;
-    try { await delivery; } catch (_) { stale = true; }
-    if (!stale || writes.length !== 2 || host.state().waiting) throw new Error('stale asynchronous HTML response accepted');
+    const stale = await Promise.race([delivery, new Promise(resolve => setTimeout(() => resolve(false), 500))]);
+    if (!stale || !cancelled || writes.length !== 2 || host.state().waiting) throw new Error('stale asynchronous HTML response accepted');
+    host.close(); div.remove();
+  }
+  for (const action of ['close', 'cancel', 'fail']) {
+    const div = document.createElement('div'); document.body.appendChild(div);
+    const notices = [], writes = [];
+    const host = createLocalActorHost({mount:div, write:x => writes.push(x), onNavigation:x => notices.push(x)});
+    const withTab = JSON.stringify([[...shell[0], [':dom/create-element',4,':button'],
+      [':dom/set-attr',4,':data-tab-id','tab-1'], [':dom/append-child',1,4]]]);
+    const n = encoder.encode(withTab).length;
+    const notice = JSON.stringify({tab:'tab-1', generation:1, url:'https://one.example/'});
+    host.output(1, encoder.encode(`FRAME 1 ${n}\n${withTab}`));
+    div.querySelector('input').dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', bubbles:true, cancelable:true}));
+    host.output(1, encoder.encode(`NFRAME 2 ${n} 0 ${encoder.encode(notice).length}\n${withTab}${notice}`));
+    let cancelled = false;
+    const stream = new ReadableStream({cancel() { cancelled = true; }});
+    const slow = new Response(stream, {headers:{'content-type':'text/html'}});
+    Object.defineProperty(slow, 'url', {value:'https://one.example/'});
+    const delivery = host.deliverHtml(notices[0], slow).then(() => 'resolved', () => 'rejected');
+    if (action === 'close') host.close();
+    else if (action === 'cancel') host.cancelNavigation(notices[0]);
+    else { try { host.output(2, new Uint8Array()); } catch (_) {} }
+    const outcome = await Promise.race([delivery, new Promise(resolve => setTimeout(() => resolve('timeout'), 500))]);
+    if (outcome !== 'rejected' || !cancelled || writes.some(x => x.includes('H1|'))) throw new Error(`pending body not cancelled on ${action}`);
     host.close(); div.remove();
   }
   if (nativeFrame !== null) {

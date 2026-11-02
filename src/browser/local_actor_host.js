@@ -22,7 +22,10 @@ export function createLocalActorHost({ mount, write, onNavigation = () => {}, on
   const pendingNotices = new Map();
   const committedUrls = new Map();
   let pageToken = null;
-  const readingResponses = new WeakSet();
+  const readingResponses = new Map();
+  function abortResponses() {
+    for (const controller of readingResponses.values()) controller.abort();
+  }
   let composing = false, finishingComposition = false, compositionTarget = 0, pendingComposition = [], compositionBytes = 0;
   let buffer = new Uint8Array(), expected = null;
   const encoder = new TextEncoder(), decoder = new TextDecoder('utf-8', { fatal: true });
@@ -39,6 +42,7 @@ export function createLocalActorHost({ mount, write, onNavigation = () => {}, on
   function fail(error) {
     if (!closed) {
       closed = true;
+      abortResponses();
       mount.removeEventListener('pointerdown', holdSelection, true);
       pendingText = []; pendingBytes = 0;
       pendingNotices.clear();
@@ -91,6 +95,7 @@ export function createLocalActorHost({ mount, write, onNavigation = () => {}, on
       const body = revision + '|' + encodeLocalEvent(message);
       const size = encoder.encode(body).length;
       if (size > MAX_INPUT) throw new Error('local actor input limit');
+      abortResponses();
       waiting = true;
       sent = message;
       write(size + '\n' + body);
@@ -111,6 +116,7 @@ export function createLocalActorHost({ mount, write, onNavigation = () => {}, on
     } catch (_) { return; }
     try {
       const body = `L1|${revision}|${tab}|${url}`;
+      abortResponses();
       waiting = true; sent = {type: ':host/link'};
       write(encoder.encode(body).length + '\n' + body);
     } catch (error) { fail(error); }
@@ -237,10 +243,11 @@ export function createLocalActorHost({ mount, write, onNavigation = () => {}, on
       if (waiting || composing || finishingComposition || pendingText.length) { onBusy(); return false; }
       if (readingResponses.has(notice)) throw new Error('navigation response already reading');
       const expectedRevision = revision;
-      readingResponses.add(notice);
+      const controller = new AbortController();
+      readingResponses.set(notice, controller);
       try {
         const payload = await encodeLocalHtmlResponse(response, {revision: expectedRevision, generation: notice.generation,
-                                                                 tab: notice.tab, url: notice.url});
+                                                                 tab: notice.tab, url: notice.url}, {signal:controller.signal});
         if (closed || revision !== expectedRevision || waiting || composing || finishingComposition || pendingText.length ||
             pendingNotices.get(notice.tab) !== notice) throw new Error('navigation response became stale');
         waiting = true;
@@ -255,6 +262,7 @@ export function createLocalActorHost({ mount, write, onNavigation = () => {}, on
       if (waiting || composing || finishingComposition || pendingText.length) { onBusy(); return false; }
       try {
         const body = `C1|${revision}|${notice.generation}|${notice.tab}`;
+        abortResponses();
         waiting = true;
         sent = {type: ':host/cancel', notice};
         write(encoder.encode(body).length + '\n' + body);
@@ -275,6 +283,7 @@ export function createLocalActorHost({ mount, write, onNavigation = () => {}, on
       if (closed) return;
       if (unbind) { unbind(true); unbind = null; }
       closed = true;
+      abortResponses();
       mount.removeEventListener('pointerdown', holdSelection, true);
       buffer = new Uint8Array(); pendingText = []; pendingBytes = 0;
       pendingNotices.clear();
