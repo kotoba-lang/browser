@@ -20,9 +20,19 @@ live = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(live)
 
 
+HTML_FIXTURE = '<!DOCTYPE html>\r\n<html><head><meta charset="utf-8"><title>猫\r\n犬</title></head><body><div><div><div><div><section><h1>Hi <em>世界</em></h1><p><strong>重要\r<!--猫 & < -->注意</strong> <code>x</code><ul><li>一<li>二</ul><hr><blockquote><small>Quote</small></blockquote><pre>\r\n  Code\n  Text</pre><table><tr><th>型<td>猫</table><a href="/next">Again</a><a href="javascript:alert(1)">Unsafe</a></section></div></div></div></div></body></html>'
+NEXT_HTML_FIXTURE = '<!doctype html><html><head><title>Next</title></head><body><section><h1>Next page</h1><p>Second document</p></section></body></html>'
+
 def run(args):
     command = json.loads(args.actor_command_file.read_text())
     assert isinstance(command, list) and command and all(isinstance(x, str) for x in command)
+    loopback = bool(args.loopback_origin)
+    assert loopback == bool(args.loopback_spki) and (not loopback or args.broker)
+    service_origin = args.loopback_origin or 'https://service.invalid'
+    if loopback:
+        parsed_origin = urlsplit(service_origin)
+        assert parsed_origin.scheme == 'https' and parsed_origin.hostname == '127.0.0.1' and parsed_origin.port
+        assert service_origin == f'https://127.0.0.1:{parsed_origin.port}'
     actor = live.Actor(command, args.actor_cwd)
     browser = None
     requests = []
@@ -54,7 +64,9 @@ def run(args):
 
         first = frame(1)
         with tempfile.TemporaryDirectory(prefix='html-live-', dir=args.actor_cwd) as profile, ExitStack() as cleanup:
-            browser = live.Pipe(args.chrome, profile)
+            browser = live.Pipe(args.chrome, profile,
+                host_rules='MAP * ~NOTFOUND, EXCLUDE 127.0.0.1' if loopback else 'MAP * ~NOTFOUND',
+                browser_args=[f'--ignore-certificate-errors-spki-list={args.loopback_spki}'] if loopback else [])
             cleanup.callback(browser.close)
             version = browser.call('Browser.getVersion')['product']
             target = browser.call('Target.createTarget', {'url': 'about:blank'})['targetId']
@@ -62,8 +74,8 @@ def run(args):
             fixture = ROOT / 'test/browser-native/local_html_live.html'
             # Exercise implicit paragraph and list-item endings in the native
             # parser before applying the resulting wire to the page host.
-            html = '<!DOCTYPE html>\r\n<html><head><meta charset="utf-8"><title>猫\r\n犬</title></head><body><div><div><div><div><section><h1>Hi <em>世界</em></h1><p><strong>重要\r<!--猫 & < -->注意</strong> <code>x</code><ul><li>一<li>二</ul><hr><blockquote><small>Quote</small></blockquote><pre>\r\n  Code\n  Text</pre><table><tr><th>型<td>猫</table><a href="/next">Again</a><a href="javascript:alert(1)">Unsafe</a></section></div></div></div></div></body></html>'
-            next_html = '<!doctype html><html><head><title>Next</title></head><body><section><h1>Next page</h1><p>Second document</p></section></body></html>'
+            html = HTML_FIXTURE
+            next_html = NEXT_HTML_FIXTURE
             if args.broker:
                 broker_bytes = args.broker.read_bytes()
                 assert hashlib.sha256(broker_bytes).hexdigest() == '7f760128c3a58098123c31ec3dd34b9c871932e3933f2c952facc4ab0e647212'
@@ -72,7 +84,9 @@ def run(args):
                          'test/browser-native/local_broker_response_test.js', 'src/browser/local_dom_host.js',
                          'src/browser/local_page_host.js', 'src/browser/local_actor_host.js', 'src/browser/local_html_response.js']
                 for name in files:
-                    dst = stage / name; dst.parent.mkdir(parents=True, exist_ok=True); shutil.copyfile(ROOT / name, dst)
+                    dst = stage / name; dst.parent.mkdir(parents=True, exist_ok=True)
+                    content = (ROOT / name).read_bytes()
+                    dst.write_bytes(content.replace(b'https://service.invalid', service_origin.encode()))
                 testdir = stage / 'test/browser-native'
                 (testdir / 'canonical-client-runtime.js').write_bytes(broker_bytes)
                 shutil.copyfile(ROOT / 'src/browser/local_html_response.js', testdir / 'local_html_response.js')
@@ -85,12 +99,15 @@ def run(args):
                     params = event['params']; request = params['request']; owner = event.get('sessionId')
                     requests.append({'phase':phase, 'url':request['url'], 'method':request['method'],
                                      'headers':sorted(k.lower() for k in request.get('headers', {}))})
-                    if phase.startswith('allow') and owner == session and request['url'] in ('https://service.invalid/page', 'https://service.invalid/next') and request['method'] == 'GET':
-                        body = html if request['url'].endswith('/page') else next_html
-                        browser.send('Fetch.fulfillRequest', {'requestId':params['requestId'], 'responseCode':200,
-                            'body':base64.b64encode(body.encode()).decode(),
-                            'responseHeaders':[{'name':'Content-Type','value':'text/html; charset=utf-8'},
-                                               {'name':'Access-Control-Allow-Origin','value':'*'}]}, owner)
+                    if phase.startswith('allow') and owner == session and request['url'] in (service_origin + '/page', service_origin + '/next') and request['method'] == 'GET':
+                        if loopback:
+                            browser.send('Fetch.continueRequest', {'requestId':params['requestId']}, owner)
+                        else:
+                            body = html if request['url'].endswith('/page') else next_html
+                            browser.send('Fetch.fulfillRequest', {'requestId':params['requestId'], 'responseCode':200,
+                                'body':base64.b64encode(body.encode()).decode(),
+                                'responseHeaders':[{'name':'Content-Type','value':'text/html; charset=utf-8'},
+                                                   {'name':'Access-Control-Allow-Origin','value':'*'}]}, owner)
                     else:
                         browser.send('Fetch.failRequest', {'requestId':params['requestId'], 'errorReason':'BlockedByClient'}, owner)
             def evaluate(expression, await_promise=False):
@@ -123,7 +140,7 @@ def run(args):
                     browser.call('Input.dispatchMouseEvent', {'type':kind, 'x':rect['x'], 'y':rect['y'], 'button':'left', 'clickCount':1}, session)
             present(first)
             click('button[data-action=":tab/new"]'); advance(2)
-            click('input'); url = 'https://service.invalid/page' if args.broker else 'https://one.example/'
+            click('input'); url = service_origin + '/page' if args.broker else 'https://one.example/'
             browser.call('Input.insertText', {'text':url}, session); advance(3)
             browser.call('Input.dispatchKeyEvent', {'type':'keyDown', 'key':'Enter', 'code':'Enter', 'windowsVirtualKeyCode':13}, session)
             browser.call('Input.dispatchKeyEvent', {'type':'keyUp', 'key':'Enter', 'code':'Enter', 'windowsVirtualKeyCode':13}, session)
@@ -142,7 +159,7 @@ def run(args):
                 # shipping host or authentication of the actor channel.
                 def broker_call(intent, revision):
                     parsed = urlsplit(intent['url'])
-                    assert parsed.scheme == 'https' and parsed.netloc == 'service.invalid' and not parsed.query and not parsed.fragment
+                    assert parsed.scheme == 'https' and parsed.netloc == urlsplit(service_origin).netloc and not parsed.query and not parsed.fragment
                     operation = json.dumps(parsed.path)
                     context = json.dumps({'revision':revision, 'generation':intent['generation'], 'tab':intent['tab']})
                     return 'window.brokerFixture.start(' + operation + ',' + context + ')'
@@ -157,7 +174,7 @@ def run(args):
                 broker_wait(lambda state: state['status'] == 'ready')
                 phase = 'deny'; evaluate(start_broker)
                 shown = broker_wait(lambda state: state['open'])
-                assert 'https://service.invalid' in shown['scope'] and 'GET /page' in shown['scope']
+                assert service_origin in shown['scope'] and 'GET /page' in shown['scope']
                 click('dialog.kotoba-client-consent button:first-of-type')
                 denied = broker_wait(lambda state: state['status'] == 'error')
                 assert 'not approved' in denied['message'] and not requests and snap()['page'] is None
@@ -223,7 +240,7 @@ def run(args):
                 for kind in ('mousePressed', 'mouseReleased'):
                     browser.call('Input.dispatchMouseEvent', {'type':kind, 'x':link['x'], 'y':link['y'], 'button':'left', 'clickCount':1}, session)
                 linked = advance(current + 1); current += 1
-                next_url = 'https://service.invalid/next'
+                next_url = service_origin + '/next'
                 assert linked[2] == {'tab':'tab-1', 'generation':3, 'url':next_url}, linked[2]
                 assert evaluate('window.htmlLive.notice()') == dict(revision=current, **linked[2])
                 phase = 'deny-link'; evaluate(broker_call(linked[2], current)); broker_wait(lambda state: state['open'])
@@ -293,12 +310,13 @@ def run(args):
                             'src/browser/local_page_host.js', 'src/browser/local_html_response.js']
             source_names += (['test/browser-native/local_html_broker_live.html', 'test/browser-native/local_broker_response_test.js']
                              if args.broker else ['test/browser-native/local_html_live.html'])
-            receipt = {'status':'PASS_OFFLINE_HTML_LIVE', 'chrome':version, 'frames':current + 3,
-                       'interceptedBroker':bool(args.broker), 'syntheticResponse':True, 'requests':requests, 'final':snap(),
+            receipt = {'status':'PASS_LOOPBACK_HTTPS_HTML_LIVE' if loopback else 'PASS_OFFLINE_HTML_LIVE', 'chrome':version, 'frames':current + 3,
+                       'interceptedBroker':bool(args.broker), 'syntheticResponse':not loopback, 'requests':requests, 'final':snap(),
                        'brokerSha256':hashlib.sha256(args.broker.read_bytes()).hexdigest() if args.broker else None,
                        'actorLogSha256':hashlib.sha256(actor.log).hexdigest(),
                        'sources':{name:hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in source_names},
-                       'limitations':(['automated consent clicks', 'intercepted fixture response'] if args.broker else ['synthetic response']) +
+                       'limitations':(['automated consent clicks', 'CDP gates HTTPS requests', 'self-signed test-key certificate exception', 'loopback-only HTTPS'] if loopback else
+                                       ['automated consent clicks', 'intercepted fixture response'] if args.broker else ['synthetic response']) +
                                       ['no production host', 'no Kotoba layout', 'no origin isolation qualification']}
             if args.receipt: args.receipt.write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + '\n')
             print(json.dumps(receipt, ensure_ascii=False))
@@ -316,4 +334,6 @@ if __name__ == '__main__':
     p.add_argument('--log', type=Path)
     p.add_argument('--receipt', type=Path)
     p.add_argument('--broker', type=Path, help='pinned canonical broker for intercepted fixed endpoint')
+    p.add_argument('--loopback-origin', help='test-only HTTPS 127.0.0.1 origin')
+    p.add_argument('--loopback-spki', help='test-only SHA-256 SPKI certificate exception')
     run(p.parse_args())
