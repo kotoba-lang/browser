@@ -24,7 +24,7 @@
   ;;   url-bar-commit-produces-navigation-intent
   ;;   tabs-can-be-focused-and-finished
   (:export [empty-chrome new-tab active-tab-index focus-tab set-url-input
-            commit-url finish-navigation main]))
+            commit-url commit-tab-url finish-navigation main]))
 
 ;; --- accessors (html_document.kotoba option idiom) -------------------------
 
@@ -155,6 +155,21 @@
          (document-assoc chrome
                          :chrome/tabs tabs)
          :chrome/last-navigation nav)))))
+
+(defn commit-tab-url [chrome :document tab-id :string url :string] :document
+  ;; A host-confirmed navigation may complete on a background tab. Update
+  ;; its URL/history without changing focus or another tab's address input.
+  (let [tabs (get-d chrome :chrome/tabs)
+        i (scan-for-id tabs tab-id 0 (tab-count chrome))]
+    (if (< i 0) chrome
+      (let [tab (tab-at-doc tabs i)
+            updated (document-assoc (updated-tab tab url (get-d tab :tab/history))
+                                    :tab/status (document-keyword :idle))
+            state (document-assoc chrome :chrome/tabs
+                                  (tabs-assoc tabs i updated 0 (document-vector)))]
+        (if (string=? tab-id (get-s chrome :chrome/active-tab-id))
+          (set-url-input state url)
+          state)))))
 
 (defn finish-navigation [chrome :document tab-id :string title :string status :keyword] :document
   ;; (finish-navigation chrome tab-id {:title t :status s}): unknown ids are

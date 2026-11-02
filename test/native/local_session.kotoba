@@ -12,6 +12,10 @@
   (text (option-or (session/get-value s (document-keyword :token))
                    (document-null))))
 
+(defn tab [s :document i :i64] :document
+  (option-or (document-vector-at (field (field s :session/chrome) :chrome/tabs) i)
+             (document-null)))
+
 (defn main [] :i64
   (let [key (document-keyword :token)
         empty (session/put-value (session/empty-session "personal") key (document-string "forbidden"))
@@ -38,13 +42,19 @@
         opaque-ready (session/confirm-navigation opaque "tab-3" 6 "mailto:person@example.com")
         denied (session/put-value opaque-ready key (document-string "secret"))
         restored (session/focus-tab denied "tab-2")
-        deleted (session/delete-value restored key)]
+        deleted (session/delete-value restored key)
+        bg-pending (session/commit-address (session/set-address two "https://third.example/"))
+        bg-focus (session/focus-tab bg-pending "tab-1")
+        bg-confirmed (session/confirm-navigation bg-focus "tab-2" 3 "https://third.example/")
+        bg-active (session/focus-tab bg-confirmed "tab-2")]
     (cond (not (string=? (value empty) "")) 1
           (not (string=? (value first-open) "")) 10
+          (not (string=? (text (field (tab first-open 0) :tab/url)) "")) 20
           (not (string=? (value second-open) "")) 11
           (not (string=? (value focused) "one")) 2
           (not (string=? (value two) "two")) 3
           (not (string=? (value pending) "one")) 12
+          (not= (document-count (field (tab pending 0) :tab/history)) 1) 21
           (not (string=? (value stale) "one")) 13
           (not (string=? (value (session/focus-tab wrong-tab "tab-1")) "one")) 14
           (not (string=? (value redirect) "one")) 15
@@ -54,8 +64,15 @@
           (not= (session/pending-generation old-response "tab-1") 4) 16
           (not= (session/pending-generation confirmed "tab-1") 0) 17
           (not (string=? (value cancelled) "two")) 18
+          (not= (document-count (field (tab cancelled 0) :tab/history)) 3) 22
+          (not (string=? (text (field (field cancelled :session/chrome) :chrome/url-input)) "https://two.example/next")) 23
           (not (string=? (value late) "two")) 19
           (not (string=? (value denied) "")) 7
           (not (string=? (value restored) "two")) 8
           (not (string=? (value deleted) "")) 9
+          (not (string=? (session/active-url bg-confirmed) "https://one.example/a")) 24
+          (not (string=? (text (field (field bg-confirmed :session/chrome) :chrome/url-input)) "https://one.example/a")) 25
+          (not (string=? (text (field (tab bg-confirmed 1) :tab/url)) "https://third.example/")) 26
+          (not (string=? (session/active-url bg-active) "https://third.example/")) 27
+          (not (string=? (value bg-active) "")) 28
           :else 0)))

@@ -34,13 +34,16 @@
       :session/next-generation (document-i64 (+ generation 1)))))
 
 (defn open-tab [session :document url :string] :document
-  (let [state (chrome/new-tab (field session :session/chrome) url)
+  (let [state (chrome/set-url-input (chrome/new-tab (field session :session/chrome) "") url)
         tab-id (text (field state :chrome/active-tab-id))]
     (queue-navigation (document-assoc session :session/chrome state) tab-id url)))
 
 (defn focus-tab [session :document tab-id :string] :document
-  (document-assoc session :session/chrome
-                  (chrome/focus-tab (field session :session/chrome) tab-id)))
+  (let [state (chrome/focus-tab (field session :session/chrome) tab-id)
+        pending (pending-entry session tab-id)
+        next (if (> (integer (field pending :generation)) 0)
+               (chrome/set-url-input state (text (field pending :url))) state)]
+    (document-assoc session :session/chrome next)))
 
 (defn set-address [session :document url :string] :document
   (document-assoc session :session/chrome
@@ -49,9 +52,11 @@
 (defn commit-address [session :document] :document
   (let [state (field session :session/chrome)]
     (if (< (chrome/active-tab-index state) 0) session
-      (let [next (chrome/commit-url state)
-            tab-id (text (field state :chrome/active-tab-id))
-            url (text (field state :chrome/url-input))]
+      (let [tab-id (text (field state :chrome/active-tab-id))
+            url (text (field state :chrome/url-input))
+            next (document-assoc state :chrome/last-navigation
+                                 (document-map :tab/id (document-string tab-id)
+                                               :url (document-string url)))]
         (queue-navigation (document-assoc session :session/chrome next) tab-id url)))))
 
 (defn pending-entry [session :document tab-id :string] :document
@@ -63,8 +68,13 @@
 
 (defn cancel-navigation [session :document tab-id :string generation :i64] :document
   (if (and (> generation 0) (= generation (pending-generation session tab-id)))
-    (document-assoc session :session/pending
-                    (document-dissoc (field session :session/pending) (document-string tab-id)))
+    (let [state (field session :session/chrome)
+          next (if (string=? tab-id (text (field state :chrome/active-tab-id)))
+                 (chrome/focus-tab state tab-id) state)]
+      (document-assoc
+        (document-assoc session :session/pending
+                        (document-dissoc (field session :session/pending) (document-string tab-id)))
+        :session/chrome next))
     session))
 
 (defn confirm-navigation [session :document tab-id :string generation :i64 url :string] :document
@@ -75,10 +85,12 @@
              (= generation (integer (field pending :generation)))
              (string=? url (text (field pending :url))))
       (document-assoc
-        (cancel-navigation session tab-id generation)
-        :session/committed
-        (document-assoc (field session :session/committed)
-                        (document-string tab-id) (document-string url)))
+        (document-assoc
+          (document-assoc session :session/pending
+                          (document-dissoc (field session :session/pending) (document-string tab-id)))
+          :session/chrome (chrome/commit-tab-url (field session :session/chrome) tab-id url))
+        :session/committed (document-assoc (field session :session/committed)
+                                           (document-string tab-id) (document-string url)))
       session)))
 
 (defn active-url [session :document] :string
