@@ -337,7 +337,7 @@ jobs:
           assert hashlib.sha256((root / 'aarch64-linux-static-root.elf').read_bytes()).hexdigest() == json.loads((root / 'aarch64-linux-static-root.json').read_text())['image']['sha256']
           PY
       - name: Apply Chrome event in native Kotoba
-        run: python3 scripts/check-shared-native.py --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-loop-input --event-wire "$RUNNER_TEMP/chrome-event/event-wire.txt" --output "$RUNNER_TEMP/chrome-event-native"
+        run: python3 scripts/check-shared-native.py --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-loop-input --event-wire "$RUNNER_TEMP/chrome-event/local-dom-host/event-wire.txt" --output "$RUNNER_TEMP/chrome-event-native"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
