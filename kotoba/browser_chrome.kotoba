@@ -115,7 +115,7 @@
   ;; Rebuild `tabs` with index `i` replaced by `tab` (document-assoc has no
   ;; vector-index write: its 3-arg key form takes a keyword/document only).
   ;; Forward recursion carrying the built prefix in `acc`.
-  (if (> k (document-count tabs))
+  (if (>= k (document-count tabs))
     acc
     (if (= k i)
       (tabs-assoc tabs i tab (+ k 1) (document-vector-conj acc tab))
@@ -185,15 +185,18 @@
                             "https://example.com") 0 1)
         p-status (if (= (get-k a1 :tab/status) :loading) 0 1)
         p-hist (if (= (document-count (get-d a1 :tab/history)) 2) 0 1)
-        p-hist0 (if (string=? (get-s (tab-at-doc (get-d a1 :tab/history) 0) :tab/none)
+        p-hist0 (if (string=? (option-or (document-string-value
+                                          (tab-at-doc (get-d a1 :tab/history) 0)) "")
                               "kotoba://home") 0 1)
+        p-tab-count (if (= (tab-count c1b) 1) 0 1)
         ;; fixture 2: tabs-can-be-focused-and-finished
         c2 (new-tab (new-tab (empty-chrome) "kotoba://one") "kotoba://two")
         first-id (get-s (tab-at c2 0) :tab/id)
         c2b (finish-navigation (focus-tab c2 first-id) first-id "One" :idle)
         a2 (tab-at c2b (active-tab-index c2b))
+        p-two-tabs (if (= (tab-count c2b) 2) 0 1)
         p-focus (if (string=? (get-s c2b :chrome/active-tab-id) first-id) 0 1)
         p-title (if (string=? (get-s a2 :tab/title) "One") 0 1)
         p-input (if (string=? (get-s c2b :chrome/url-input) "kotoba://one") 0 1)]
-    (+ p-url (+ p-nav (+ p-status (+ p-hist (+ p-hist0
-      (+ p-focus (+ p-title p-input)))))))))
+    (+ p-url (+ p-nav (+ p-status (+ p-hist (+ p-hist0 (+ p-tab-count
+      (+ p-two-tabs (+ p-focus (+ p-title p-input)))))))))))

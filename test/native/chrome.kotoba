@@ -1,0 +1,34 @@
+(ns browser.native-chrome-test
+  (:require [browser-chrome :as chrome])
+  (:export [main]))
+
+(defn field [d :document key :keyword] :document
+  (option-or (document-get d key) (document-null)))
+
+(defn text [d :document] :string
+  (option-or (document-string-value d) ""))
+
+(defn item [d :document i :i64] :document
+  (option-or (document-vector-at d i) (document-null)))
+
+;; Exercise the exported module as a project dependency, including repeated
+;; updates and preservation of an unrelated tab's position and history.
+(defn main [] :i64
+  (let [initial (chrome/new-tab (chrome/new-tab (chrome/empty-chrome) "https://one.example/") "https://two.example/")
+        input (chrome/set-url-input initial "https://next.example/")
+        committed (chrome/commit-url input)
+        completed (chrome/finish-navigation committed "tab-2" "Next" :idle)
+        repeated (chrome/finish-navigation completed "tab-2" "Next again" :idle)
+        unknown (chrome/finish-navigation repeated "missing" "Ignored" :idle)
+        tabs (field unknown :chrome/tabs)
+        first-tab (item tabs 0)
+        second-tab (item tabs 1)
+        history (field second-tab :tab/history)]
+    (cond (not= (document-count tabs) 2) 1
+          (not (string=? (text (field first-tab :tab/url)) "https://one.example/")) 2
+          (not (string=? (text (field second-tab :tab/url)) "https://next.example/")) 3
+          (not (string=? (text (field second-tab :tab/title)) "Next again")) 4
+          (not= (document-count history) 2) 5
+          (not (string=? (text (item history 0)) "https://two.example/")) 6
+          (not (string=? (text (item history 1)) "https://next.example/")) 7
+          :else 0)))
