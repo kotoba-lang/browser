@@ -25,6 +25,7 @@ window.htmlLive = {
   },
   commentNodes() { return Array.from(page?.querySelector('strong')?.childNodes ?? [], node => [node.nodeType, node.data]); },
   listItems() { return page ? Array.from(page.querySelectorAll('ul > li'), node => node.textContent) : []; },
+  semanticElements() { return !!page?.querySelector('hr + blockquote > small') && page.querySelector('blockquote > small').textContent === 'Quote'; },
   deepStructure() { return !!page?.querySelector('div > div > div > div > div > section > h1 > em'); },
   linkRect(index = 0) {
     const a = page?.querySelectorAll('a')[index]; if (!a) return null;

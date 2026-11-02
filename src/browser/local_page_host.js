@@ -2,7 +2,8 @@
 // The caller owns document provenance and isolation. This adapter does not
 // execute scripts, request resources, grant capabilities or implement layout.
 const TAGS = new Set(['div', 'span', 'p', 'br', 'section', 'article', 'header', 'footer', 'main',
-  'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'strong', 'em', 'b', 'i', 'code', 'ul', 'ol', 'li', 'a']);
+  'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'strong', 'em', 'b', 'i', 'code', 'ul', 'ol', 'li', 'a',
+  'hr', 'blockquote', 'small', 's', 'mark', 'sub', 'sup', 'q']);
 const ATTRS = new Set(['id', 'class', 'title']);
 const MAX_TEXT = 1048576;
 const pageBindings = new WeakMap();
@@ -52,7 +53,7 @@ export function commitLocalPageProjection(root, batches, onLink = () => {}) {
         }
       } else if (kind === ':dom/append-child') {
         const parent = nodes.get(id), child = nodes.get(value);
-        if (op.length !== 3 || !(parent instanceof Element) || parent instanceof HTMLBRElement || !idOk(value) || !child ||
+        if (op.length !== 3 || !(parent instanceof Element) || (parent instanceof HTMLBRElement || parent instanceof HTMLHRElement) || !idOk(value) || !child ||
             parents.has(value) || child === page || child.contains(parent)) throw new Error('invalid page child');
         parent.appendChild(child); parents.add(value);
       } else throw new Error('unknown page operation');

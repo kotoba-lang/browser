@@ -30,6 +30,15 @@ try {
     [':dom/append-child',3,4], [':dom/append-child',2,3], [':dom/append-child',1,2]]];
   commitLocalPageProjection(root, listOps);
   if (root.querySelector('ol > li')?.textContent !== 'one') throw new Error('list projection mismatch');
+  const semanticOps = [[[':dom/create-element',1,':div'], [':dom/set-root',1],
+    [':dom/create-element',2,':p'], [':dom/create-text',3,'one'], [':dom/append-child',2,3], [':dom/append-child',1,2],
+    [':dom/create-element',4,':hr'], [':dom/append-child',1,4],
+    [':dom/create-element',5,':blockquote'], [':dom/create-element',6,':small'],
+    [':dom/create-text',7,'two'], [':dom/append-child',6,7], [':dom/append-child',5,6], [':dom/append-child',1,5]]];
+  commitLocalPageProjection(root, semanticOps);
+  const semanticExpected = document.createElement('div');
+  semanticExpected.innerHTML = '<p>one<hr><blockquote><small>two</small></blockquote>';
+  if (!root.firstChild.isEqualNode(semanticExpected)) throw new Error('semantic page projection mismatch');
   const commentOps = [[[':dom/create-element',1,':div'], [':dom/set-root',1],
     [':dom/create-text',2,'before'], [':dom/create-comment',3,'猫 & <'], [':dom/create-text',4,'after'],
     [':dom/append-child',1,2], [':dom/append-child',1,3], [':dom/append-child',1,4]]];
@@ -61,6 +70,7 @@ try {
   refuse([[[':dom/create-element', 1, ':div'], [':dom/set-root', 1], [':dom/set-attr', 1, ':onclick', 'alert(1)']]]);
   refuse([[[':dom/create-element', 1, ':div'], [':dom/set-root', 1], [':dom/set-attr', 1, ':href', 'https://example.com']]]);
   refuse([[[':dom/create-element', 1, ':div'], [':dom/set-root', 1], [':dom/create-element', 2, ':br'], [':dom/append-child', 1, 2], [':dom/create-text', 3, 'x'], [':dom/append-child', 2, 3]]]);
+  refuse([[[':dom/create-element', 1, ':div'], [':dom/set-root', 1], [':dom/create-element', 2, ':hr'], [':dom/append-child', 1, 2], [':dom/create-text', 3, 'x'], [':dom/append-child', 2, 3]]]);
   refuse([[[':dom/create-element', 1, ':div'], [':dom/set-root', 1], [':dom/create-element', 2, ':p']]]);
   const shellMount = document.createElement('div'); document.body.appendChild(shellMount);
   const shell = [[[':dom/create-element', 1, ':main'], [':dom/set-root', 1],
