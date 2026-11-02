@@ -114,6 +114,18 @@ try {
         JSON.stringify(notices[0]) !== JSON.stringify({revision:2, tab:'tab-1', generation:3, url:'https://one.example/'})) {
       throw new Error('actor navigation notification mismatch');
     }
+    let forged = false;
+    try { host.cancelNavigation({...notices[0]}); } catch (_) { forged = true; }
+    if (!forged || !host.cancelNavigation(notices[0]) || !host.state().waiting ||
+        writes[1] !== '12\nC1|2|3|tab-1' || host.cancelNavigation(notices[0]) !== false) {
+      throw new Error('navigation cancellation mismatch');
+    }
+    const response = page ? encoder.encode(`PFRAME 3 ${shellBytes} ${encoder.encode(page).length}\n${shellWire}${page}`)
+                          : encoder.encode(`FRAME 3 ${shellBytes}\n${shellWire}`);
+    host.output(1, response);
+    let replay = false;
+    try { host.cancelNavigation(notices[0]); } catch (_) { replay = true; }
+    if (!replay || host.state().revision !== 3 || host.state().waiting) throw new Error('cancel replay accepted');
     host.close(); div.remove();
   }
   for (const invalid of ['{', {tab:'tab-1', generation:0, url:'https://one.example/'},
@@ -127,6 +139,24 @@ try {
     try { host.output(1, navFrame(invalid)); } catch (_) {}
     if (!error || notified || !host.state().closed || div.firstChild !== stable) throw new Error('invalid navigation accepted');
     div.remove();
+  }
+  {
+    const div = document.createElement('div'); document.body.appendChild(div);
+    const notices = [];
+    const host = createLocalActorHost({mount:div, write:() => {}, onNavigation:x => notices.push(x)});
+    const withTab = JSON.stringify([[...shell[0], [':dom/create-element',4,':button'],
+      [':dom/set-attr',4,':data-tab-id','tab-1'], [':dom/append-child',1,4]]]);
+    const item = JSON.stringify({tab:'tab-1', generation:1, url:'https://one.example/'});
+    const bytes = encoder.encode(withTab).length;
+    host.output(1, encoder.encode(`FRAME 1 ${bytes}\n${withTab}`));
+    div.querySelector('input').dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', bubbles:true, cancelable:true}));
+    host.output(1, encoder.encode(`NFRAME 2 ${bytes} 0 ${encoder.encode(item).length}\n${withTab}${item}`));
+    div.querySelector('input').dispatchEvent(new InputEvent('beforeinput', {bubbles:true, cancelable:true, inputType:'insertText', data:'x'}));
+    host.output(1, encoder.encode(`FRAME 3 ${shellBytes}\n${shellWire}`));
+    let rejected = false;
+    try { host.cancelNavigation(notices[0]); } catch (_) { rejected = true; }
+    if (!rejected) throw new Error('closed tab navigation handle remained valid');
+    host.close(); div.remove();
   }
   if (nativeFrame !== null) {
     const nativeMount = document.createElement('div'); document.body.appendChild(nativeMount);

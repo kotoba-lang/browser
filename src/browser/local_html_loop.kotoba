@@ -1,6 +1,7 @@
 (ns browser.local-html-loop
-  (:require [browser.local-loop :as runtime] [browser.local-html-navigation :as nav])
-  (:export [prepare]))
+  (:require [browser.local-loop :as runtime] [browser.local-html-navigation :as nav]
+            [browser.local-session :as session])
+  (:export [prepare cancel]))
 
 ;; Prepare a shell frame and page wire together; the caller must authenticate
 ;; and approve the response, then commit both as one host transaction. This
@@ -8,6 +9,14 @@
 (defn field [d :document k :keyword] :document (option-or (document-get d k) (document-null)))
 (defn integer [d :document] :i64 (option-or (document-i64-value d) 0))
 (defn kind [d :document] :keyword (option-or (document-keyword-value d) :bad))
+(defn cancel [frame :document expected :i64 tab :string generation :i64] [:option :document]
+  ;; Only an exact pending generation in the exact current frame may be
+  ;; cancelled. This changes local state and cannot authorize an operation.
+  (let [revision (integer (field frame :revision)) state (field frame :state)]
+    (if (or (< revision 1) (>= revision 9007199254740991) (not= revision expected)
+            (<= generation 0) (not= generation (session/pending-generation state tab)))
+      (option-none-of [:option :document])
+      (runtime/begin (session/cancel-navigation state tab generation) (+ revision 1)))))
 (defn prepare [frame :document expected :i64 tab :string generation :i64 url :string body :string] [:option :document]
   (let [revision (integer (field frame :revision))]
     (if (or (< revision 1) (>= revision 9007199254740991) (not= revision expected))

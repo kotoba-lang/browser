@@ -17,6 +17,7 @@ export function createLocalActorHost({ mount, write, onNavigation = () => {}, on
   }
   let revision = 0, waiting = true, closed = false, unbind = null;
   let projection = null, sent = null, pendingText = [], pendingBytes = 0;
+  const pendingNotices = new Map();
   let composing = false, finishingComposition = false, compositionTarget = 0, pendingComposition = [], compositionBytes = 0;
   let buffer = new Uint8Array(), expected = null;
   const encoder = new TextEncoder(), decoder = new TextDecoder('utf-8', { fatal: true });
@@ -35,6 +36,7 @@ export function createLocalActorHost({ mount, write, onNavigation = () => {}, on
       closed = true;
       mount.removeEventListener('pointerdown', holdSelection, true);
       pendingText = []; pendingBytes = 0;
+      pendingNotices.clear();
       pendingComposition = []; compositionBytes = 0;
       if (unbind) { unbind(true); unbind = null; }
       onError(error);
@@ -125,7 +127,14 @@ export function createLocalActorHost({ mount, write, onNavigation = () => {}, on
     unbind = bindLocalInput(mount, projection, intent);
     waiting = false;
     sent = null;
-    if (notice) onNavigation(notice);
+    // Closing a tab invalidates any previously issued host handle for it.
+    // The actor still checks the generation for every actual cancellation.
+    const tabs = new Set(Array.from(mount.querySelectorAll('button[data-tab-id]'), node => node.getAttribute('data-tab-id')));
+    for (const tab of pendingNotices.keys()) if (!tabs.has(tab)) pendingNotices.delete(tab);
+    if (completed && completed.type === ':host/cancel' && pendingNotices.get(completed.notice.tab) === completed.notice) {
+      pendingNotices.delete(completed.notice.tab);
+    }
+    if (notice) { pendingNotices.set(notice.tab, notice); onNavigation(notice); }
     if (pendingText.length) {
       const input = mount.querySelector('input[data-role="address"]');
       const target = input && projection.resolve(input);
@@ -169,6 +178,18 @@ export function createLocalActorHost({ mount, write, onNavigation = () => {}, on
     }
   }
   return Object.freeze({
+    cancelNavigation(notice) {
+      if (closed) throw new Error('local actor host closed');
+      if (!notice || pendingNotices.get(notice.tab) !== notice) throw new Error('unknown navigation intent');
+      if (waiting || composing || finishingComposition || pendingText.length) { onBusy(); return false; }
+      try {
+        const body = `C1|${revision}|${notice.generation}|${notice.tab}`;
+        waiting = true;
+        sent = {type: ':host/cancel', notice};
+        write(encoder.encode(body).length + '\n' + body);
+        return true;
+      } catch (error) { return fail(error); }
+    },
     output(fd, bytes) {
       if (closed) throw new Error('local actor host closed');
       try {
@@ -185,6 +206,7 @@ export function createLocalActorHost({ mount, write, onNavigation = () => {}, on
       closed = true;
       mount.removeEventListener('pointerdown', holdSelection, true);
       buffer = new Uint8Array(); pendingText = []; pendingBytes = 0;
+      pendingNotices.clear();
       pendingComposition = []; compositionBytes = 0;
       write('0\n');
     },

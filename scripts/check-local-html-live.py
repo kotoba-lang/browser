@@ -132,16 +132,18 @@ def run(args):
             send(f'H1|4|1|tab-1|{len(wrong.encode())}|{wrong}{html}')
             assert actor.line(time.monotonic() + 30) == b'REJECT'
             assert snap() == {'url':url, 'page':None, 'tabs':1}, snap()
+            response_revision, response_generation = 4, 1
             if args.broker:
                 # The test-only bridge derives the fixed declared operation and
                 # response context from the actor's notification. It is not a
                 # shipping host or authentication of the actor channel.
-                intent = submitted[2]
-                parsed = urlsplit(intent['url'])
-                assert parsed.scheme == 'https' and parsed.netloc == 'service.invalid' and not parsed.query and not parsed.fragment
-                operation = json.dumps(parsed.path)
-                context = json.dumps({'revision':4, 'generation':intent['generation'], 'tab':intent['tab']})
-                start_broker = 'window.brokerFixture.start(' + operation + ',' + context + ')'
+                def broker_call(intent, revision):
+                    parsed = urlsplit(intent['url'])
+                    assert parsed.scheme == 'https' and parsed.netloc == 'service.invalid' and not parsed.query and not parsed.fragment
+                    operation = json.dumps(parsed.path)
+                    context = json.dumps({'revision':revision, 'generation':intent['generation'], 'tab':intent['tab']})
+                    return 'window.brokerFixture.start(' + operation + ',' + context + ')'
+                start_broker = broker_call(submitted[2], 4)
                 def broker_wait(predicate):
                     deadline = time.monotonic() + 30
                     while time.monotonic() < deadline:
@@ -156,6 +158,17 @@ def run(args):
                 click('dialog.kotoba-client-consent button:first-of-type')
                 denied = broker_wait(lambda state: state['status'] == 'error')
                 assert 'not approved' in denied['message'] and not requests and snap()['page'] is None
+                send('C1|4|1|tab-1'); present(frame(5))
+                assert snap() == {'url':'', 'page':None, 'tabs':1}, snap()
+                send(f'H1|5|1|tab-1|{len(url.encode())}|{url}{html}')
+                assert actor.line(time.monotonic() + 30) == b'REJECT'
+                click('input'); browser.call('Input.insertText', {'text':url}, session); advance(6)
+                browser.call('Input.dispatchKeyEvent', {'type':'keyDown', 'key':'Enter', 'code':'Enter', 'windowsVirtualKeyCode':13}, session)
+                browser.call('Input.dispatchKeyEvent', {'type':'keyUp', 'key':'Enter', 'code':'Enter', 'windowsVirtualKeyCode':13}, session)
+                retried = advance(7)
+                assert retried[2] == {'tab':'tab-1', 'generation':2, 'url':url}, retried[2]
+                response_revision, response_generation = 7, 2
+                start_broker = broker_call(retried[2], response_revision)
                 time.sleep(.25)
                 phase = 'allow'; evaluate(start_broker); broker_wait(lambda state: state['open'])
                 evaluate("document.querySelectorAll('dialog.kotoba-client-consent button')[1].click()")
@@ -169,15 +182,15 @@ def run(args):
             else:
                 response = evaluate('window.htmlLive.encodeFixture(' + json.dumps(url) + ',' + json.dumps(html, ensure_ascii=True) + ')', True)
             header, payload = response.split('\n', 1)
-            assert int(header) == len(payload.encode('utf-8')) and payload.startswith('H1|4|1|tab-1|')
+            assert int(header) == len(payload.encode('utf-8')) and payload.startswith(f'H1|{response_revision}|{response_generation}|tab-1|')
             actor.proc.stdin.write(response.encode('utf-8')); actor.proc.stdin.flush()
-            present(frame(5))
+            present(frame(response_revision + 1))
             assert snap() == {'url':url, 'page':'Hi 世界重要 x', 'tabs':1}, snap()
-            click('input'); browser.call('Input.insertText', {'text':'x'}, session); present_frame = advance(6)
+            click('input'); browser.call('Input.insertText', {'text':'x'}, session); present_frame = advance(response_revision + 2)
             assert present_frame[1] is not None and snap()['page'] == 'Hi 世界重要 x'
-            click('button[data-action=":tab/new"]'); advance(7)
+            click('button[data-action=":tab/new"]'); advance(response_revision + 3)
             assert snap()['page'] is None and snap()['tabs'] == 2
-            click('button[data-tab-id="tab-1"]'); advance(8)
+            click('button[data-tab-id="tab-1"]'); advance(response_revision + 4)
             assert snap()['page'] == 'Hi 世界重要 x' and snap()['tabs'] == 2
             actor.proc.stdin.write(b'0\n'); actor.proc.stdin.flush()
             tail, _ = actor.proc.communicate(timeout=30); actor.log.extend(tail)
@@ -187,7 +200,7 @@ def run(args):
                             'src/browser/local_page_host.js', 'src/browser/local_html_response.js']
             source_names += (['test/browser-native/local_html_broker_live.html', 'test/browser-native/local_broker_response_test.js']
                              if args.broker else ['test/browser-native/local_html_live.html'])
-            receipt = {'status':'PASS_OFFLINE_HTML_LIVE', 'chrome':version, 'frames':8,
+            receipt = {'status':'PASS_OFFLINE_HTML_LIVE', 'chrome':version, 'frames':response_revision + 4,
                        'interceptedBroker':bool(args.broker), 'syntheticResponse':True, 'requests':requests, 'final':snap(),
                        'brokerSha256':hashlib.sha256(args.broker.read_bytes()).hexdigest() if args.broker else None,
                        'actorLogSha256':hashlib.sha256(actor.log).hexdigest(),

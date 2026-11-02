@@ -83,8 +83,16 @@ def run_actor(command, env, output, timeout=90):
         response(5, 1, 'tab-1', url, body); reject()
         event(5, 'B1|:ui/text|9|20|20|0|0|x'); shell, after = frame(6, True)
         assert address(shell) == url + 'x' and after == page
-        event(6, 'B1|:ui/click|5|-1|-1|0|0|'); frame(7)  # open a second blank tab
-        event(7, 'B1|:ui/click|3|-1|-1|0|0|'); _, restored = frame(8, True)
+        event(6, 'B1|:ui/submit|9|-1|-1|0|0|')
+        frame(7, True, {'tab':'tab-1', 'generation':2, 'url':url + 'x'})
+        send('C1|6|2|tab-1'); reject()  # stale frame
+        send('C1|7|1|tab-1'); reject()  # stale generation
+        send('C1|7|2|tab-1|extra'); reject()
+        send('C1|7|2|tab-1'); shell, cancelled = frame(8, True)
+        assert address(shell) == url and cancelled == page
+        response(8, 2, 'tab-1', url + 'x', body); reject()
+        event(8, 'B1|:ui/click|5|-1|-1|0|0|'); frame(9)  # open a second blank tab
+        event(9, 'B1|:ui/click|3|-1|-1|0|0|'); _, restored = frame(10, True)
         assert restored == page
         process.stdin.write(b'0\n'); process.stdin.flush()
         tail, errors = process.communicate(timeout=timeout)
