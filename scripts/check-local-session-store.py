@@ -57,13 +57,13 @@ def main():
     assert version == second_version and verified == {'corrupted':True, 'conflict':True, 'undefinedRejected':True, 'missingWriteRejected':True, 'revision':2, 'payload':expected['payload']}
     assert not requests, requests
     if a.restored_file: a.restored_file.write_text(verified['payload'], encoding='utf-8')
-    sources = ['src/browser/local_session_store.js','test/browser-native/local_session_store.html',
+    sources = ['src/browser/local_session_store.js','src/browser/local_session_persistence.js','test/browser-native/local_session_store.html',
                'test/browser-native/local_session_store_test.js','scripts/check-local-native-live.py','scripts/check-local-session-store.py']
     result = {'status':'PASS_LOCAL_SESSION_STORE_RESTART','browser':version,'recordRevision':expected['revision'], 'payloadSha256':hashlib.sha256(payload.encode()).hexdigest(),
               'nativeFixturePayload':bool(a.snapshot_file),
               'sources':{name:hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in sources},
               'limitations':['test-only profile and payload', 'checksum detects corruption but is not authentication',
-                             'no native actor snapshot integration or corrupted EDN parser qualification',
+                             'persistence coordinator uses a synthetic actor; real actor restart is not qualified',
                              'no crash-during-write, eviction, cross-device or production qualification']}
     (out / 'receipt.json').write_text(json.dumps(result, indent=2) + '\n')
     print(result['status'], version)

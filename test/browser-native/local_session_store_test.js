@@ -1,4 +1,5 @@
 import { createLocalSessionStore } from '../../src/browser/local_session_store.js';
+import { createLocalSessionPersistence } from '../../src/browser/local_session_persistence.js';
 const profile = new URL(location.href).searchParams.get('profile');
 const store = createLocalSessionStore(profile);
 let current = null;
@@ -52,9 +53,27 @@ window.sessionFixture = {
     let absent = false;
     try { await store.save('bad'); } catch (_) { absent = true; }
     if (!absent || JSON.stringify(await store.load()) !== JSON.stringify(current)) throw new Error('invalid write changed stored value');
+    const persistenceStore = createLocalSessionStore(profile + '-persist');
+    let actorRevision = 1, actorWire = 'BSS1|first', restored = null, changedDuringSave = false;
+    const actor = {state:() => ({revision:actorRevision, waiting:false, closed:false}),
+      requestSnapshot:async () => ({revision:actorRevision, wire:actorWire}),
+      restoreSnapshot:async wire => { if (actorRevision !== 1) throw new Error('not pristine'); restored = wire; actorRevision++; }};
+    const persistence = createLocalSessionPersistence({host:actor, store:persistenceStore});
+    if (await persistence.restore() !== false) throw new Error('empty persistence restored');
+    const saved = await persistence.save();
+    if (saved.stale || saved.revision !== 1 || saved.storeRevision !== 1) throw new Error('persistence save mismatch');
+    if (!await persistence.restore() || restored !== actorWire || actorRevision !== 2) throw new Error('persistence restore mismatch');
+    if (!await persistence.restore().then(() => false, () => true)) throw new Error('non-pristine restore accepted');
+    const delayedStore = {load:() => persistenceStore.load(), save:async (...args) => {
+      const result = await persistenceStore.save(...args); actorRevision++; changedDuringSave = true; return result;
+    }};
+    const stale = await createLocalSessionPersistence({host:actor, store:delayedStore}).save();
+    if (!changedDuringSave || !stale.stale || stale.revision !== 2 || stale.storeRevision !== 2) throw new Error('stale persistence save missed');
     return current;
   },
   async afterRestart(expected) {
+    const persisted = await createLocalSessionStore(profile + '-persist').load();
+    if (!persisted || persisted.payload !== 'BSS1|first' || persisted.revision !== 2) throw new Error('persistence restart mismatch');
     const restored = await store.load();
     if (JSON.stringify(restored) !== JSON.stringify(expected)) throw new Error('restart value mismatch');
     await tamper();
