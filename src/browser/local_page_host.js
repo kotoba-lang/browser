@@ -3,7 +3,8 @@
 // execute scripts, request resources, grant capabilities or implement layout.
 const TAGS = new Set(['div', 'span', 'p', 'br', 'section', 'article', 'header', 'footer', 'main',
   'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'strong', 'em', 'b', 'i', 'code', 'ul', 'ol', 'li', 'a',
-  'hr', 'blockquote', 'pre', 'small', 's', 'mark', 'sub', 'sup', 'q']);
+  'hr', 'blockquote', 'pre', 'small', 's', 'mark', 'sub', 'sup', 'q',
+  'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td']);
 const ATTRS = new Set(['id', 'class', 'title']);
 const MAX_TEXT = 1048576;
 const pageBindings = new WeakMap();

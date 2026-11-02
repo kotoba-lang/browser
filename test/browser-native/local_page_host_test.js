@@ -39,6 +39,16 @@ try {
   const semanticExpected = document.createElement('div');
   semanticExpected.innerHTML = '<p>one<hr><blockquote><small>two</small></blockquote>';
   if (!root.firstChild.isEqualNode(semanticExpected)) throw new Error('semantic page projection mismatch');
+  const tableOps = [[[':dom/create-element',1,':div'], [':dom/set-root',1],
+    [':dom/create-element',2,':table'], [':dom/create-element',3,':tbody'], [':dom/create-element',4,':tr'],
+    [':dom/create-element',5,':th'], [':dom/create-text',6,'種類'], [':dom/append-child',5,6],
+    [':dom/create-element',7,':td'], [':dom/create-text',8,'猫'], [':dom/append-child',7,8],
+    [':dom/append-child',4,5], [':dom/append-child',4,7], [':dom/append-child',3,4],
+    [':dom/append-child',2,3], [':dom/append-child',1,2]]];
+  commitLocalPageProjection(root, tableOps);
+  const tableExpected = document.createElement('div');
+  tableExpected.innerHTML = '<table><tr><th>種類</th><td>猫</td></tr></table>';
+  if (!root.firstChild.isEqualNode(tableExpected)) throw new Error('table projection mismatch');
   const preOps = [[[':dom/create-element',1,':div'], [':dom/set-root',1],
     [':dom/create-element',2,':pre'], [':dom/create-text',3,'  Code\n  Text'],
     [':dom/append-child',2,3], [':dom/append-child',1,2]]];

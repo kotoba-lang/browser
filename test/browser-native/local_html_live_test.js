@@ -25,6 +25,7 @@ window.htmlLive = {
   },
   commentNodes() { return Array.from(page?.querySelector('strong')?.childNodes ?? [], node => [node.nodeType, node.data]); },
   listItems() { return page ? Array.from(page.querySelectorAll('ul > li'), node => node.textContent) : []; },
+  tableStructure() { const row = page?.querySelector('table > tbody > tr'); return row ? Array.from(row.children, cell => cell.textContent) : null; },
   preformatted() { const pre = page?.querySelector('pre'); return pre ? {text:pre.textContent, whiteSpace:getComputedStyle(pre).whiteSpace} : null; },
   semanticElements() { return !!page?.querySelector('hr + blockquote > small') && page.querySelector('blockquote > small').textContent === 'Quote'; },
   deepStructure() { return !!page?.querySelector('div > div > div > div > div > section > h1 > em'); },
