@@ -13,7 +13,7 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 
 class Pipe:
-    def __init__(self, browser, profile):
+    def __init__(self, browser, profile, host_rules='MAP * ~NOTFOUND', browser_args=()):
         to_r, self.to_w = os.pipe()
         self.from_r, from_w = os.pipe()
         def fds():
@@ -22,8 +22,9 @@ class Pipe:
             os.dup2(b, 4)
         args = [browser, '--headless', '--disable-gpu', '--no-first-run',
                 '--disable-extensions', '--disable-background-networking', '--disable-sync',
-                '--host-resolver-rules=MAP * ~NOTFOUND', '--allow-file-access-from-files',
+                f'--host-resolver-rules={host_rules}', '--allow-file-access-from-files',
                 '--remote-debugging-pipe', f'--user-data-dir={profile}', 'about:blank']
+        args[1:1] = list(browser_args)
         if os.geteuid() == 0 or os.environ.get('KOTOBA_BROWSER_NO_SANDBOX') == '1':
             args.insert(1, '--no-sandbox')
         self.log = open(Path(profile) / 'browser.log', 'w+b')
