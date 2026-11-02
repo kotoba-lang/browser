@@ -45,6 +45,14 @@
               (controller/dispatch state (document-map :type (document-keyword :tab/close-active)))
 
               (and (= kind :ui/click) (= tag :button)
+                   (= (keyword-value (field attrs :data-action)) :history/back))
+              (controller/dispatch state (document-map :type (document-keyword :history/back)))
+
+              (and (= kind :ui/click) (= tag :button)
+                   (= (keyword-value (field attrs :data-action)) :history/forward))
+              (controller/dispatch state (document-map :type (document-keyword :history/forward)))
+
+              (and (= kind :ui/click) (= tag :button)
                    (option-some?-of [:option :string] (document-string-value (field attrs :data-tab-id))))
               (controller/dispatch state (document-map :type (document-keyword :tab/focus)
                                                         :text (field attrs :data-tab-id)))

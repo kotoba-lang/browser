@@ -19,7 +19,7 @@
         stale (session/confirm-text-navigation again "tab-1" 1 "https://example.com/" "stale")
         cleared (session/confirm-navigation again "tab-1" 2 "https://example.com/")
         tree (dom/tree (view/render stale))
-        page (item (field tree :children) 2)
+        page (item (field tree :children) 3)
         pre (item (field page :children) 0)]
     (cond (not= (session/pending-generation wrong "tab-1") 1) 1
           (not= (session/pending-generation stale "tab-1") 2) 2

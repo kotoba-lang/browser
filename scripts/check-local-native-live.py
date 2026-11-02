@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Offline test bridge between a real actor process and Chrome; not an app host."""
 import argparse
+from contextlib import ExitStack
 import json
 import os
 from pathlib import Path
@@ -68,6 +69,9 @@ class Pipe:
         os.write(self.to_w, json.dumps(request).encode() + b'\0')
 
     def close(self):
+        if getattr(self, 'closed', False):
+            return
+        self.closed = True
         try:
             self.call('Browser.close', timeout=5)
         except Exception:
@@ -144,8 +148,9 @@ def run(args):
     browser = None
     try:
         first = actor.frame(1)
-        with tempfile.TemporaryDirectory(prefix='browser-live-') as profile:
+        with tempfile.TemporaryDirectory(prefix='browser-live-') as profile, ExitStack() as cleanup:
             browser = Pipe(args.chrome, profile)
+            cleanup.callback(browser.close)
             version = browser.call('Browser.getVersion')['product']
             target = browser.call('Target.createTarget', {'url': (ROOT / 'test/browser-native/local_native_live.html').as_uri()})['targetId']
             session = browser.call('Target.attachToTarget', {'targetId': target, 'flatten': True})['sessionId']

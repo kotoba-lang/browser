@@ -7,7 +7,7 @@ import { commitLocalPageProjection } from './local_page_host.js';
 const TAGS = new Set([":main", ":nav", ":button", ":input", ":section", ":pre"]);
 const ATTRS = new Set([":aria-label", ":aria-selected", ":data-action", ":data-tab-id", ":data-role", ":value",
                        ":data-selection-start", ":data-selection-end", ":data-caret"]);
-const ACTIONS = new Set([":tab/new", ":tab/close-active"]);
+const ACTIONS = new Set([":tab/new", ":tab/close-active", ":history/back", ":history/forward"]);
 const MAX_TEXT = 1_048_576;
 const composing = new WeakSet();
 const boundContainers = new WeakSet();

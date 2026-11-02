@@ -10,7 +10,7 @@ try {
   previous.focus();
   commitLocalProjection(mount, batches);
   const address = mount.querySelector('[data-role="address"]');
-  if (mount.querySelectorAll("nav button").length !== 4 ||
+  if (mount.querySelectorAll("nav button").length !== 6 ||
       mount.querySelector('[data-tab-id="tab-2"]').getAttribute("aria-selected") !== "true" ||
       address.value !== "https://two.example/" || document.activeElement !== address ||
       address.selectionStart !== address.value.length || address.selectionEnd !== address.value.length ||

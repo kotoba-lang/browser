@@ -52,6 +52,12 @@
         d2 (append-text d1 id "Close tab")]
     (dom/append-child d2 parent id)))
 
+(defn append-history-button [document :document parent :i64 action :keyword label :string] :document
+  (let [result (dom/create-element document :button)
+        id (number (item result 0))
+        d1 (dom/set-attribute (item result 1) id :data-action (document-keyword action))]
+    (dom/append-child (append-text d1 id label) parent id)))
+
 (defn render [session :document] :document
   (let [chrome (field session :session/chrome)
         editor (field session :session/address-editor)
@@ -76,14 +82,22 @@
         d6b (dom/set-attribute d6a address-id :data-selection-end (field editor :text/selection-end))
         d6c (dom/set-attribute d6b address-id :data-caret (field editor :text/caret))
         d7 (dom/append-child d6c root-id address-id)
-        page (dom/create-element d7 :section)
+        toolbar (dom/create-element d7 :nav)
+        toolbar-id (number (item toolbar 0))
+        toolbar-labeled (dom/set-attribute (item toolbar 1) toolbar-id :aria-label (document-string "Navigation"))
+        toolbar-tree (dom/append-child toolbar-labeled root-id toolbar-id)
+        toolbar-buttons (append-history-button
+                          (append-history-button toolbar-tree toolbar-id :history/back "Back")
+                          toolbar-id :history/forward "Forward")
+        page (dom/create-element toolbar-buttons :section)
         page-id (number (item page 0))
         d8 (dom/set-attribute (item page 1) page-id :data-role (document-string "page"))
         d9 (dom/append-child d8 root-id page-id)
-        body (document-get (field session :session/pages) (document-string active))]
-    (if (option-some?-of [:option :document] body)
-      (let [pre (dom/create-element d9 :pre)
-            pre-id (number (item pre 0))
-            attached (dom/append-child (item pre 1) page-id pre-id)]
-        (append-text attached pre-id (text (option-or body (document-null)))))
-      d9)))
+        body (document-get (field session :session/pages) (document-string active))
+        page-tree (if (option-some?-of [:option :document] body)
+                    (let [pre (dom/create-element d9 :pre)
+                          pre-id (number (item pre 0))
+                          attached (dom/append-child (item pre 1) page-id pre-id)]
+                      (append-text attached pre-id (text (option-or body (document-null)))))
+                    d9)]
+    page-tree))

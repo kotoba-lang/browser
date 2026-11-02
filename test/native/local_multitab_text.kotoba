@@ -24,7 +24,7 @@
         text-rendered (view/render stale)
         transaction (dom/consume-op-transaction text-rendered)
         text-tree (dom/tree text-rendered)
-        text-page (item (field text-tree :children) 2)
+        text-page (item (field text-tree :children) 3)
         pre (item (field text-page :children) 0)
         edited (session/address-insert (session/focus-tab second-ready "tab-1") "<日本>")
         rendered (view/render edited)
@@ -35,10 +35,10 @@
         tab1 (item tabs 0)
         tab2 (item tabs 1)
         input (item children 1)
-        page (item children 2)
+        page (item children 3)
         consumed (dom/consume-op-transaction rendered)]
     (cond (not= (document-count (field empty-nav :children)) 1) 1
-          (not= (document-count children) 3) 2
+          (not= (document-count children) 4) 2
           (not= (document-count tabs) 4) 3
           (not (bool (field (field tab1 :attrs) :aria-selected))) 4
           (bool (field (field tab2 :attrs) :aria-selected)) 5

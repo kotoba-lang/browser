@@ -12,7 +12,7 @@ try {
   old.setSelectionRange(1, 3, "backward");
   commitLocalProjection(mount, batches);
   const input = mount.querySelector('[data-role="address"]');
-  if (mount.querySelectorAll("nav button").length !== 4 || document.activeElement !== input ||
+  if (mount.querySelectorAll("nav button").length !== 6 || document.activeElement !== input ||
       input.value !== "A😀B" || input.selectionStart !== 3 || input.selectionEnd !== 3 ||
       mount.querySelector("script")) throw new Error("event result mismatch");
   result.textContent = "PASS";

@@ -2,6 +2,7 @@
 """Offline Chrome UI -> native HTML actor -> Chrome page integration test."""
 import argparse
 import base64
+from contextlib import ExitStack
 import hashlib
 import importlib.util
 import json
@@ -48,8 +49,9 @@ def run(args):
             actor.proc.stdin.write(str(len(data)).encode() + b'\n' + data); actor.proc.stdin.flush()
 
         first = frame(1)
-        with tempfile.TemporaryDirectory(prefix='html-live-', dir=args.actor_cwd) as profile:
+        with tempfile.TemporaryDirectory(prefix='html-live-', dir=args.actor_cwd) as profile, ExitStack() as cleanup:
             browser = live.Pipe(args.chrome, profile)
+            cleanup.callback(browser.close)
             version = browser.call('Browser.getVersion')['product']
             target = browser.call('Target.createTarget', {'url': 'about:blank'})['targetId']
             session = browser.call('Target.attachToTarget', {'targetId': target, 'flatten': True})['sessionId']

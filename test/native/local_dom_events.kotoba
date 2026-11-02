@@ -19,6 +19,26 @@
 (defn open-many [state :document remaining :i64] :document
   (if (= remaining 0) state (open-many (session/open-tab state "") (- remaining 1))))
 
+(defn history-click-test [] :i64
+  (let [one (session/confirm-navigation (session/open-tab (session/empty-session "h") "https://a/") "tab-1" 1 "https://a/")
+        two (session/confirm-navigation (session/commit-address (session/set-address one "https://b/")) "tab-1" 2 "https://b/")
+        snapshot (view/render two)
+        nav (item (children (dom/tree snapshot)) 2)
+        back-id (id (item (children nav) 0))
+        pending (bridge/dispatch two snapshot (event :ui/click back-id))
+        stale (bridge/dispatch pending snapshot (event :ui/click back-id))
+        confirmed (session/confirm-navigation pending "tab-1" 3 "https://a/")
+        snapshot2 (view/render confirmed)
+        nav2 (item (children (dom/tree snapshot2)) 2)
+        forward-id (id (item (children nav2) 1))
+        next (bridge/dispatch confirmed snapshot2 (event :ui/click forward-id))]
+    (cond (not= (session/pending-generation pending "tab-1") 3) 31
+          (not (string=? (session/active-url pending) "https://b/")) 32
+          (not (document-equal? pending stale)) 33
+          (not (string=? (session/active-url confirmed) "https://a/")) 34
+          (not= (session/pending-generation next "tab-1") 4) 35
+          :else 0)))
+
 (defn main [] :i64
   (let [empty (session/empty-session "p")
         frame0 (view/render empty)
@@ -68,7 +88,8 @@
         many-typed (bridge/dispatch many many-frame
                      (document-map :type (document-keyword :ui/text)
                                    :target (document-i64 many-input) :text (document-string "many")))]
-    (cond (not (document-equal? opened stale)) 1
+    (cond (not= (history-click-test) 0) (history-click-test)
+          (not (document-equal? opened stale)) 1
           (not (document-equal? typed old-input)) 2
           (not= (session/pending-generation submitted "tab-1") 1) 3
           (not (string=? (session/active-url forged) "")) 4
