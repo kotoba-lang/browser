@@ -3,10 +3,31 @@
 // verifies artifact provenance, fetches, or grants a service operation.
 import { createLocalActorHost } from './local_actor_host.js';
 
+const verifiedModules = new WeakSet();
+const MAX_ARTIFACT_BYTES = 16777216;
+// The embedding host must obtain the expected digest from its trusted,
+// immutable release manifest. Matching an attacker-supplied digest does not
+// authenticate an artifact or its source. No downloads occur here.
+export async function compileVerifiedLocalActor(bytes, expectedSha256) {
+  if (!(bytes instanceof Uint8Array) || bytes.length < 8 || bytes.length > MAX_ARTIFACT_BYTES ||
+      typeof expectedSha256 !== 'string' || !/^[0-9a-f]{64}$/.test(expectedSha256)) {
+    throw new Error('invalid local actor artifact');
+  }
+  // Snapshot before awaiting digest: caller mutation must not change the
+  // bytes that are subsequently compiled.
+  const snapshot = bytes.slice();
+  const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', snapshot));
+  const actual = Array.from(hash, byte => byte.toString(16).padStart(2, '0')).join('');
+  if (actual !== expectedSha256) throw new Error('local actor digest mismatch');
+  const module = await WebAssembly.compile(snapshot);
+  verifiedModules.add(module);
+  return module;
+}
+
 export function createLocalWorkerActor({mount, worker, module, fuel, createStdio,
                                         onNavigation, onNavigationError, onBusy,
                                         onError = () => {}, onStop = () => {}}) {
-  if (!(module instanceof WebAssembly.Module) || !Number.isSafeInteger(fuel) || fuel < 1 ||
+  if (!(module instanceof WebAssembly.Module) || !verifiedModules.has(module) || !Number.isSafeInteger(fuel) || fuel < 1 ||
       !worker || typeof worker.postMessage !== 'function' || typeof worker.addEventListener !== 'function' ||
       typeof worker.removeEventListener !== 'function' || typeof worker.terminate !== 'function' ||
       typeof createStdio !== 'function' || typeof onError !== 'function' || typeof onStop !== 'function') {

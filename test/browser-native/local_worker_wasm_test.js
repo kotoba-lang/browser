@@ -1,8 +1,8 @@
-import { createLocalWorkerActor } from '../../src/browser/local_worker_actor.js';
+import { createLocalWorkerActor, compileVerifiedLocalActor } from '../../src/browser/local_worker_actor.js';
 const result = document.getElementById('result');
 try {
   const bytes = Uint8Array.from(atob(window.WASM_PROBE), c => c.charCodeAt(0));
-  const module = await WebAssembly.compile(bytes), worker = new Worker('./amu-static-host.js');
+  const module = await compileVerifiedLocalActor(bytes, window.WASM_DIGEST), worker = new Worker('./amu-static-host.js');
   let stopped = false, error = null;
   const actor = createLocalWorkerActor({mount:document.getElementById('mount'),worker,module,fuel:1000000,
     createStdio:createKotobaLocalStdio,onError:e => {error = e;},onStop:() => {stopped = true;}});

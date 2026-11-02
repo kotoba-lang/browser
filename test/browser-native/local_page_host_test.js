@@ -1,7 +1,7 @@
 import { commitLocalPageProjection } from '../../src/browser/local_page_host.js';
 import { commitLocalProjection } from '../../src/browser/local_dom_host.js';
 import { createLocalActorHost } from '../../src/browser/local_actor_host.js';
-import { createLocalWorkerActor } from '../../src/browser/local_worker_actor.js';
+import { createLocalWorkerActor, compileVerifiedLocalActor } from '../../src/browser/local_worker_actor.js';
 import batches from './page_fixture.js';
 import nativeFrame from './page_frame_fixture.js';
 const result = document.getElementById('result');
@@ -382,7 +382,14 @@ try {
       terminate() { this.terminated = true; }
       send(data) { this.dispatchEvent(new MessageEvent('message', {data})); }
     }
-    const module = await WebAssembly.compile(Uint8Array.from([0,97,115,109,1,0,0,0]));
+    const bytes = Uint8Array.from([0,97,115,109,1,0,0,0]);
+    const rawModule = await WebAssembly.compile(bytes);
+    let refusedRaw = false;
+    try { createLocalWorkerActor({mount:document.createElement('div'), worker:new FakeWorker(), module:rawModule, fuel:1000, createStdio:() => ({})}); } catch (_) { refusedRaw = true; }
+    if (!refusedRaw || !await compileVerifiedLocalActor(bytes, '0'.repeat(64)).then(() => false, () => true)) throw new Error('unverified Wasm accepted');
+    const compiling = compileVerifiedLocalActor(bytes, '93a44bbb96c751218e4c00d479e4c14358122a389acca16205b1e4d0dc5f9476');
+    bytes[0] = 1;
+    const module = await compiling;
     const worker = new FakeWorker(), div = document.createElement('div'); document.body.appendChild(div);
     const writes = [], errors = []; let output, disposed = false, stopped = false;
     const actor = createLocalWorkerActor({mount:div, worker, module, fuel:1000,

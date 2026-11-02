@@ -37,7 +37,7 @@ def main():
     shutil.copyfile(a.stdio, stage / 'test/browser-native/amu-local-stdio.js')
     if a.wasm:
         shutil.copyfile(a.worker_host, stage / 'test/browser-native/amu-static-host.js')
-        (stage / 'test/browser-native/wasm-probe.js').write_text('window.WASM_PROBE=' + json.dumps(base64.b64encode(a.wasm.read_bytes()).decode()) + ';\n')
+        (stage / 'test/browser-native/wasm-probe.js').write_text('window.WASM_PROBE=' + json.dumps(base64.b64encode(a.wasm.read_bytes()).decode()) + ';window.WASM_DIGEST=' + json.dumps(hashlib.sha256(a.wasm.read_bytes()).hexdigest()) + ';\n')
     spec = importlib.util.spec_from_file_location('live', ROOT / 'scripts/check-local-native-live.py')
     live = importlib.util.module_from_spec(spec); spec.loader.exec_module(live)
     with tempfile.TemporaryDirectory(prefix='profile-', dir=out) as profile:

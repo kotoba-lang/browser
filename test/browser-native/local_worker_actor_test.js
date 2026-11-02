@@ -1,4 +1,4 @@
-import { createLocalWorkerActor } from '../../src/browser/local_worker_actor.js';
+import { createLocalWorkerActor, compileVerifiedLocalActor } from '../../src/browser/local_worker_actor.js';
 const result = document.getElementById('result'), encoder = new TextEncoder();
 try {
   class FakeWorker extends EventTarget {
@@ -8,7 +8,7 @@ try {
     send(data) { this.dispatchEvent(new MessageEvent('message', {data})); }
   }
   const worker = new FakeWorker(), errors = [];
-  const module = await WebAssembly.compile(Uint8Array.from([0,97,115,109,1,0,0,0]));
+  const module = await compileVerifiedLocalActor(Uint8Array.from([0,97,115,109,1,0,0,0]), '93a44bbb96c751218e4c00d479e4c14358122a389acca16205b1e4d0dc5f9476');
   let stopped = false;
   const actor = createLocalWorkerActor({mount:document.getElementById('mount'), worker, module, fuel:1000,
     createStdio:createKotobaLocalStdio, onError:error => errors.push(error), onStop:() => {stopped = true;}});
