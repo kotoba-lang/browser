@@ -60,10 +60,9 @@ def run(args):
             target = browser.call('Target.createTarget', {'url': 'about:blank'})['targetId']
             session = browser.call('Target.attachToTarget', {'targetId': target, 'flatten': True})['sessionId']
             fixture = ROOT / 'test/browser-native/local_html_live.html'
-            # HTML permits the paragraph end tag to be omitted before the
-            # parent section closes. Exercise the native parser, not Chrome's
-            # parser, on this response before applying the resulting wire.
-            html = '<section><h1>Hi <em>世界</em></h1><p><strong>重要</strong> <code>x</code></section>'
+            # Exercise implicit paragraph and list-item endings in the native
+            # parser before applying the resulting wire to the page host.
+            html = '<section><h1>Hi <em>世界</em></h1><p><strong>重要</strong> <code>x</code><ul><li>一<li>二</ul></section>'
             if args.broker:
                 broker_bytes = args.broker.read_bytes()
                 assert hashlib.sha256(broker_bytes).hexdigest() == '7f760128c3a58098123c31ec3dd34b9c871932e3933f2c952facc4ab0e647212'
@@ -202,13 +201,14 @@ def run(args):
             assert int(header) == len(payload.encode('utf-8')) and payload.startswith(f'H1|{response_revision}|{response_generation}|tab-1|')
             actor.proc.stdin.write(response.encode('utf-8')); actor.proc.stdin.flush()
             present(frame(response_revision + 1))
-            assert snap() == {'url':url, 'page':'Hi 世界重要 x', 'tabs':1}, snap()
+            assert snap() == {'url':url, 'page':'Hi 世界重要 x一二', 'tabs':1}, snap()
+            assert evaluate('window.htmlLive.listItems()') == ['一', '二']
             click('input'); browser.call('Input.insertText', {'text':'x'}, session); present_frame = advance(response_revision + 2)
-            assert present_frame[1] is not None and snap()['page'] == 'Hi 世界重要 x'
+            assert present_frame[1] is not None and snap()['page'] == 'Hi 世界重要 x一二'
             click('button[data-action=":tab/new"]'); advance(response_revision + 3)
             assert snap()['page'] is None and snap()['tabs'] == 2
             click('button[data-tab-id="tab-1"]'); advance(response_revision + 4)
-            assert snap()['page'] == 'Hi 世界重要 x' and snap()['tabs'] == 2
+            assert snap()['page'] == 'Hi 世界重要 x一二' and snap()['tabs'] == 2
             actor.proc.stdin.write(b'0\n'); actor.proc.stdin.flush()
             tail, _ = actor.proc.communicate(timeout=30); actor.log.extend(tail)
             assert actor.proc.returncode == 0 and b':status :ok :result 0' in actor.log

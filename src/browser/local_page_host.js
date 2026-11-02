@@ -2,7 +2,7 @@
 // The caller owns document provenance and isolation. This adapter does not
 // execute scripts, request resources, grant capabilities or implement layout.
 const TAGS = new Set(['div', 'span', 'p', 'br', 'section', 'article', 'header', 'footer', 'main',
-  'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'strong', 'em', 'b', 'i', 'code']);
+  'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'strong', 'em', 'b', 'i', 'code', 'ul', 'ol', 'li']);
 const ATTRS = new Set(['id', 'class', 'title']);
 const MAX_TEXT = 1048576;
 

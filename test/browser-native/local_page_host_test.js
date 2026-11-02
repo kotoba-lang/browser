@@ -20,12 +20,18 @@ try {
   let openRefused = false;
   try { commitLocalPageProjection(openRoot, batches); } catch (_) { openRefused = true; }
   if (!openRefused || openRoot.childNodes.length) throw new Error('open page root accepted');
-  const before = root.firstChild;
   const refuse = ops => {
     let rejected = false;
     try { commitLocalPageProjection(root, ops); } catch (_) { rejected = true; }
     if (!rejected || root.firstChild !== before) throw new Error('invalid page committed');
   };
+  const listOps = [[[':dom/create-element',1,':div'], [':dom/set-root',1],
+    [':dom/create-element',2,':ol'], [':dom/create-element',3,':li'], [':dom/create-text',4,'one'],
+    [':dom/append-child',3,4], [':dom/append-child',2,3], [':dom/append-child',1,2]]];
+  commitLocalPageProjection(root, listOps);
+  if (root.querySelector('ol > li')?.textContent !== 'one') throw new Error('list projection mismatch');
+  commitLocalPageProjection(root, batches);
+  const before = root.firstChild;
   refuse([[[':dom/create-element', 1, ':script'], [':dom/set-root', 1]]]);
   refuse([[[':dom/create-element', 1, ':div'], [':dom/set-root', 1], [':dom/set-attr', 1, ':onclick', 'alert(1)']]]);
   refuse([[[':dom/create-element', 1, ':div'], [':dom/set-root', 1], [':dom/set-attr', 1, ':href', 'https://example.com']]]);

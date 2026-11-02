@@ -23,6 +23,7 @@ window.htmlLive = {
     Object.defineProperty(response, 'url', {value:url});
     return host.deliverHtml(notice, response);
   },
+  listItems() { return page ? Array.from(page.querySelectorAll('ul > li'), node => node.textContent) : []; },
   snapshot() {
     const input = mount.querySelector('input');
     return {url: input?.value ?? null, page: page?.textContent ?? null, tabs: mount.querySelectorAll('nav [data-tab-id]').length};

@@ -60,7 +60,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: kotoba-lang/kotoba
-          ref: 95c9afbe04a2e003ead5f1010c8c238075fcef30
+          ref: ac0cca12b543dde065bad2967b08aac734f9cde3
           path: _html
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
