@@ -82,7 +82,14 @@
 
 (defn same-origin?
   [a b]
-  (= (origin a) (origin b)))
+  ;; No opaque-origin identity is available here. Do not compare serialized
+  ;; placeholders or schemes outside this model's supported origin set.
+  (let [pa (parse-url a)
+        pb (parse-url b)]
+    (boolean (and (contains? #{"http" "https" "ws" "wss" "kotoba"} (:scheme pa))
+                  (seq (:authority pa))
+                  (seq (:authority pb))
+                  (= (:origin pa) (:origin pb))))))
 
 (defn internal?
   [url]

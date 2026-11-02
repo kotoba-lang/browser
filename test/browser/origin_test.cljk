@@ -17,6 +17,15 @@
   (is (not (origin/same-origin? "https://example.com/a" "http://example.com/a")))
   (is (origin/internal? "kotoba://shell")))
 
+(deftest opaque-and-unsupported-origins-do-not-compare-equal
+  (is (not (origin/same-origin? "mailto:a@example.com" "mailto:b@example.com")))
+  (is (not (origin/same-origin? "/one" "/two")))
+  (is (not (origin/same-origin? "data:text/plain,a" "data:text/plain,b")))
+  (is (not (origin/same-origin? "https:///one" "https:///two")))
+  (is (not (origin/same-origin? "other://host/a" "other://host/b")))
+  (is (origin/same-origin? "kotoba://shell/a" "kotoba://shell/b"))
+  (is (origin/same-origin? "wss://example.com:443/a" "wss://example.com/b")))
+
 (deftest parse-url-strips-userinfo-from-authority
   ;; RFC 6454: an origin is scheme://host[:port] -- userinfo ("user@" or
   ;; "user:pass@") is never part of it. A URL shaped like

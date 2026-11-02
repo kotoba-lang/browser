@@ -12,4 +12,11 @@
         (not (origin/same-origin? "https://éあ😀@example.com/" "https://example.com:443/")) 5
         (origin/same-origin? "https://éあ😀@attacker.example/" "https://example.com/") 6
         (not (origin/internal? "kotoba://shell/apps")) 7
+        (origin/same-origin? "mailto:a@example.com" "mailto:b@example.com") 8
+        (origin/same-origin? "/one" "/two") 9
+        (origin/same-origin? "data:text/plain,a" "data:text/plain,b") 10
+        (origin/same-origin? "https:///one" "https:///two") 11
+        (origin/same-origin? "other://host/a" "other://host/b") 12
+        (not (origin/same-origin? "kotoba://shell/a" "kotoba://shell/b")) 13
+        (not (origin/same-origin? "wss://example.com:443/a" "wss://example.com/b")) 14
         :else 0))

@@ -174,7 +174,17 @@
   (:origin (parse-url url)))
 
 (defn same-origin? [a :string b :string] :bool
-  (string=? (origin a) (origin b)))
+  ;; Opaque and unsupported origins have no stable identity in this model.
+  ;; Reject them instead of comparing their shared serialized placeholder.
+  (let [pa (parse-url a)
+        pb (parse-url b)
+        scheme (:scheme pa)]
+    (and (or (string=? scheme "http") (string=? scheme "https")
+             (string=? scheme "ws") (string=? scheme "wss")
+             (string=? scheme "kotoba"))
+         (> (string-length (:authority pa)) 0)
+         (> (string-length (:authority pb)) 0)
+         (string=? (:origin pa) (:origin pb)))))
 
 (defn internal? [url :string] :bool
   ;; nil scheme in the .cljc is "" here; neither equals "kotoba".
