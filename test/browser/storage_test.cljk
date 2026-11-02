@@ -27,6 +27,16 @@
     (is (nil? (storage/get-value store p "kotoba://shell" :session)))
     (is (= :storage/delete (-> store :storage/log last :op)))))
 
+(deftest unsupported-origins-cannot-share-a-storage-partition
+  (let [p (profile/new-profile {:id "personal"})
+        base (storage/put-value (storage/empty-store) p "https://example.com/a" :token "ok")
+        denied (storage/put-value base p "mailto:a@example.com" :token "secret")]
+    (is (= base denied))
+    (is (nil? (storage/get-value denied p "mailto:b@example.com" :token)))
+    (is (= {} (storage/origin-entries denied p "data:text/plain,a")))
+    (is (= denied (storage/delete-value denied p "/relative" :token)))
+    (is (= "ok" (storage/get-value denied p "https://example.com:443/b" :token)))))
+
 (deftest storage-log-can-be-promoted-to-audit-events
   (let [acct (account/new-account {:id "local"})
         p (profile/new-profile {:id "default" :account acct})
