@@ -1,0 +1,7 @@
+{
+  "manifest_version": 2,
+  "name": "mv2 fixture",
+  "version": "1.0.0",
+  "permissions": ["storage", "https://news.example/*"],
+  "background": {"scripts": ["background.js"]}
+}

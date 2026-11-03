@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "cmp-reader fixture",
+  "version": "1.0.0",
+  "permissions": ["storage", "cookies", "tabs", "scripting"],
+  "host_permissions": ["https://news.example/*"],
+  "content_scripts": [{"matches": ["https://news.example/*"], "js": ["content.js"]}],
+  "background": {"service_worker": "background.js"},
+  "action": {"default_title": "Consent"},
+  "commands": {"deny-all": {"description": "Deny all vendors"}}
+}
