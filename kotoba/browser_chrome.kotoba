@@ -55,6 +55,7 @@
 (defn new-tab [chrome :document url :string] :document
   ;; (update chrome :chrome/next-tab-id inc) + conj a tab + focus it.
   ;; id = (str "tab-" next-tab-id); a nil url history seed -> empty history.
+  (if (>= (document-count (get-d chrome :chrome/tabs)) 32) chrome
   (let [n (get-i chrome :chrome/next-tab-id)
         id (string-concat "tab-" (string-from-i64 n))
         hist (if (string=? url "")
@@ -73,7 +74,7 @@
        (document-assoc chrome :chrome/tabs tabs)
        :chrome/next-tab-id (document-i64 (+ n 1)))
       :chrome/active-tab-id (document-string id))
-     :chrome/url-input (document-string url))))
+     :chrome/url-input (document-string url)))))
 
 (defn tab-count [chrome :document] :i64
   (document-count (get-d chrome :chrome/tabs)))

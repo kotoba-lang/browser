@@ -203,13 +203,14 @@ export function createLocalActorHost({ mount, write, onNavigation = () => {}, on
         if (nl > MAX_HEADER) throw new Error('actor header limit');
         const header = decoder.decode(buffer.subarray(0, nl));
         if (header === 'REJECT') {
-          if (!waiting || !sent || ![':host/response', ':host/cancel', ':host/snapshot', ':host/restore'].includes(sent.type)) {
+          if (!waiting || !sent || ![':host/response', ':host/cancel', ':host/snapshot', ':host/restore', ':ui/click'].includes(sent.type)) {
             throw new Error('unexpected actor refusal');
           }
           const refused = sent;
           buffer = buffer.slice(nl + 1);
           sent = null;
           waiting = false;
+          if (refused.type === ':ui/click') { onBusy(); continue; }
           // The actor has not advanced its revision or changed state. Keep
           // the displayed page and the notice so the trusted host can cancel
           // or retry; this is a generic refusal, not a diagnostic from HTML.

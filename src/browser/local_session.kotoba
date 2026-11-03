@@ -70,10 +70,13 @@
       :session/next-generation (document-i64 (+ generation 1)))))
 
 (defn open-tab [session :document url :string] :document
-  (let [state (chrome/set-url-input (chrome/new-tab (field session :session/chrome) "") url)
+  (let [previous (field session :session/chrome)
+        opened (chrome/new-tab previous "")
+        state (chrome/set-url-input opened url)
         tab-id (text (field state :chrome/active-tab-id))]
-    (if (string=? url "") (with-chrome session state)
-      (queue-navigation (with-chrome session state) tab-id url))))
+    (if (document-equal? previous opened) session
+      (if (string=? url "") (with-chrome session state)
+        (queue-navigation (with-chrome session state) tab-id url)))))
 
 (defn focus-tab [session :document tab-id :string] :document
   (let [state (chrome/focus-tab (field session :session/chrome) tab-id)

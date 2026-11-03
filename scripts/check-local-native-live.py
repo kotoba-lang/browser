@@ -196,6 +196,7 @@ def run(args):
                 return evaluate('window.nativeLive.snapshot()')
             first_frame = f'FRAME 1 {len(first)}\n'.encode() + first
             assert evaluate('window.nativeLive.negative(' + json.dumps(list(first_frame)) + ')') is True
+            assert evaluate('window.nativeLive.refusedClick(' + json.dumps(list(first_frame)) + ')') is True
             assert evaluate('window.nativeLive.compositionCleanup(' + json.dumps(list(first_frame)) + ')') is True
             present(1, first)
             click('button')

@@ -9,6 +9,8 @@
 (defn text [d :document] :string (option-or (document-string-value d) ""))
 (defn frame [value [:option :document]] :document (option-or value (document-null)))
 (defn present? [value [:option :document]] :bool (option-some?-of [:option :document] value))
+(defn tabs [state :document n :i64] :document
+  (if (= n 0) state (tabs (session/open-tab state "") (- n 1))))
 
 (defn main [] :i64
   (let [f0 (frame (runtime/begin (session/empty-session "p") 1))
@@ -26,7 +28,10 @@
         malformed (input/decode "B1|:ui/text|09|0|0|0|0|bad")
         broken (input/decode "B1|:ui/text|9|0|0|0|0")
         movement (input/decode "B1|:ui/text|9|0|0|1|0|bad")
-        escaped (input/decode "B1|:ui/text|9|-1|-1|0|0|a|b\n日本")]
+        escaped (input/decode "B1|:ui/text|9|-1|-1|0|0|a|b\n日本")
+        full (tabs (session/empty-session "p") 32)
+        overflow (session/open-tab full "https://example.com/")
+        too-many (runtime/begin (tabs (session/empty-session "p") 31) 1)]
     (cond (not (present? opened)) 1
           (not (present? typed)) 2
           (not (present? selected)) 3
@@ -39,4 +44,6 @@
           (not (string=? (text (field notice :url)) "AXB")) 10
           (not= (option-or (document-i64-value (field notice :generation)) 0) 1) 11
           (not= (document-kind (field after-edit :navigation)) :null) 12
+          (not (document-equal? full overflow)) 13
+          (present? too-many) 14
           :else 0)))

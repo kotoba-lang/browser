@@ -1,4 +1,5 @@
 import { bindLocalInput, commitLocalProjection, encodeLocalEvent } from "../../src/browser/local_dom_host.js";
+import { createLocalActorHost } from "../../src/browser/local_actor_host.js";
 
 const mount = document.getElementById("mount");
 const result = document.getElementById("result");
@@ -42,6 +43,19 @@ function reject(batches, label) {
 }
 
 try {
+  // A refused UI click leaves the last valid projection and actor usable.
+  const actorMount = document.createElement('div'), actorWrites = [];
+  document.body.appendChild(actorMount);
+  let actorBusy = 0;
+  const actor = createLocalActorHost({mount:actorMount, write: value => actorWrites.push(value), onBusy:() => actorBusy++});
+  const frameBody = JSON.stringify([shell.slice(0, 32), shell.slice(32)]);
+  actor.output(1, new TextEncoder().encode(`FRAME 1 ${new TextEncoder().encode(frameBody).length}\n${frameBody}`));
+  const newButton = actorMount.querySelector('[data-action=":tab/new"]');
+  newButton.click(); actor.output(1, new TextEncoder().encode('REJECT\n'));
+  check(!actor.state().closed && !actor.state().waiting && actor.state().revision === 1 && actorBusy === 1, 'refused click keeps actor');
+  newButton.click();
+  check(actor.state().waiting && actorWrites.length === 2, 'actor accepts next click');
+  actor.close(); actorMount.remove();
   commitLocalProjection(mount, [op.slice(0, 5), op.slice(5)]);
   check(mount.querySelector("input").value === "日本", "input value");
   check(mount.querySelector("pre").textContent === "<script>not markup</script>", "text");

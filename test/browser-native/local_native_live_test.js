@@ -11,6 +11,19 @@ window.nativeLive = {
   busy() { return busy; },
   captureNode() { capturedNode = mount.querySelector('input'); },
   sameNode() { return capturedNode === mount.querySelector('input'); },
+  refusedClick(first) {
+    const div = document.createElement('div'); document.body.appendChild(div);
+    const writes = []; let busy = 0, errors = 0;
+    const instance = createLocalActorHost({mount:div, write:s => writes.push(s), onBusy:() => busy++, onError:() => errors++});
+    instance.output(1, Uint8Array.from(first));
+    const button = div.querySelector('button');
+    button.click();
+    instance.output(1, new TextEncoder().encode('REJECT\n'));
+    const intact = !instance.state().closed && !instance.state().waiting && instance.state().revision === 1 && busy === 1;
+    button.click();
+    const ok = intact && instance.state().waiting && writes.length === 2 && errors === 0;
+    instance.close(); div.remove(); return ok;
+  },
   queueLimit(first, second) {
     const div = document.createElement('div'); document.body.appendChild(div);
     const writes = []; let refused = 0;

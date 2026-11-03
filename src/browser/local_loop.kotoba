@@ -27,7 +27,11 @@
 ;; The embedding runtime owns this frame and its revision. A UI callback is
 ;; not an authority grant; input must name the exact current revision.
 (defn begin [state :document revision :i64] [:option :document]
-  (if (or (< revision 1) (> revision 9007199254740991)) (option-none-of [:option :document])
+  ;; The tab strip also contains New and Close controls. Reject before
+  ;; constructing a 33rd child; the caller retains the previous frame.
+  (if (or (< revision 1) (> revision 9007199254740991)
+          (> (document-count (field (field state :session/chrome) :chrome/tabs)) 30))
+    (option-none-of [:option :document])
     (let [snapshot (view/render state)
           batches (item (dom/consume-op-transaction snapshot) 0)
           encoded (wire/encode state snapshot batches)]
