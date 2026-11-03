@@ -1,0 +1,359 @@
+(ns browser.input
+  "Canonical pointer/keyboard event reducer for the kotoba-only browser surface.
+
+   Host adapters and aiueos providers normalize their own event names into this
+   vocabulary before reducing against browser.surface."
+  {:kotoba/export [empty-state window-at normalize-event actions-for-event
+                   reduce-event reduce-events]}
+  (:require [browser.surface :as surface]))
+
+(def titlebar-height 28)
+(def resize-handle-size 16)
+
+(defn empty-state
+  []
+  {:pointer/position [0 0]
+   :pointer/capture nil})
+
+(defn- point-in-rect?
+  [[px py] [x y w h]]
+  (and (let [__native_cmp_586_0 x __native_cmp_586_1 px __native_cmp_586_2 (+ x w)] (and (<= __native_cmp_586_0 __native_cmp_586_1) (<= __native_cmp_586_1 __native_cmp_586_2)))
+       (let [__native_cmp_611_0 y __native_cmp_611_1 py __native_cmp_611_2 (+ y h)] (and (<= __native_cmp_611_0 __native_cmp_611_1) (<= __native_cmp_611_1 __native_cmp_611_2)))))
+
+(defn window-at
+  [surface point]
+  (first (filter (fn [__native_683_arg1] (point-in-rect? point (:window/rect __native_683_arg1)))
+                 (reverse (:surface/windows surface)))))
+
+(defn- in-titlebar?
+  [[px py] [_x y _w _h]]
+  (let [__native_cmp_829_0 y __native_cmp_829_1 py __native_cmp_829_2 (+ y titlebar-height)] (and (<= __native_cmp_829_0 __native_cmp_829_1) (<= __native_cmp_829_1 __native_cmp_829_2))))
+
+(defn- in-resize-handle?
+  [[px py] [x y w h]]
+  (and (let [__native_cmp_917_0 (- (+ x w) resize-handle-size) __native_cmp_917_1 px __native_cmp_917_2 (+ x w)] (and (<= __native_cmp_917_0 __native_cmp_917_1) (<= __native_cmp_917_1 __native_cmp_917_2)))
+       (let [__native_cmp_971_0 (- (+ y h) resize-handle-size) __native_cmp_971_1 py __native_cmp_971_2 (+ y h)] (and (<= __native_cmp_971_0 __native_cmp_971_1) (<= __native_cmp_971_1 __native_cmp_971_2)))))
+
+(defn- launcher-app-at
+  "Hit-test the fixed launcher rectangles emitted by surface-node."
+  [surface [px py]]
+  (let [top (:surface/menubar-height surface 28)]
+    (when (let [__native_cmp_1192_0 (+ top 3) __native_cmp_1192_1 py __native_cmp_1192_2 (+ top 27)] (and (<= __native_cmp_1192_0 __native_cmp_1192_1) (<= __native_cmp_1192_1 __native_cmp_1192_2)))
+      (first
+       (filter (fn [app]
+                 (let [left (+ 6 (* 102 (:app/launcher-slot app 0)))]
+                   (let [__native_cmp_1348_0 left __native_cmp_1348_1 px __native_cmp_1348_2 (+ left 96)] (and (<= __native_cmp_1348_0 __native_cmp_1348_1) (<= __native_cmp_1348_1 __native_cmp_1348_2)))))
+               (:surface/apps surface))))))
+
+(defn- dock-app-at
+  "Hit-test the centered Dock buttons emitted by surface-node."
+  [surface [px py]]
+  (let [[width height] (:surface/viewport surface [1280 800])
+        apps (:surface/apps surface)
+        dock-height (:surface/dock-height surface 64)
+        dock-width (+ 12 (* (count apps) 72))
+        centered-left (quot (- width dock-width) 2)
+        dock-left (if (< centered-left 12) 12 centered-left)
+        dock-top (- height (+ dock-height 8))]
+    (when (let [__native_cmp_1892_0 (+ dock-top 6) __native_cmp_1892_1 py __native_cmp_1892_2 (+ dock-top 58)] (and (<= __native_cmp_1892_0 __native_cmp_1892_1) (<= __native_cmp_1892_1 __native_cmp_1892_2)))
+      (first
+       (filter (fn [app]
+                 (let [left (+ dock-left 6 (* 72 (:app/launcher-slot app 0)))]
+                   (let [__native_cmp_2067_0 left __native_cmp_2067_1 px __native_cmp_2067_2 (+ left 64)] (and (<= __native_cmp_2067_0 __native_cmp_2067_1) (<= __native_cmp_2067_1 __native_cmp_2067_2)))))
+               apps)))))
+
+(defn- window-close-hit?
+  [window [px py]]
+  (let [[x y w _h] (:window/rect window)
+        left (+ x w -22)
+        top (+ y 6)]
+    (and (>= w 40)
+         (let [__native_cmp_2279_0 left __native_cmp_2279_1 px __native_cmp_2279_2 (+ left 16)] (and (<= __native_cmp_2279_0 __native_cmp_2279_1) (<= __native_cmp_2279_1 __native_cmp_2279_2)))
+         (let [__native_cmp_2313_0 top __native_cmp_2313_1 py __native_cmp_2313_2 (+ top 16)] (and (<= __native_cmp_2313_0 __native_cmp_2313_1) (<= __native_cmp_2313_1 __native_cmp_2313_2))))))
+
+(defn normalize-event
+  "Converts host/aiueos event records into the browser input vocabulary."
+  [event]
+  (let [cap (or (:aiueos/capability event) (:capability event))
+        t (:event/type event)]
+    (cond
+      (= cap "pointer/move")
+      (merge {:event/type :pointer/move :x (:x event) :y (:y event)}
+             (select-keys event [:pointerId :pointerType :isPrimary
+                                 :pointer-id :pointer-type :is-primary?
+                                 :pressure :width :height]))
+
+      (= cap "pointer/down")
+      (merge {:event/type :pointer/down
+              :button (or (:button event) 0)
+              :x (:x event)
+              :y (:y event)}
+             (select-keys event [:pointerId :pointerType :isPrimary
+                                 :pointer-id :pointer-type :is-primary?
+                                 :pressure :width :height]))
+
+      (= cap "pointer/up")
+      (merge {:event/type :pointer/up
+              :button (or (:button event) 0)
+              :x (:x event)
+              :y (:y event)}
+             (select-keys event [:pointerId :pointerType :isPrimary
+                                 :pointer-id :pointer-type :is-primary?
+                                 :pressure :width :height]))
+
+      (= cap "pointer/cancel")
+      (merge {:event/type :pointer/cancel
+              :x (:x event)
+              :y (:y event)}
+             (select-keys event [:pointerId :pointerType :isPrimary
+                                 :pointer-id :pointer-type :is-primary?
+                                 :pressure :width :height]))
+
+      (= cap "pointer/click")
+      (merge {:event/type :pointer/click
+              :button (or (:button event) 0)
+              :x (:x event)
+              :y (:y event)}
+             (select-keys event [:pointerId :pointerType :isPrimary
+                                 :pointer-id :pointer-type :is-primary?
+                                 :pressure :width :height]))
+
+      (= cap "pointer/wheel")
+      (merge {:event/type :pointer/wheel
+              :x (:x event)
+              :y (:y event)
+              :delta-x (or (:delta-x event) (:deltaX event) 0)
+              :delta-y (or (:delta-y event) (:deltaY event) 0)}
+             (select-keys event [:pointerId :pointerType :isPrimary
+                                 :pointer-id :pointer-type :is-primary?
+                                 :pressure :width :height]))
+
+      (= cap "keyboard/key")
+      ;; document-input's own key-event builder already fully supports
+      ;; :alt?/:repeat? (checks (contains? event :alt?)/:repeat? to set
+      ;; a dispatched KeyboardEvent's real altKey/repeat fields) -- this
+      ;; branch silently dropped both, so a real Alt-modified keypress or
+      ;; a real OS-level key-repeat (a held-down key) reached a page's
+      ;; own addEventListener('keydown', ...) listener with altKey/repeat
+      ;; always false, regardless of what the host actually reported.
+      ;; Confirmed via direct REPL reproduction before touching source.
+      (cond-> {:event/type :key/down :key (:key event)}
+        (:shift? event) (assoc :shift? true)
+        (:ctrl? event) (assoc :ctrl? true)
+        (:meta? event) (assoc :meta? true)
+        (:alt? event) (assoc :alt? true)
+        (:repeat? event) (assoc :repeat? true))
+
+      (= cap "keyboard/type")
+      {:event/type :text/input :text (:text event)}
+
+      (= cap "text/composition-start")
+      {:event/type :composition/start}
+
+      (= cap "text/composition-update")
+      {:event/type :composition/update :text (:text event)}
+
+      (= cap "text/composition-end")
+      {:event/type :composition/end :text (:text event)}
+
+      (#{:pointer/down :pointer/move :pointer/up :pointer/cancel
+         :pointer/click :pointer/wheel
+         :key/down :key/up :text/input
+         :text/caret :text/selection
+         :composition/start :composition/update :composition/end
+         :app/launch
+         :select/change :file/select} t)
+      event
+
+      (= t :dom/click)
+      (assoc event :event/type :pointer/click)
+
+      (= t :dom/input)
+      {:event/type :text/input :text (:value event)}
+
+      :else
+      (assoc event :event/type :unknown))))
+
+(defn- event-point
+  [input event]
+  (let [event (normalize-event event)]
+    [(or (:x event) (first (:pointer/position input)) 0)
+     (or (:y event) (second (:pointer/position input)) 0)]))
+
+(defn actions-for-event
+  [surface input event]
+  (let [event (normalize-event event)
+        point (event-point input event)
+        focused (:surface/focus surface)]
+    (case (:event/type event)
+      :pointer/down
+      (if-let [window (window-at surface point)]
+        (let [[x y w h] (:window/rect window)
+              id (:window/id window)
+              action (cond
+                       (window-close-hit? window point)
+                       nil
+
+                       (in-resize-handle? point (:window/rect window))
+                       {:kind :resize
+                        :window-id id
+                        :origin point
+                        :start-size [w h]}
+
+                       (in-titlebar? point (:window/rect window))
+                       {:kind :drag
+                        :window-id id
+                        :offset [(- (first point) x) (- (second point) y)]})]
+          {:input (assoc (assoc input :pointer/position point) :pointer/capture action)
+           :actions [{:action :window/focus :window-id id}]})
+        {:input (assoc input :pointer/position point)
+         :actions []})
+
+      :pointer/move
+      (let [capture (:pointer/capture input)
+            action (case (:kind capture)
+                     :drag
+                     (let [[dx dy] (:offset capture)]
+                       {:action :window/move
+                        :window-id (:window-id capture)
+                        :position [(- (first point) dx) (- (second point) dy)]})
+
+                     :resize
+                     (let [[ox oy] (:origin capture)
+                           [sw sh] (:start-size capture)]
+                       {:action :window/resize
+                        :window-id (:window-id capture)
+                        :size [(max 120 (+ sw (- (first point) ox)))
+                               (max 80 (+ sh (- (second point) oy)))]})
+
+                     nil)]
+        {:input (assoc input :pointer/position point)
+         :actions (cond-> [] action (conj action))})
+
+      :pointer/up
+      {:input (assoc (assoc input :pointer/position point) :pointer/capture nil)
+       :actions []}
+
+      ;; A real pointercancel (an interrupted gesture -- capture stolen by
+      ;; the OS/another surface, a multi-touch conflict, etc.) ends the
+      ;; current pointer interaction exactly like pointerup does, per the
+      ;; Pointer Events spec. This case was previously entirely absent, so
+      ;; it silently fell through to the default no-op clause below and
+      ;; left :pointer/capture untouched -- a canceled titlebar-drag or
+      ;; resize-handle-drag stayed "captured," so the very next unrelated
+      ;; :pointer/move (from a totally different gesture) was misinterpreted
+      ;; as a continuation of the old drag/resize. Confirmed via direct REPL
+      ;; reproduction before this fix: down -> cancel -> an unrelated move
+      ;; to a far-away point still relocated the window as if the drag were
+      ;; still live.
+      :pointer/cancel
+      {:input (assoc (assoc input :pointer/position point) :pointer/capture nil)
+       :actions []}
+
+      :pointer/click
+      (if-let [window (window-at surface point)]
+        {:input (assoc input :pointer/position point)
+         :actions [(if (window-close-hit? window point)
+                     {:action :window/close :window-id (:window/id window)}
+                     {:action :window/focus :window-id (:window/id window)})]}
+        (if-let [app (launcher-app-at surface point)]
+          {:input (assoc input :pointer/position point)
+           :actions [{:action :app/launch :app-id (:app/id app)}]}
+          (if-let [app (dock-app-at surface point)]
+            {:input (assoc input :pointer/position point)
+             :actions [{:action :app/launch :app-id (:app/id app)}]}
+            {:input (assoc input :pointer/position point)
+             :actions []})))
+
+      :app/launch
+      {:input input
+       :actions [{:action :app/launch :app-id (:app-id event)}]}
+
+      :pointer/wheel
+      (if-let [window (window-at surface point)]
+        {:input (assoc input :pointer/position point)
+         :actions [{:action :window/scroll
+                    :window-id (:window/id window)
+                    :delta-x (:delta-x event)
+                    :delta-y (:delta-y event)
+                    :x (first point)
+                    :y (second point)}]}
+        {:input (assoc input :pointer/position point)
+         :actions []})
+
+      :key/down
+      (let [edit-action (case (:key event)
+                          "Backspace" {:action :text/edit :window-id focused
+                                       :text/op :delete-backward}
+                          "Delete" {:action :text/edit :window-id focused
+                                    :text/op :delete-forward}
+                          "ArrowLeft" {:action :text/edit :window-id focused
+                                       :text/op :move-caret :delta -1
+                                       :extend? (:shift? event)}
+                          "ArrowRight" {:action :text/edit :window-id focused
+                                        :text/op :move-caret :delta 1
+                                        :extend? (:shift? event)}
+                          "Home" {:action :text/edit :window-id focused
+                                  :text/op :move-to :caret 0
+                                  :extend? (:shift? event)}
+                          "End" {:action :text/edit :window-id focused
+                                 :text/op :move-to-end
+                                 :extend? (:shift? event)}
+                          "a" (when (or (:meta? event) (:ctrl? event))
+                                {:action :text/edit :window-id focused
+                                 :text/op :select-all})
+                          "A" (when (or (:meta? event) (:ctrl? event))
+                                {:action :text/edit :window-id focused
+                                 :text/op :select-all})
+                          nil)]
+        {:input input
+         :actions (cond-> [{:action :keyboard/key :window-id focused :key (:key event)}]
+                    edit-action (conj edit-action))})
+
+      :text/input
+      {:input input
+       :actions [{:action :text/input :window-id focused :text (:text event)}]}
+
+      :text/caret
+      {:input input
+       :actions [{:action :text/edit :window-id focused
+                  :text/op :caret :caret (:caret event)}]}
+
+      :text/selection
+      {:input input
+       :actions [{:action :text/edit :window-id focused
+                  :text/op :select :start (:start event) :end (:end event)}]}
+
+      :composition/start
+      {:input input
+       :actions [{:action :text/edit :window-id focused
+                  :text/op :composition-start}]}
+
+      :composition/update
+      {:input input
+       :actions [{:action :text/edit :window-id focused
+                  :text/op :composition-update :text (:text event)}]}
+
+      :composition/end
+      {:input input
+       :actions [{:action :text/edit :window-id focused
+                  :text/op :composition-end :text (:text event)}]}
+
+      {:input input :actions []})))
+
+(defn reduce-event
+  [surface input event]
+  (let [{:keys [input actions]} (actions-for-event surface input event)]
+    {:surface (surface/apply-actions surface actions)
+     :input input
+     :actions actions}))
+
+(defn reduce-events
+  ([surface events]
+   (reduce-events surface (empty-state) events))
+  ([surface input events]
+   (reduce (fn [{:keys [surface input actions]} event]
+             (let [result (reduce-event surface input event)]
+               (update result :actions (fn [__native_14399_arg1] (into actions __native_14399_arg1)))))
+           {:surface surface :input input :actions []}
+           events)))

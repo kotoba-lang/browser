@@ -4,6 +4,11 @@
    This is the shell model for using the browser UI as the OS UI itself. It is
    still just kotoba DOM data and host ABI ops: windows, panels, and launchers
    are document nodes, not native widgets."
+  {:kotoba/export [empty-surface register-app open-window
+                   close-window focus-window move-window resize-window
+                   record-key scroll-window append-text edit-text app-by-id
+                   launch-app apply-action apply-actions render-node!
+                   surface-node render-surface]}
   (:require [browser.text-edit :as text-edit]
             [cssom.layout :as layout]
             [kotoba.wasm.dom :as dom]))
@@ -14,7 +19,7 @@
    :padding 6
    :gap 6
    :fg "#111111"
-   :bg "#f5f6f8"
+   :bg "#8fb5d8"
    :button-bg "#e4e8ef"})
 
 (defn empty-surface
@@ -24,6 +29,9 @@
     :surface/title (or (:title opts) "Kotoba")
     :surface/viewport (or (:viewport opts) [1280 800])
     :surface/theme (merge default-theme (:theme opts))
+    :surface/menubar-height 28
+    :surface/launcher-height 32
+    :surface/dock-height 64
     :surface/apps []
     :surface/windows []
     :surface/focus nil
@@ -32,7 +40,9 @@
 
 (defn register-app
   [surface app]
-  (update surface :surface/apps conj app))
+  (let [slot (count (:surface/apps surface))]
+    (update surface :surface/apps conj
+            (assoc app :app/launcher-slot slot))))
 
 (defn- next-window-id
   [surface]
@@ -191,13 +201,16 @@
 (defn launch-app
   [surface app-id]
   (if-let [app (app-by-id surface app-id)]
-    (open-window surface
-                 {:app-id app-id
-                  :title (:app/title app)
-                  :rect (:app/default-rect app)
-                  :document (if-let [f (:app/document-fn app)]
-                              (f {:surface surface :app app})
-                              (:app/document app))})
+    (if-let [existing (last (filter #(= app-id (:window/app-id %))
+                                    (:surface/windows surface)))]
+      (focus-window surface (:window/id existing))
+      (open-window surface
+                   {:app-id app-id
+                    :title (:app/title app)
+                    :rect (:app/default-rect app)
+                    :document (if-let [f (:app/document-fn app)]
+                                (f {:surface surface :app app})
+                                (:app/document app))}))
     surface))
 
 (defn apply-action
@@ -274,42 +287,146 @@
 
 (defn- window-node
   [surface window focused?]
-  (let [[x y w h] (:window/rect window)]
+  (let [[x y w h] (:window/rect window)
+        workspace-top (+ (:surface/menubar-height surface 28)
+                         (:surface/launcher-height surface 32))]
     [:section {:class (str "window" (when focused? " focused"))
                :data-window-id (:window/id window)
-               :style (style {:padding 0
+               :style (style {:position "absolute"
+                              :left x
+                              :top (- y workspace-top)
+                              :padding 0
                               :width w
                               :height h
                               :background (if focused? "#ffffff" "#eef1f5")})}
      [:header {:class "titlebar"
-               :style {:background (if focused? "#d8e7ff" "#dde2ea")
+               :style {:position "relative"
+                       :height 28
+                       :box-sizing "border-box"
+                       :background (if focused? "#d8e7ff" "#dde2ea")
                        :padding 6}}
-      (:window/title window)]
+      [:span {:class "window-title"} (:window/title window)]
+      [:button {:class "window-close"
+                :data-close-window (:window/id window)
+                :aria-label "Close window"
+                :style {:position "absolute"
+                        :right 6
+                        :top 6
+                        :width 16
+                        :height 16
+                        :padding 0
+                        :border-radius "999px"
+                        :border "none"
+                        :background "#e35d5b"}}
+       ""]]
      [:main {:class "window-body"
              :style {:padding 8
                      :background "#ffffff"}}
       (or (:window/document window)
-          [:p (str "app " (:window/app-id window) " has no document")])]
-     [:footer {:class "window-geometry"
-               :style {:padding 4 :font-size 12 :color "#5f6875"}}
-      (str x "," y " " w "x" h)]]))
+          [:p (str "app " (:window/app-id window) " has no document")])]]))
 
 (defn surface-node
+  "Build the Kotoba DOM for the desktop surface.
+
+   Launcher button geometry is stable (x=6+102*slot, y=menubar+3,
+   96x24); browser.input uses the same slots to turn a pointer click into an
+   :app/launch action. Window rectangles stay in viewport coordinates while
+   their DOM nodes are positioned inside the workspace below the two bars."
   [surface]
+  (let [[width height] (:surface/viewport surface)
+        menubar-height (:surface/menubar-height surface 28)
+        launcher-height (:surface/launcher-height surface 32)
+        dock-height (:surface/dock-height surface 64)
+        apps (:surface/apps surface)
+        dock-width (+ 12 (* (count apps) 72))
+        centered-dock-left (quot (- width dock-width) 2)
+        dock-left (if (< centered-dock-left 12) 12 centered-dock-left)
+        dock-top (- height (+ dock-height 8))]
   [:main {:class "kotoba-os"
           :data-surface-id (:surface/id surface)
-          :style {:background "#f5f6f8" :padding 8}}
+          :style {:position "relative"
+                  :width width
+                  :height height
+                  :box-sizing "border-box"
+                  :background "#8fb5d8"
+                  :padding 0}}
    [:header {:class "topbar"
-             :style {:background "#ffffff" :padding 8}}
+             :style {:position "absolute"
+                     :left 0
+                     :top 0
+                     :width width
+                     :height menubar-height
+                     :box-sizing "border-box"
+                     :background "#f7f9fc"
+                     :padding 6}}
     (:surface/title surface)]
    [:nav {:class "launcher"
-          :style {:background "#edf0f5" :padding 6}}
-    (for [{:app/keys [id title]} (:surface/apps surface)]
-      [:button {:data-app-id id :style {:padding 6}} (or title id)])]
+          :style {:position "absolute"
+                  :left 0
+                  :top menubar-height
+                  :width width
+                  :height launcher-height
+                  :box-sizing "border-box"
+                  :background "#e6edf5"
+                  :padding 0}}
+    (for [{:app/keys [id title icon launcher-slot]} (:surface/apps surface)]
+      [:button {:data-app-id id
+                :data-app-icon icon
+                :style {:position "absolute"
+                        :left (+ 6 (* 102 launcher-slot))
+                        :top 3
+                        :width 96
+                        :height 24
+                        :box-sizing "border-box"
+                        :padding 2
+                        :background "#f5f7fb"}}
+       [:span {:class "app-label"} (or title id)]])]
+   [:footer {:class "dock"
+             :aria-label "AIUEOS Dock"
+             :style {:position "absolute"
+                     :left dock-left
+                     :top dock-top
+                     :width dock-width
+                     :height dock-height
+                     :box-sizing "border-box"
+                     :padding 6
+                     :border-radius 16
+                     :background "#eaf1f8"}}
+    (for [{:app/keys [id title icon launcher-slot]} apps]
+      [:button {:data-app-id id
+                :data-dock-slot launcher-slot
+                :aria-label (str "Open " title)
+                :style {:position "absolute"
+                        :left (+ 6 (* 72 launcher-slot))
+                        :top 6
+                        :width 64
+                        :height 52
+                        :box-sizing "border-box"
+                        :padding 2
+                        :border-radius 12
+                        :background "#eef1f5"}}
+       [:span {:class "dock-app-icon"
+               :style {:display "block"
+                       :height 24
+                       :font-size 18
+                       :font-weight 700
+                       :color "#315fba"}}
+        icon]
+       [:span {:class "dock-app-label"
+               :style {:display "block"
+                       :font-size 10}}
+        title]])]
    [:section {:class "workspace"
-              :style {:background "#f5f6f8" :padding 8}}
+              :style {:position "absolute"
+                      :left 0
+                      :top (+ menubar-height launcher-height)
+                      :width width
+                      :height (- height menubar-height launcher-height dock-height 8)
+                      :box-sizing "border-box"
+                      :background "#8fb5d8"
+                      :padding 0}}
     (for [window (:surface/windows surface)]
-      (window-node surface window (= (:window/id window) (:surface/focus surface))))]])
+      (window-node surface window (= (:window/id window) (:surface/focus surface))))]]))
 
 (defn render-surface
   [surface]
@@ -320,7 +437,8 @@
         tree (dom/tree document)
         [width _height] (:surface/viewport surface)
         draw-ops (layout/draw-ops tree {:width width
-                                        :theme (:surface/theme surface)})]
+                                        :theme (assoc (:surface/theme surface)
+                                                      :padding 0)})]
     {:surface surface
      :document document
      :tree tree
