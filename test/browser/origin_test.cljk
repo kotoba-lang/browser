@@ -17,6 +17,37 @@
   (is (not (origin/same-origin? "https://example.com/a" "http://example.com/a")))
   (is (origin/internal? "kotoba://shell")))
 
+(deftest opaque-and-unsupported-origins-do-not-compare-equal
+  (is (not (origin/same-origin? "mailto:a@example.com" "mailto:b@example.com")))
+  (is (not (origin/same-origin? "/one" "/two")))
+  (is (not (origin/same-origin? "data:text/plain,a" "data:text/plain,b")))
+  (is (not (origin/same-origin? "https:///one" "https:///two")))
+  (is (not (origin/same-origin? "other://host/a" "other://host/b")))
+  (is (origin/same-origin? "kotoba://shell/a" "kotoba://shell/b"))
+  (is (origin/same-origin? "wss://example.com:443/a" "wss://example.com/b")))
+
+(deftest unsupported-hosts-are-not-origin-identities
+  ;; Unicode case conversion is not IDNA; these must not share storage.
+  (is (not (origin/same-origin? "https://faß.de/" "https://fass.de/")))
+  (is (not (origin/same-origin? "https://faß.de/" "https://faß.de/")))
+  (is (not (origin/same-origin? "https://example.com:65536/" "https://example.com:65536/")))
+  (is (not (origin/same-origin? "https://example.com:443:443/" "https://example.com:443:443/")))
+  (is (not (origin/same-origin? "https://example%2ecom/" "https://example%2ecom/")))
+  (is (origin/same-origin? "https://é@EXAMPLE.com:443/" "https://example.com/")))
+
+(deftest query-and-fragment-terminate-the-authority
+  (is (= "https://victim.example" (origin/origin "https://victim.example?@attacker.example/path")))
+  (is (= "https://example.com" (origin/origin "https://example.com:443#frag/other")))
+  (is (= "/?x=1#top" (:path (origin/parse-url "https://example.com?x=1#top"))))
+  (is (= "/#top" (:path (origin/parse-url "https://example.com#top"))))
+  (is (origin/same-origin? "https://example.com?x" "https://example.com/")))
+
+(deftest web-backslash-terminates-the-authority
+  (is (= "https://evil.example" (origin/origin "https://evil.example\\@victim.example/path")))
+  (is (= "/docs" (:path (origin/parse-url "https://example.com\\docs"))))
+  (is (not (origin/same-origin? "https://evil.example\\@victim.example/path"
+                                "https://victim.example/"))))
+
 (deftest parse-url-strips-userinfo-from-authority
   ;; RFC 6454: an origin is scheme://host[:port] -- userinfo ("user@" or
   ;; "user:pass@") is never part of it. A URL shaped like

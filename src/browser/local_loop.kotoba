@@ -1,0 +1,59 @@
+(ns browser.local-loop
+  (:require [browser.local-session :as session]
+            [browser.local-view :as view]
+            [browser.local-dom-events :as events]
+            [browser.local-dom-wire :as wire]
+            [browser.local-event-wire :as input]
+            [kotoba.wasm.dom :as dom])
+  (:export [begin step new-navigation]))
+
+(defn field [d :document key :keyword] :document
+  (option-or (document-get d key) (document-null)))
+(defn item [d :document i :i64] :document
+  (option-or (document-vector-at d i) (document-null)))
+(defn text [d :document] :string
+  (option-or (document-string-value d) ""))
+
+(defn new-navigation [before :document after :document] :document
+  ;; This is an intent notification only. The trusted host still owns the
+  ;; operation broker, consent, response provenance and actor authentication.
+  (let [tab (text (field (field after :session/chrome) :chrome/active-tab-id))
+        generation (session/pending-generation after tab)
+        previous (session/pending-generation before tab)
+        entry (option-or (document-get (field after :session/pending) (document-string tab)) (document-null))]
+    (if (or (string=? tab "") (<= generation 0) (= generation previous)) (document-null)
+      (document-map :tab (document-string tab) :generation (document-i64 generation) :url (field entry :url)))))
+
+;; The embedding runtime owns this frame and its revision. A UI callback is
+;; not an authority grant; input must name the exact current revision.
+(defn begin [state :document revision :i64] [:option :document]
+  ;; The tab strip also contains New and Close controls. Reject before
+  ;; constructing a 33rd child; the caller retains the previous frame.
+  (if (or (< revision 1) (> revision 9007199254740991)
+          (> (document-count (field (field state :session/chrome) :chrome/tabs)) 30))
+    (option-none-of [:option :document])
+    (let [snapshot (view/render state)
+          batches (item (dom/consume-op-transaction snapshot) 0)
+          encoded (wire/encode state snapshot batches)]
+      (if (option-some?-of [:option :string] encoded)
+        (option-some-of [:option :document]
+          (document-map :state state :revision (document-i64 revision) :snapshot snapshot
+                        :wire (document-string (option-or encoded ""))
+                        :page-wire (if (option-some?-of [:option :string] (session/active-html-page state))
+                                     (document-string (option-or (session/active-html-page state) ""))
+                                     (document-null))))
+        (option-none-of [:option :document])))))
+
+(defn step [frame :document expected :i64 event-wire :string] [:option :document]
+  (let [revision (option-or (document-i64-value (field frame :revision)) 0)
+        state (field frame :state) snapshot (field frame :snapshot)
+        event (input/decode event-wire)]
+    (if (or (< revision 1) (>= revision 9007199254740991) (not= expected revision)
+            (not (option-some?-of [:option :document] event)))
+      (option-none-of [:option :document])
+      (let [next (events/dispatch state snapshot (option-or event (document-null)))]
+        (if (document-equal? next state) (option-none-of [:option :document])
+          (let [result (begin next (+ revision 1))]
+            (if (not (option-some?-of [:option :document] result)) result
+              (option-some-of [:option :document]
+                (document-assoc (option-or result (document-null)) :navigation (new-navigation state next))))))))))

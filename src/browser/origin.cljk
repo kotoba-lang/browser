@@ -44,8 +44,12 @@
       (let [scheme (str/lower scheme)]
         (if (str/starts-with? rest "//")
           (let [without-slashes (subs rest 2)
-                slash (.indexOf without-slashes "/")
-                authority-with-userinfo (if (neg? slash) without-slashes (subs without-slashes 0 slash))
+                web? (contains? #{"http" "https" "ws" "wss"} scheme)
+                end (reduce (fn [end delimiter]
+                              (let [i (.indexOf without-slashes delimiter)]
+                                (if (neg? i) end (min end i))))
+                            (count without-slashes) (cond-> ["/" "?" "#"] web? (conj "\\")))
+                authority-with-userinfo (subs without-slashes 0 end)
                 ;; Strip any "userinfo@" prefix before the host (WHATWG URL:
                 ;; everything up to the LAST "@" in the authority is
                 ;; userinfo, never part of the host) -- without this, a URL
@@ -60,11 +64,17 @@
                 authority (if (neg? at)
                             authority-with-userinfo
                             (subs authority-with-userinfo (inc at)))
+                raw-authority authority
                 authority (strip-default-port scheme (str/lower authority))
-                path (if (neg? slash) "/" (subs without-slashes slash))]
+                tail (subs without-slashes end)
+                path (cond
+                       (str/starts-with? tail "/") tail
+                       (and web? (str/starts-with? tail "\\")) (str "/" (subs tail 1))
+                       :else (str "/" tail))]
             {:url s
              :scheme scheme
              :authority authority
+             :raw-authority raw-authority
              :path path
              :origin (str scheme "://" authority)})
           {:url s
@@ -80,9 +90,27 @@
   [url]
   (:origin (parse-url url)))
 
+(defn- supported-authority?
+  "Admit only an ASCII host and an optional decimal port in 0..65535.
+   Check the original host: Unicode lowercasing is not IDNA canonicalization.
+   IPv6 and escaped hosts remain unsupported until URL parsing is qualified."
+  [authority]
+  (boolean (and authority
+                (re-matches #"[A-Za-z0-9.-]+(:([0-9]{1,4}|[0-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?"
+                            authority))))
+
 (defn same-origin?
   [a b]
-  (= (origin a) (origin b)))
+  ;; No opaque-origin identity is available here. Do not compare serialized
+  ;; placeholders or schemes outside this model's supported origin set.
+  (let [pa (parse-url a)
+        pb (parse-url b)]
+    (boolean (and (contains? #{"http" "https" "ws" "wss" "kotoba"} (:scheme pa))
+                  (seq (:authority pa))
+                  (seq (:authority pb))
+                  (supported-authority? (:raw-authority pa))
+                  (supported-authority? (:raw-authority pb))
+                  (= (:origin pa) (:origin pb))))))
 
 (defn internal?
   [url]

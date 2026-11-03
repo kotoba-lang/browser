@@ -1,0 +1,15 @@
+(ns browser.native-html-frame-test
+  (:require [browser.local-session :as session] [browser.local-html-navigation :as nav]
+            [browser.local-loop :as runtime] [browser.local-actor-frame :as actor])
+  (:capabilities [:io/write :io/write-error])
+  (:export [main]))
+(defn field [d :document k :keyword] :document (option-or (document-get d k) (document-null)))
+(defn kind [d :document] :keyword (option-or (document-keyword-value d) :bad))
+(defn main [] :i64
+  (let [url "https://one.example/" body "<section><h1>Hi <em>世界</em></h1><p><strong>重要</strong> <code>x</code></p></section>"
+        state (session/open-tab (session/empty-session "local") url)
+        prepared (nav/prepare state "tab-1" 1 url body)
+        frame (runtime/begin (field prepared :session) 1)]
+    (if (or (not= (kind (field prepared :kind)) :html-navigation/ok)
+            (not (option-some?-of [:option :document] frame))) 1
+      (let [sent (actor/emit-frame (option-or frame (document-null)))] 0))))

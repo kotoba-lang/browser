@@ -1,0 +1,95 @@
+(ns browser.local-snapshot
+  (:require [browser.local-session :as session] [browser-chrome :as chrome])
+  (:export [snapshot restore]))
+
+;; Bounded, inert metadata snapshot. This does not persist data itself, keep
+;; page bodies or site storage, approve operations, or restart navigation.
+;; Restore regenerates tab IDs and discards pending intents and transient UI.
+(defn field [d :document k :keyword] :document (option-or (document-get d k) (document-null)))
+(defn at [d :document i :i64] :document (option-or (document-vector-at d i) (document-null)))
+(defn text [d :document] :string (option-or (document-string-value d) ""))
+(defn num [d :document] :i64 (option-or (document-i64-value d) 0))
+(defn width [c :i64] :i64 (cond (< c 128) 1 (< c 2048) 2 (< c 65536) 3 :else 4))
+(defn safe-text? [s :string limit :i64 controls? :bool] :bool
+  (if (> (string-byte-length s) limit) false
+    (loop [i 0]
+      (if (= i (string-length s)) true
+        (let [c (string-code-point-at s i)]
+          (if (or (= c 0) (and (not controls?) (or (< c 32) (= c 127)))) false
+            (recur (+ i (width c)))))))))
+(defn valid-history? [h :document i :i64] :bool
+  (if (>= i (document-count h)) true
+    (let [entry (at h i) value (text entry)]
+      (and (= (document-kind entry) :string) (not (string=? value ""))
+           (safe-text? value 4096 false) (valid-history? h (+ i 1))))))
+(defn history-bytes [h :document i :i64 sum :i64] :i64
+  (if (or (>= i (document-count h)) (> sum 65536)) sum
+    (history-bytes h (+ i 1) (+ sum (string-byte-length (text (at h i)))))))
+(defn valid-tab? [tab :document] :bool
+  (if (or (not= (document-kind tab) :map) (not= (document-count tab) 4)) false
+    (let [url (field tab :url) title (field tab :title) hist (field tab :history) index (field tab :index)
+          value (text url) pos (num index)]
+      (and (= (document-kind url) :string) (= (document-kind title) :string)
+           (= (document-kind hist) :vector) (= (document-kind index) :i64)
+           (<= (document-count hist) 32) (safe-text? value 4096 false)
+           (safe-text? (text title) 4096 true) (valid-history? hist 0)
+           (if (= (document-count hist) 0) (and (= pos -1) (string=? value ""))
+             (and (>= pos 0) (< pos (document-count hist)) (string=? value (text (at hist pos)))))))))
+(defn valid-tabs? [tabs :document i :i64 total :i64] :bool
+  (if (> total 65536) false
+    (if (>= i (document-count tabs)) true
+      (let [tab (at tabs i)]
+        (if (not (valid-tab? tab)) false
+          (valid-tabs? tabs (+ i 1)
+            (history-bytes (field tab :history) 0
+              (+ total (+ (string-byte-length (text (field tab :url)))
+                          (string-byte-length (text (field tab :title))))))))))))
+(defn valid-snapshot? [value :document] :bool
+  (if (or (not= (document-kind value) :map) (not= (document-count value) 4)) false
+    (let [version (field value :snapshot/version) tabs (field value :snapshot/tabs)
+          active (field value :snapshot/active) generation (field value :snapshot/next-generation)
+          selected (num active) next (num generation)]
+      (and (= (document-kind version) :i64) (= (num version) 1)
+           (= (document-kind tabs) :vector) (<= (document-count tabs) 32)
+           (= (document-kind active) :i64) (= (document-kind generation) :i64)
+           (> next 0) (< next 9007199254740991)
+           (if (= (document-count tabs) 0) (= selected -1)
+             (and (>= selected 0) (< selected (document-count tabs))))
+           (valid-tabs? tabs 0 0)))))
+(defn extract-tabs [tabs :document i :i64 result :document] :document
+  (if (>= i (document-count tabs)) result
+    (let [tab (at tabs i) item (document-map :url (field tab :tab/url) :title (field tab :tab/title)
+                      :history (field tab :tab/history) :index (field tab :tab/history-index))]
+      (extract-tabs tabs (+ i 1) (document-vector-conj result item)))))
+(defn snapshot [state :document] [:option :document]
+  (let [c (field state :session/chrome) tabs (field c :chrome/tabs)]
+    (if (or (not= (document-kind c) :map) (not= (document-kind tabs) :vector) (> (document-count tabs) 32))
+      (option-none-of [:option :document])
+      (let [value (document-map :snapshot/version (document-i64 1)
+                    :snapshot/tabs (extract-tabs tabs 0 (document-vector))
+                    :snapshot/active (document-i64 (chrome/active-tab-index c))
+                    :snapshot/next-generation (field state :session/next-generation))]
+        (if (valid-snapshot? value) (option-some-of [:option :document] value)
+          (option-none-of [:option :document]))))))
+(defn install-tabs [tabs :document i :i64 state :document] :document
+  (if (>= i (document-count tabs)) state
+    (let [item (at tabs i) added (chrome/new-tab (field state :session/chrome) "")
+          all (field added :chrome/tabs) index (- (document-count all) 1) tab (at all index)
+          id (text (field tab :tab/id)) url (text (field item :url))
+          updated (document-assoc (document-assoc (document-assoc (document-assoc tab
+                    :tab/url (field item :url)) :tab/title (field item :title))
+                    :tab/history (field item :history)) :tab/history-index (field item :index))
+          next-chrome (document-assoc added :chrome/tabs (document-vector-assoc all index updated))
+          committed (field state :session/committed)
+          next-store (if (string=? url "") committed (document-assoc committed (document-string id) (document-string url)))
+          next-state (document-assoc (document-assoc state :session/chrome next-chrome) :session/committed next-store)]
+      (install-tabs tabs (+ i 1) next-state))))
+(defn restore [value :document partition :string] [:option :document]
+  (if (or (not (safe-text? partition 256 false)) (string=? partition "") (not (valid-snapshot? value)))
+    (option-none-of [:option :document])
+    (let [tabs (field value :snapshot/tabs) selected (num (field value :snapshot/active))
+          state (install-tabs tabs 0 (session/empty-session partition))
+          c (field state :session/chrome) id (if (< selected 0) "" (text (field (at (field c :chrome/tabs) selected) :tab/id)))
+          focused (if (< selected 0) state (session/focus-tab state id))]
+      (option-some-of [:option :document]
+        (document-assoc focused :session/next-generation (field value :snapshot/next-generation))))))

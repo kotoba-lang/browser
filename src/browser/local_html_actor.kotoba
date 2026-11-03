@@ -1,0 +1,148 @@
+(ns browser.local-html-actor
+  (:require [browser.local-session :as session]
+            [browser.local-loop :as runtime]
+            [browser.local-html-loop :as html]
+            [browser.local-actor-frame :as emitter]
+            [browser.local-snapshot-loop :as snapshots])
+  (:capabilities [:io/read :io/write :io/write-error])
+  (:export [main]))
+
+;; Experimental local transport. The host must authenticate this channel,
+;; verify response provenance/MIME/size and obtain fresh operation consent.
+;; H1 carries already-supplied HTML only; it grants no network capability.
+;; H1|revision|generation|tab|url-byte-length|<url><html> is length framed.
+;; C1|revision|generation|tab cancels a matching pending navigation.
+;; L1|revision|tab|url requests navigation from a host-verified page gesture.
+;; NFRAME reports a newly queued navigation to the trusted host; it conveys
+;; no consent and is valid only on the authenticated actor channel.
+;; S1|revision exports an inert BSS1 snapshot in SFRAME without advancing.
+;; R1|revision|BSS1 restores only into a pristine startup frame.
+;; Other inputs retain the native actor's revision|B1 UI event format.
+(defn field [d :document key :keyword] :document
+  (option-or (document-get d key) (document-null)))
+(defn read-one [] :string (typed-cap-call :io/read :string :string "1"))
+(defn write-flush [s :string] :i64
+  (let [out (typed-cap-call :io/write :string :string s)
+        flush (typed-cap-call :io/write-error :string :string "")]
+    0))
+
+;; -1 is clean EOF, -2 is a malformed or truncated length header.
+(defn read-length [value :i64 digits :i64] :i64
+  (let [s (read-one)]
+    (cond (string=? s "") (if (= digits 0) -1 -2)
+          (string=? s "\n") (cond (= digits 0) -2 (= value 0) -1 (> value 131200) -2 :else value)
+          (or (not= (string-byte-length s) 1) (>= digits 6)) -2
+          :else (let [c (string-code-point-at s 0)]
+                  (if (or (< c 48) (> c 57) (and (> digits 0) (= value 0))) -2
+                    (read-length (+ (* value 10) (- c 48)) (+ digits 1)))))))
+
+;; Chunking bounds transient string-copy cost while accepting up to the
+;; snapshot transport limit. Each read may return one complete UTF-8 scalar.
+(defn read-chunk [remaining :i64] :document
+  (loop [left remaining used 0 out ""]
+    (if (or (= left 0) (>= used 256))
+      (document-map :remaining (document-i64 left) :text (document-string out))
+      (let [s (read-one) n (string-byte-length s)]
+        (if (or (= n 0) (> n left)) (document-null)
+          (recur (- left n) (+ used n) (string-concat out s)))))))
+(defn read-body [remaining :i64 out :string] [:option :string]
+  (if (= remaining 0) (option-some-of [:option :string] out)
+    (let [chunk (read-chunk remaining)]
+      (if (= (document-kind chunk) :null) (option-none-of [:option :string])
+        (read-body (option-or (document-i64-value (field chunk :remaining)) -1)
+                   (string-concat out (option-or (document-string-value (field chunk :text)) "")))))))
+
+;; Bounded decimal revision before the first delimiter; 0 means invalid.
+(defn parse-revision [s :string end :i64] :i64
+  (if (or (< end 1) (> end 16) (and (> end 1) (= (string-code-point-at s 0) 48))) 0
+    (loop [i 0 value 0]
+      (if (= i end) (if (<= value 9007199254740991) value 0)
+        (let [c (string-code-point-at s i)]
+          (if (or (< c 48) (> c 57)) 0 (recur (+ i 1) (+ (* value 10) (- c 48)))))))))
+
+(defn scalar-width [cp :i64] :i64
+  (cond (< cp 128) 1 (< cp 2048) 2 (< cp 65536) 3 :else 4))
+(defn boundary? [s :string i :i64 end :i64] :bool
+  (cond (= i end) true (> i end) false (>= i (string-length s)) false
+        :else (boundary? s (+ i (scalar-width (string-code-point-at s i))) end)))
+(defn split [s :string] :document
+  (let [at (string-index-of s "|")]
+    (if (< at 0) (document-null)
+      (document-vector (document-string (string-substring s 0 at))
+                       (document-string (string-substring s (+ at 1) (string-length s)))))))
+(defn item [d :document i :i64] :string
+  (if (= (document-kind d) :vector)
+    (option-or (document-string-value (option-or (document-vector-at d i) (document-null))) "") ""))
+(defn number [s :string] :i64 (parse-revision s (string-length s)))
+(defn response [frame :document raw :string] [:option :document]
+  (let [r (split raw) a (split (item r 1)) b (split (item a 1)) c (split (item b 1))
+        revision (number (item r 0)) generation (number (item a 0)) tab (item b 0)
+        size (number (item c 0)) payload (item c 1)]
+    (if (or (= (document-kind r) :null) (= (document-kind a) :null)
+            (= (document-kind b) :null) (= (document-kind c) :null)
+            (<= size 0) (> size 4096) (> size (string-length payload))
+            (not (boundary? payload 0 size)) (string=? tab ""))
+      (option-none-of [:option :document])
+      (let [url (string-substring payload 0 size) body (string-substring payload size (string-length payload))
+            result (html/prepare frame revision tab generation url body)]
+        (if (option-some?-of [:option :document] result)
+          (option-some-of [:option :document] (field (option-or result (document-null)) :frame))
+          (option-none-of [:option :document]))))))
+(defn cancel [frame :document raw :string] [:option :document]
+  (let [a (split raw) b (split (item a 1))
+        revision (number (item a 0)) generation (number (item b 0)) tab (item b 1)]
+    (if (or (= (document-kind a) :null) (= (document-kind b) :null)
+            (<= revision 0) (<= generation 0) (string=? tab "")
+            (> (string-byte-length tab) 32) (>= (string-index-of tab "|") 0))
+      (option-none-of [:option :document])
+      (html/cancel frame revision tab generation))))
+(defn link [frame :document raw :string] [:option :document]
+  (let [a (split raw) b (split (item a 1)) revision (number (item a 0))
+        tab (item b 0) url (item b 1)]
+    (if (or (= (document-kind a) :null) (= (document-kind b) :null)
+            (<= revision 0) (string=? tab "") (> (string-byte-length tab) 32))
+      (option-none-of [:option :document])
+      (html/link frame revision tab url))))
+(defn snapshot-export [frame :document raw :string] [:option :string]
+  (let [revision (number raw)]
+    (if (or (<= revision 0) (>= (string-index-of raw "|") 0)) (option-none-of [:option :string])
+      (snapshots/export-wire frame revision))))
+(defn snapshot-restore [frame :document raw :string] [:option :document]
+  (let [parts (split raw) revision (number (item parts 0))]
+    (if (or (= (document-kind parts) :null) (<= revision 0)) (option-none-of [:option :document])
+      (snapshots/restore-wire frame revision (item parts 1)))))
+(defn serve [frame :document] :i64
+  (let [length (read-length 0 0)]
+    (cond (= length -1) 0
+          (< length 0) 2
+          :else (let [body (read-body length "")]
+                  (if (not (option-some?-of [:option :string] body)) 2
+                    (let [s (option-or body "") is-html (= (string-index-of s "H1|") 0)
+                          is-cancel (= (string-index-of s "C1|") 0)
+                          is-link (= (string-index-of s "L1|") 0)
+                          is-snapshot (= (string-index-of s "S1|") 0)
+                          is-restore (= (string-index-of s "R1|") 0)
+                          separator (string-index-of s "|")
+                          revision (if (< separator 0) 0 (parse-revision s separator))
+                          event (if (< separator 0) "" (string-substring s (+ separator 1) (string-length s)))]
+                      (if is-snapshot
+                        (let [saved (snapshot-export frame (string-substring s 3 (string-length s)))]
+                          (if (option-some?-of [:option :string] saved)
+                            (let [wire (option-or saved "") rev (field frame :revision)
+                                  header (string-concat "SFRAME " (string-concat (string-from-i64 (option-or (document-i64-value rev) 0))
+                                           (string-concat " " (string-concat (string-from-i64 (string-byte-length wire)) "\n"))))
+                                  sent (write-flush (string-concat header wire))] (serve frame))
+                            (let [sent (write-flush "REJECT\n")] (serve frame))))
+                        (let [next (if is-html (response frame (string-substring s 3 (string-length s)))
+                                     (if is-cancel (cancel frame (string-substring s 3 (string-length s)))
+                                       (if is-link (link frame (string-substring s 3 (string-length s)))
+                                         (if is-restore (snapshot-restore frame (string-substring s 3 (string-length s)))
+                                           (runtime/step frame revision event)))))]
+                          (if (option-some?-of [:option :document] next)
+                            (let [f (option-or next (document-null)) sent (emitter/emit-html-frame f)] (serve f))
+                            (let [sent (write-flush "REJECT\n")] (serve frame)))))))))))
+
+(defn main [] :i64
+  (let [initial (runtime/begin (session/empty-session "local") 1)]
+    (if (not (option-some?-of [:option :document] initial)) 1
+      (let [frame (option-or initial (document-null)) sent (emitter/emit-html-frame frame)] (serve frame)))))

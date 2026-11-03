@@ -1,0 +1,23 @@
+(ns browser.local-snapshot-loop
+  (:require [browser.local-session :as session] [browser.local-loop :as runtime]
+            [browser.local-snapshot-codec :as codec])
+  (:export [export-wire restore-wire]))
+
+;; Host-authenticated local messages only. These functions do not access
+;; storage or issue navigation; a restore is allowed solely on a fresh frame.
+(defn field [d :document k :keyword] :document (option-or (document-get d k) (document-null)))
+(defn num [d :document] :i64 (option-or (document-i64-value d) 0))
+(defn text [d :document] :string (option-or (document-string-value d) ""))
+(defn export-wire [frame :document expected :i64] [:option :string]
+  (let [revision (num (field frame :revision))]
+    (if (or (< revision 1) (not= expected revision)) (option-none-of [:option :string])
+      (codec/encode (field frame :state)))))
+(defn restore-wire [frame :document expected :i64 wire :string] [:option :document]
+  (let [revision (num (field frame :revision)) state (field frame :state)
+        partition (text (field state :session/partition))]
+    (if (or (not= revision 1) (not= expected revision) (string=? partition "")
+            (not (document-equal? state (session/empty-session partition))))
+      (option-none-of [:option :document])
+      (let [restored (codec/decode wire partition)]
+        (if (not (option-some?-of [:option :document] restored)) (option-none-of [:option :document])
+          (runtime/begin (option-or restored (document-null)) 2))))))

@@ -1,0 +1,53 @@
+(ns browser.native-local-view-test
+  (:require [browser.local-session :as session]
+            [browser.local-view :as view]
+            [kotoba.wasm.dom :as dom])
+  (:export [main]))
+
+(defn field [d :document k :keyword] :document
+  (option-or (document-get d k) (document-null)))
+(defn item [d :document i :i64] :document
+  (option-or (document-vector-at d i) (document-null)))
+(defn text [d :document] :string
+  (option-or (document-string-value d) ""))
+(defn bool [d :document] :bool
+  (option-or (document-bool-value d) false))
+
+(defn main [] :i64
+  (let [empty-tree (dom/tree (view/render (session/empty-session "p")))
+        empty-nav (item (field empty-tree :children) 0)
+        first-open (session/open-tab (session/empty-session "p") "https://one.example/")
+        first-ready (session/confirm-navigation first-open "tab-1" 1 "https://one.example/")
+        second-open (session/open-tab first-ready "https://two.example/")
+        second-ready (session/confirm-text-navigation second-open "tab-2" 2 "https://two.example/" "<script>not markup</script> 日本")
+        stale (session/confirm-text-navigation second-ready "tab-2" 2 "https://two.example/" "stale")
+        text-rendered (view/render stale)
+        transaction (dom/consume-op-transaction text-rendered)
+        text-tree (dom/tree text-rendered)
+        text-page (item (field text-tree :children) 3)
+        pre (item (field text-page :children) 0)
+        edited (session/address-insert (session/focus-tab second-ready "tab-1") "<日本>")
+        rendered (view/render edited)
+        tree (dom/tree rendered)
+        children (field tree :children)
+        nav (item children 0)
+        tabs (field nav :children)
+        tab1 (item tabs 0)
+        tab2 (item tabs 1)
+        input (item children 1)
+        page (item children 3)
+        consumed (dom/consume-op-transaction rendered)]
+    (cond (not= (document-count (field empty-nav :children)) 1) 1
+          (not= (document-count children) 4) 2
+          (not= (document-count tabs) 4) 3
+          (not (bool (field (field tab1 :attrs) :aria-selected))) 4
+          (bool (field (field tab2 :attrs) :aria-selected)) 5
+          (not (string=? (text (item (field tab1 :children) 0)) "https://one.example/")) 6
+          (not (string=? (text (field (field input :attrs) :value)) "https://one.example/<日本>")) 7
+          (not (string=? (text (field (field page :attrs) :data-role)) "page")) 8
+          (<= (document-count (item consumed 0)) 0) 9
+          (not= (document-count (field (item consumed 1) :ops)) 0) 10
+          (not (string=? (text (item (field pre :children) 0)) "<script>not markup</script> 日本")) 11
+          (not= (document-count (item transaction 0)) 2) 12
+          (not= (document-count (field (item transaction 1) :ops)) 0) 13
+          :else 0)))

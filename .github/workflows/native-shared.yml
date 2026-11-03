@@ -10,6 +10,392 @@ concurrency:
   group: native-shared-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
+  offline-dom-host:
+    name: Offline DOM host (Chrome)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Validate detached DOM transactions
+        run: python3 scripts/check-local-dom-host.py --browser "$(command -v google-chrome)" --output "$RUNNER_TEMP/local-dom-host"
+      - name: Validate isolated page transactions
+        run: python3 scripts/check-local-page-host.py --browser "$(command -v google-chrome)" --output "$RUNNER_TEMP/local-page-host"
+      - name: Verify IndexedDB recovery after Chrome process interruption
+        run: python3 scripts/check-local-session-crash.py --browser "$(command -v google-chrome)" --output "$RUNNER_TEMP/session-crash"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: kotoba-lang/amu
+          ref: 06439c784f72d0078bc4d4ade65a338e6d4bf2ee
+          path: _amu-worker
+          persist-credentials: false
+      - name: Compile selfhost Worker protocol probe
+        run: |
+          python3 - <<'PYCODE'
+          import hashlib
+          from pathlib import Path
+          compiler = Path('_amu-worker/bin/amu-linux-x86_64')
+          assert hashlib.sha256(compiler.read_bytes()).hexdigest() == '8d30be7c4847ee85cb82c1b38bcae4de764abe75e41ca0e3d80319f1b1fa72b5'
+          PYCODE
+          mkdir -p "$RUNNER_TEMP/worker-probe"
+          cp test/native/local_worker_transport_probe.kotoba "$RUNNER_TEMP/worker-probe/probe.kotoba"
+          cd "$RUNNER_TEMP/worker-probe"
+          env PATH=/nonexistent KEXE_ALLOW=35,37,38,39 KEXE_CAP_RESOURCES_35="$PWD" KEXE_STACK_BYTES=8388608 \
+            "$GITHUB_WORKSPACE/_amu-worker/bin/amu-linux-x86_64" compile probe.kotoba --target wasm32-browser --output probe.wasm
+          python3 - <<'PYCODE'
+          import hashlib
+          from pathlib import Path
+          assert hashlib.sha256(Path('probe.wasm').read_bytes()).hexdigest() == 'd5c7f141bc4a567d43a496e6ca22d513c6f3982a94039ab63dd3e6b273554e43'
+          PYCODE
+      - name: Verify Browser actor integration with pinned Amu stdio
+        run: >-
+          python3 scripts/check-local-worker-actor.py --browser "$(command -v google-chrome)"
+          --stdio "$PWD/_amu-worker/runtime/wasm32-browser-local-stdio.js"
+          --worker-host "$PWD/_amu-worker/runtime/wasm32-browser-static-host.js"
+          --wasm "$RUNNER_TEMP/worker-probe/probe.wasm" --output "$RUNNER_TEMP/worker-actor"
+      - name: Validate synthetic HTML responses
+        run: python3 scripts/check-local-html-response.py --browser "$(command -v google-chrome)" --output "$RUNNER_TEMP/html-response"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: kotoba-lang/kotoba
+          ref: 135e733a8a6ecee895ba0a68c76548be8ca895e1
+          path: _broker
+          persist-credentials: false
+      - name: Verify canonical broker and response boundary offline
+        run: >-
+          python3 scripts/check-local-broker-response.py --browser "$(command -v google-chrome)"
+          --broker "$PWD/_broker/lib/kotoba.wasmWebcomponent/src/kotoba-client-runtime.js" --output "$RUNNER_TEMP/broker-response"
+      - name: Verify broker loopback HTTPS and certificate negative control
+        run: |
+          python3 scripts/check-local-broker-https.py --browser "$(command -v google-chrome)" \
+            --broker "$PWD/_broker/lib/kotoba.wasmWebcomponent/src/kotoba-client-runtime.js" --output "$RUNNER_TEMP/broker-https"
+          python3 scripts/check-local-broker-https.py --negative-no-cert-exception --browser "$(command -v google-chrome)" \
+            --broker "$PWD/_broker/lib/kotoba.wasmWebcomponent/src/kotoba-client-runtime.js" --output "$RUNNER_TEMP/broker-https-negative"
+          python3 scripts/check-local-broker-https.py --negative-no-cors --browser "$(command -v google-chrome)" \
+            --broker "$PWD/_broker/lib/kotoba.wasmWebcomponent/src/kotoba-client-runtime.js" --output "$RUNNER_TEMP/broker-https-cors"
+      - name: Verify slow loopback HTTPS response cancellation
+        run: >-
+          python3 scripts/check-local-slow-html-https.py --browser "$(command -v google-chrome)"
+          --broker "$PWD/_broker/lib/kotoba.wasmWebcomponent/src/kotoba-client-runtime.js" --output "$RUNNER_TEMP/slow-html-https"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: offline-dom-host
+          path: |
+            ${{ runner.temp }}/local-dom-host/*.json
+            ${{ runner.temp }}/local-dom-host/*.html
+            ${{ runner.temp }}/local-dom-host/*.stderr
+            ${{ runner.temp }}/local-dom-host/event-wire.txt
+            ${{ runner.temp }}/local-page-host/*.json
+            ${{ runner.temp }}/local-page-host/*.html
+            ${{ runner.temp }}/local-page-host/*.stderr
+            ${{ runner.temp }}/html-response/*.json
+            ${{ runner.temp }}/session-crash/receipt.json
+            ${{ runner.temp }}/worker-actor/receipt.json
+            ${{ runner.temp }}/broker-response/*.json
+            ${{ runner.temp }}/broker-https/receipt.json
+            ${{ runner.temp }}/broker-https-negative/negative-receipt.json
+            ${{ runner.temp }}/broker-https-cors/cors-receipt.json
+            ${{ runner.temp }}/slow-html-https/receipt.json
+          if-no-files-found: warn
+  native-html-page-wire:
+    name: Build native HTML page wire
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: kotoba-lang/kotoba
+          ref: b457e3849dab9d60fd826133d96264234c1df182
+          path: _html
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: kotoba-lang/amu
+          ref: d4d6841f129d846db13393a469645e1ca91fb568
+          path: _amu
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: kotoba-lang/kotoba
+          ref: 071a7a524f9c416815937fed0a3443285c2ff7e0
+          path: _dom
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: kotoba-lang/kotoba
+          ref: b7719f723fbf94f11e19dcda12641f682e324e62
+          path: _text
+          persist-credentials: false
+      - name: Build and run locked HTML fixture
+        run: >-
+          python3 _html/scripts/check-html-native.py --case html_fragment_wire
+          --compiler "$PWD/_amu/seed/bootstrap/aarch64-linux-static-root.elf"
+          --compiler-sha256 73350746c1f86dcfbe8cf47723bd7bb1e33ee28f0e08e40bef2dd2b196f5a09b
+          --runner-source "$PWD/_amu/seed/x86_64-kx64-runner.kotoba"
+          --dom "$PWD/_dom/lib/kotoba.domGpu" --output "$RUNNER_TEMP/html-page"
+      - name: Build Browser navigation and page wire
+        run: >-
+          python3 scripts/check-shared-native.py --case local-html-navigation
+          --compiler "$PWD/_amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64
+          --runner-source "$PWD/_amu/seed/x86_64-kx64-runner.kotoba"
+          --browser "$PWD" --dom "$PWD/_dom/lib/kotoba.domGpu"
+          --text "$PWD/_text/lib/kotoba.text" --html "$PWD/_html/lib/kotoba.htmldom"
+          --output "$RUNNER_TEMP/nav-page"
+      - name: Prepare shell frame and HTML page
+        run: >-
+          python3 scripts/check-shared-native.py --case local-html-loop
+          --compiler "$PWD/_amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64
+          --runner-source "$PWD/_amu/seed/x86_64-kx64-runner.kotoba"
+          --browser "$PWD" --dom "$PWD/_dom/lib/kotoba.domGpu"
+          --text "$PWD/_text/lib/kotoba.text" --html "$PWD/_html/lib/kotoba.htmldom"
+          --output "$RUNNER_TEMP/loop-page"
+      - name: Build native page-bearing actor frame
+        run: >-
+          python3 scripts/check-shared-native.py --case local-html-frame
+          --compiler "$PWD/_amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64
+          --runner-source "$PWD/_amu/seed/x86_64-kx64-runner.kotoba"
+          --browser "$PWD" --dom "$PWD/_dom/lib/kotoba.domGpu"
+          --text "$PWD/_text/lib/kotoba.text" --html "$PWD/_html/lib/kotoba.htmldom"
+          --output "$RUNNER_TEMP/frame-page"
+      - name: Exercise local HTML actor transport
+        run: >-
+          python3 scripts/check-shared-native.py --case local-html-actor
+          --compiler "$PWD/_amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64
+          --runner-source "$PWD/_amu/seed/x86_64-kx64-runner.kotoba"
+          --browser "$PWD" --dom "$PWD/_dom/lib/kotoba.domGpu"
+          --text "$PWD/_text/lib/kotoba.text" --html "$PWD/_html/lib/kotoba.htmldom"
+          --output "$RUNNER_TEMP/html-actor"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: native-actor-snapshot-controls
+          path: |
+            ${{ runner.temp }}/html-actor/local-html-actor-execute.stdout.snapshot
+            ${{ runner.temp }}/html-actor/local-html-actor-execute.stdout.snapshot-large
+          if-no-files-found: error
+      - name: Generate native session snapshot fixture
+        run: >-
+          python3 scripts/check-shared-native.py --case local-snapshot-wire
+          --compiler "$PWD/_amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64
+          --runner-source "$PWD/_amu/seed/x86_64-kx64-runner.kotoba"
+          --browser "$PWD" --dom "$PWD/_dom/lib/kotoba.domGpu" --text "$PWD/_text/lib/kotoba.text"
+          --output "$RUNNER_TEMP/snapshot-wire"
+      - name: Build native session restore fixture
+        run: >-
+          python3 scripts/check-shared-native.py --case local-snapshot-read
+          --event-wire "$RUNNER_TEMP/snapshot-wire/snapshot.bss1"
+          --compiler "$PWD/_amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64
+          --runner-source "$PWD/_amu/seed/x86_64-kx64-runner.kotoba"
+          --browser "$PWD" --dom "$PWD/_dom/lib/kotoba.domGpu" --text "$PWD/_text/lib/kotoba.text"
+          --output "$RUNNER_TEMP/snapshot-reader"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: native-session-fixtures
+          path: |
+            ${{ runner.temp }}/snapshot-wire/snapshot.bss1
+            ${{ runner.temp }}/snapshot-wire/shared-native.json
+            ${{ runner.temp }}/snapshot-reader/local-snapshot-read.elf
+            ${{ runner.temp }}/snapshot-reader/shared-native.json
+          if-no-files-found: error
+      - name: Compare independent wire output
+        run: |
+          python3 - <<'PYCODE'
+          import json, os
+          from pathlib import Path
+          temp = Path(os.environ['RUNNER_TEMP'])
+          assert json.loads((temp / 'html-page/semantic-wire.json').read_text()) == json.loads((temp / 'nav-page/wire.json').read_text()) == json.loads((temp / 'loop-page/wire.json').read_text())
+          frame = (temp / 'frame-page/pageframe.bin').read_bytes()
+          header, payload = frame.split(b'\n', 1)
+          marker, revision, shell_size, page_size = header.split()
+          assert marker == b'PFRAME' and revision == b'1' and len(payload) == int(shell_size) + int(page_size)
+          assert json.loads(payload[int(shell_size):]) == json.loads((temp / 'loop-page/wire.json').read_text())
+          (temp / 'loop-page/pageframe.bin').write_bytes(frame)
+          PYCODE
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: native-html-page-wire
+          path: |
+            ${{ runner.temp }}/loop-page/wire.json
+            ${{ runner.temp }}/loop-page/pageframe.bin
+            ${{ runner.temp }}/loop-page/shared-native.json
+            ${{ runner.temp }}/loop-page/local-html-loop.ksl
+          if-no-files-found: error
+  native-html-page-host:
+    name: Native HTML wire to Chrome page
+    needs: native-html-page-wire
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: native-html-page-wire
+          path: ${{ runner.temp }}/html-page
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: native-session-fixtures
+          path: ${{ runner.temp }}/session-fixtures
+      - name: Store native session snapshot and restart Chrome
+        run: >-
+          python3 scripts/check-local-session-store.py --browser "$(command -v google-chrome)"
+          --snapshot-file "$RUNNER_TEMP/session-fixtures/snapshot-wire/snapshot.bss1"
+          --restored-file "$RUNNER_TEMP/session-restored.bss1" --output "$RUNNER_TEMP/session-store"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: native-session-roundtrip
+          path: |
+            ${{ runner.temp }}/session-fixtures/snapshot-wire/snapshot.bss1
+            ${{ runner.temp }}/session-fixtures/snapshot-reader/local-snapshot-read.elf
+            ${{ runner.temp }}/session-fixtures/snapshot-reader/shared-native.json
+            ${{ runner.temp }}/session-restored.bss1
+            ${{ runner.temp }}/session-store/receipt.json
+          if-no-files-found: error
+      - name: Apply freshly generated HTML page
+        run: >-
+          python3 scripts/check-local-page-host.py --browser "$(command -v google-chrome)"
+          --wire "$RUNNER_TEMP/html-page/wire.json" --frame "$RUNNER_TEMP/html-page/pageframe.bin" --output "$RUNNER_TEMP/native-page-host"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: native-html-page-host
+          path: |
+            ${{ runner.temp }}/native-page-host/*.json
+            ${{ runner.temp }}/native-page-host/*.html
+          if-no-files-found: warn
+  native-session-restoration-fixture:
+    name: Restore IndexedDB fixture in native process
+    needs: native-html-page-host
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: native-session-roundtrip
+          path: ${{ runner.temp }}/roundtrip
+      - name: Verify fixture bytes and restore
+        run: |
+          python3 - <<'PYCODE'
+          import hashlib, json, os, re, subprocess
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP']) / 'roundtrip'
+          original = (root / 'session-fixtures/snapshot-wire/snapshot.bss1').read_bytes()
+          restored = (root / 'session-restored.bss1').read_bytes()
+          receipt = json.loads((root / 'session-fixtures/snapshot-reader/shared-native.json').read_text())
+          image = root / 'session-fixtures/snapshot-reader/local-snapshot-read.elf'
+          case = receipt['cases'][0]
+          assert original == restored and case['inputSnapshot']['sha256'] == hashlib.sha256(restored).hexdigest()
+          assert case['executable']['sha256'] == hashlib.sha256(image.read_bytes()).hexdigest()
+          image.chmod(0o755)
+          env = dict(PATH='/nonexistent', KEXE_STACK_BYTES='8388608', KEXE_ALLOW='38', KEXE_STRUCTURED_REPORT='1')
+          run = subprocess.run([str(image), restored.decode('utf-8')], env=env, capture_output=True, timeout=60)
+          assert run.returncode == 0 and not run.stderr and re.search(rb':status :ok :result 0(?:\s|})', run.stdout), (run.returncode, run.stdout, run.stderr)
+          print('PASS_NATIVE_SESSION_FIXTURE_ROUNDTRIP')
+          PYCODE
+  chrome-event-native:
+    name: Chrome event to native state
+    needs: offline-dom-host
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: kotoba-lang/amu
+          ref: 6a77cd91182b858fff435c679e8ef71f514fc2ae
+          path: _native/amu
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: kotoba-lang/kotoba
+          ref: 071a7a524f9c416815937fed0a3443285c2ff7e0
+          path: _shared/domowner
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: kotoba-lang/kotoba
+          ref: b7719f723fbf94f11e19dcda12641f682e324e62
+          path: _shared/kotoba
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: offline-dom-host
+          path: ${{ runner.temp }}/chrome-event
+      - name: Verify compiler identity
+        run: |
+          python3 - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          root = Path('_native/amu/seed/bootstrap')
+          assert hashlib.sha256((root / 'aarch64-linux-static-root.elf').read_bytes()).hexdigest() == json.loads((root / 'aarch64-linux-static-root.json').read_text())['image']['sha256']
+          PY
+      - name: Apply Chrome event in native Kotoba
+        run: python3 scripts/check-shared-native.py --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-loop-input --event-wire "$RUNNER_TEMP/chrome-event/local-dom-host/event-wire.txt" --output "$RUNNER_TEMP/chrome-event-native"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: chrome-event-native
+          path: |
+            ${{ runner.temp }}/chrome-event-native/*.json
+            ${{ runner.temp }}/chrome-event-native/*.ksl
+            ${{ runner.temp }}/chrome-event-native/*.stdout
+            ${{ runner.temp }}/chrome-event-native/*.stderr
+          if-no-files-found: warn
+  native-wire-chrome:
+    name: Native DOM wire to Chrome
+    needs: native-shared
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: native-dom-wire-arm64
+          path: ${{ runner.temp }}/native-dom-wire
+      - name: Render native output in Chrome
+        run: python3 scripts/check-local-dom-host.py --browser "$(command -v google-chrome)" --wire "$RUNNER_TEMP/native-dom-wire/wire.json" --output "$RUNNER_TEMP/native-wire-chrome"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: native-wire-chrome
+          path: |
+            ${{ runner.temp }}/native-wire-chrome/*.json
+            ${{ runner.temp }}/native-wire-chrome/*.html
+            ${{ runner.temp }}/native-wire-chrome/*.stderr
+          if-no-files-found: warn
+  chrome-native-roundtrip:
+    name: Chrome event native redraw
+    needs: chrome-event-native
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: chrome-event-native
+          path: ${{ runner.temp }}/native-loop-result
+      - name: Render native event result
+        run: python3 scripts/check-local-dom-host.py --browser "$(command -v google-chrome)" --wire "$RUNNER_TEMP/native-loop-result/wire.json" --wire-case roundtrip --output "$RUNNER_TEMP/chrome-native-roundtrip"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: chrome-native-roundtrip
+          path: |
+            ${{ runner.temp }}/chrome-native-roundtrip/*.json
+            ${{ runner.temp }}/chrome-native-roundtrip/*.html
+            ${{ runner.temp }}/chrome-native-roundtrip/*.stderr
+          if-no-files-found: warn
   native-shared:
     name: Native text-edit (${{ matrix.target }})
     runs-on: ${{ matrix.runner }}
@@ -34,9 +420,10 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          repository: kotoba-lang/dom-gpu
-          ref: c0be10ca6b0089e5fbe061eb76a6c23e61f61b22
-          path: _shared/dom
+          # Draft dependency: kotoba PR #1173, not yet merged.
+          repository: kotoba-lang/kotoba
+          ref: 071a7a524f9c416815937fed0a3443285c2ff7e0
+          path: _shared/domowner
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -62,10 +449,118 @@ jobs:
         run: python3 _native/amu/scripts/seed/check-x86-project-native.py --compiler "$PWD/_native/amu/bin/amu" --output "$RUNNER_TEMP/project-native"
       - name: Execute current owner source on ARM
         if: matrix.target == 'arm64'
-        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/dom" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case text-edit --output "$RUNNER_TEMP/owner-native"
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case text-edit --output "$RUNNER_TEMP/owner-native"
       - name: Execute current owner source on x86
         if: matrix.target == 'x86_64'
-        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/dom" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case text-edit --output "$RUNNER_TEMP/owner-native"
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case text-edit --output "$RUNNER_TEMP/owner-native"
+      - name: Execute shared tab model on ARM
+        if: matrix.target == 'arm64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case chrome --output "$RUNNER_TEMP/chrome-native"
+      - name: Execute shared tab model on x86
+        if: matrix.target == 'x86_64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case chrome --output "$RUNNER_TEMP/chrome-native"
+      - name: Execute shared origin model on ARM
+        if: matrix.target == 'arm64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case origin --output "$RUNNER_TEMP/origin-native"
+      - name: Execute shared origin model on x86
+        if: matrix.target == 'x86_64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case origin --output "$RUNNER_TEMP/origin-native"
+      - name: Execute shared storage model on ARM
+        if: matrix.target == 'arm64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case storage --output "$RUNNER_TEMP/storage-native"
+      - name: Execute shared storage model on x86
+        if: matrix.target == 'x86_64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case storage --output "$RUNNER_TEMP/storage-native"
+      - name: Execute local session on ARM
+        if: matrix.target == 'arm64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-session --output "$RUNNER_TEMP/session-native"
+      - name: Execute local session on x86
+        if: matrix.target == 'x86_64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-session --output "$RUNNER_TEMP/session-native"
+      - name: Execute session snapshot on ARM
+        if: matrix.target == 'arm64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-snapshot --output "$RUNNER_TEMP/snapshot-native"
+      - name: Execute session snapshot on x86
+        if: matrix.target == 'x86_64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-snapshot --output "$RUNNER_TEMP/snapshot-native"
+      - name: Execute snapshot codec on ARM
+        if: matrix.target == 'arm64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-snapshot-codec --output "$RUNNER_TEMP/snapshot-codec-native"
+      - name: Execute snapshot codec on x86
+        if: matrix.target == 'x86_64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-snapshot-codec --output "$RUNNER_TEMP/snapshot-codec-native"
+      - name: Execute snapshot frame boundary on ARM
+        if: matrix.target == 'arm64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-snapshot-loop --output "$RUNNER_TEMP/snapshot-loop-native"
+      - name: Execute snapshot frame boundary on x86
+        if: matrix.target == 'x86_64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-snapshot-loop --output "$RUNNER_TEMP/snapshot-loop-native"
+      - name: Execute snapshot codec aggregate limit on ARM
+        if: matrix.target == 'arm64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-snapshot-codec-limit --output "$RUNNER_TEMP/snapshot-codec-limit"
+      - name: Execute snapshot codec field boundary on ARM
+        if: matrix.target == 'arm64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-snapshot-codec-boundary --output "$RUNNER_TEMP/snapshot-codec-boundary"
+      - name: Execute local view on ARM
+        if: matrix.target == 'arm64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-view --output "$RUNNER_TEMP/view-native"
+      - name: Execute local view on x86
+        if: matrix.target == 'x86_64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-view --output "$RUNNER_TEMP/view-native"
+      - name: Execute local text page on ARM
+        if: matrix.target == 'arm64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-text-view --output "$RUNNER_TEMP/text-view-native"
+      - name: Execute local text page on x86
+        if: matrix.target == 'x86_64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-text-view --output "$RUNNER_TEMP/text-view-native"
+      - name: Execute multi-tab text page on ARM
+        if: matrix.target == 'arm64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-multitab-text --output "$RUNNER_TEMP/multitab-text-native"
+      - name: Execute multi-tab text page on x86
+        if: matrix.target == 'x86_64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-multitab-text --output "$RUNNER_TEMP/multitab-text-native"
+      - name: Execute multi-tab DOM replay on ARM
+        if: matrix.target == 'arm64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-dom-replay --output "$RUNNER_TEMP/dom-replay-native"
+      - name: Execute multi-tab DOM replay on x86
+        if: matrix.target == 'x86_64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-dom-replay --output "$RUNNER_TEMP/dom-replay-native"
+      - name: Execute DOM commit admission on ARM
+        if: matrix.target == 'arm64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-dom-commit --output "$RUNNER_TEMP/dom-commit-native"
+      - name: Execute DOM commit admission on x86
+        if: matrix.target == 'x86_64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-dom-commit --output "$RUNNER_TEMP/dom-commit-native"
+      - name: Execute local controller on ARM
+        if: matrix.target == 'arm64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-controller --output "$RUNNER_TEMP/controller-native"
+      - name: Execute local controller on x86
+        if: matrix.target == 'x86_64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-controller --output "$RUNNER_TEMP/controller-native"
+      - name: Execute local DOM events on ARM
+        if: matrix.target == 'arm64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-dom-events --output "$RUNNER_TEMP/dom-events-native"
+      - name: Execute local DOM events on x86
+        if: matrix.target == 'x86_64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-dom-events --output "$RUNNER_TEMP/dom-events-native"
+      - name: Execute local event loop on ARM
+        if: matrix.target == 'arm64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-loop --output "$RUNNER_TEMP/local-loop-native"
+      - name: Execute local event loop on x86
+        if: matrix.target == 'x86_64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/bin/amu" --target x86_64 --runner "$RUNNER_TEMP/project-native/runner.elf" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-loop --output "$RUNNER_TEMP/local-loop-native"
+      - name: Emit admitted DOM wire on ARM
+        if: matrix.target == 'arm64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-dom-wire --output "$RUNNER_TEMP/dom-wire-native"
+      - name: Exercise persistent local actor on ARM
+        if: matrix.target == 'arm64'
+        run: python3 "$PWD/scripts/check-shared-native.py" --compiler "$PWD/_native/amu/seed/bootstrap/aarch64-linux-static-root.elf" --target arm64 --runner-source "$PWD/_native/amu/seed/x86_64-kx64-runner.kotoba" --browser "$PWD" --dom "$PWD/_shared/domowner/lib/kotoba.domGpu" --text "$PWD/_shared/kotoba/lib/kotoba.text" --case local-native-actor --output "$RUNNER_TEMP/local-native-actor"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: matrix.target == 'arm64'
+        with:
+          name: native-dom-wire-arm64
+          path: ${{ runner.temp }}/dom-wire-native/wire.json
+          if-no-files-found: error
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
@@ -75,6 +570,80 @@ jobs:
             ${{ runner.temp }}/owner-native/*.ksl
             ${{ runner.temp }}/owner-native/*.stdout
             ${{ runner.temp }}/owner-native/*.stderr
+            ${{ runner.temp }}/chrome-native/*.json
+            ${{ runner.temp }}/chrome-native/*.ksl
+            ${{ runner.temp }}/chrome-native/*.stdout
+            ${{ runner.temp }}/chrome-native/*.stderr
+            ${{ runner.temp }}/origin-native/*.json
+            ${{ runner.temp }}/origin-native/*.ksl
+            ${{ runner.temp }}/origin-native/*.stdout
+            ${{ runner.temp }}/origin-native/*.stderr
+            ${{ runner.temp }}/storage-native/*.json
+            ${{ runner.temp }}/storage-native/*.ksl
+            ${{ runner.temp }}/storage-native/*.stdout
+            ${{ runner.temp }}/storage-native/*.stderr
+            ${{ runner.temp }}/session-native/*.json
+            ${{ runner.temp }}/session-native/*.ksl
+            ${{ runner.temp }}/session-native/*.stdout
+            ${{ runner.temp }}/session-native/*.stderr
+            ${{ runner.temp }}/snapshot-native/*.json
+            ${{ runner.temp }}/snapshot-native/*.ksl
+            ${{ runner.temp }}/snapshot-native/*.stdout
+            ${{ runner.temp }}/snapshot-native/*.stderr
+            ${{ runner.temp }}/snapshot-loop-native/*.json
+            ${{ runner.temp }}/snapshot-loop-native/*.ksl
+            ${{ runner.temp }}/snapshot-loop-native/*.stdout
+            ${{ runner.temp }}/snapshot-loop-native/*.stderr
+            ${{ runner.temp }}/snapshot-codec-native/*.json
+            ${{ runner.temp }}/snapshot-codec-native/*.ksl
+            ${{ runner.temp }}/snapshot-codec-native/*.stdout
+            ${{ runner.temp }}/snapshot-codec-native/*.stderr
+            ${{ runner.temp }}/snapshot-codec-limit/*.json
+            ${{ runner.temp }}/snapshot-codec-limit/*.ksl
+            ${{ runner.temp }}/snapshot-codec-limit/*.stdout
+            ${{ runner.temp }}/snapshot-codec-limit/*.stderr
+            ${{ runner.temp }}/snapshot-codec-boundary/*.json
+            ${{ runner.temp }}/snapshot-codec-boundary/*.ksl
+            ${{ runner.temp }}/snapshot-codec-boundary/*.stdout
+            ${{ runner.temp }}/snapshot-codec-boundary/*.stderr
+            ${{ runner.temp }}/view-native/*.json
+            ${{ runner.temp }}/view-native/*.ksl
+            ${{ runner.temp }}/view-native/*.stdout
+            ${{ runner.temp }}/view-native/*.stderr
+            ${{ runner.temp }}/text-view-native/*.json
+            ${{ runner.temp }}/text-view-native/*.ksl
+            ${{ runner.temp }}/text-view-native/*.stdout
+            ${{ runner.temp }}/text-view-native/*.stderr
+            ${{ runner.temp }}/multitab-text-native/*.json
+            ${{ runner.temp }}/multitab-text-native/*.ksl
+            ${{ runner.temp }}/multitab-text-native/*.stdout
+            ${{ runner.temp }}/multitab-text-native/*.stderr
+            ${{ runner.temp }}/dom-replay-native/*.json
+            ${{ runner.temp }}/dom-replay-native/*.ksl
+            ${{ runner.temp }}/dom-replay-native/*.stdout
+            ${{ runner.temp }}/dom-replay-native/*.stderr
+            ${{ runner.temp }}/dom-commit-native/*.json
+            ${{ runner.temp }}/dom-commit-native/*.ksl
+            ${{ runner.temp }}/dom-commit-native/*.stdout
+            ${{ runner.temp }}/dom-commit-native/*.stderr
+            ${{ runner.temp }}/controller-native/*.json
+            ${{ runner.temp }}/controller-native/*.ksl
+            ${{ runner.temp }}/controller-native/*.stdout
+            ${{ runner.temp }}/controller-native/*.stderr
+            ${{ runner.temp }}/dom-events-native/*.json
+            ${{ runner.temp }}/dom-events-native/*.ksl
+            ${{ runner.temp }}/dom-events-native/*.stdout
+            ${{ runner.temp }}/dom-events-native/*.stderr
+            ${{ runner.temp }}/local-loop-native/*.json
+            ${{ runner.temp }}/local-loop-native/*.ksl
+            ${{ runner.temp }}/local-loop-native/*.stdout
+            ${{ runner.temp }}/local-loop-native/*.stderr
+            ${{ runner.temp }}/local-native-actor/*.json
+            ${{ runner.temp }}/local-native-actor/*.ksl
+            ${{ runner.temp }}/local-native-actor/*.stdout
+            ${{ runner.temp }}/local-native-actor/*.stderr
+            ${{ runner.temp }}/local-native-actor/*.invalid
+            ${{ runner.temp }}/local-native-actor/*.denied
             ${{ runner.temp }}/project-native/*.json
             ${{ runner.temp }}/project-native/*.stdout
             ${{ runner.temp }}/project-native/*.stderr

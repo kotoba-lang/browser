@@ -23,13 +23,15 @@
   ;; test/browser/chrome_test.cljk's two fixtures is pinned in `main`:
   ;;   url-bar-commit-produces-navigation-intent
   ;;   tabs-can-be-focused-and-finished
-  (:export [empty-chrome new-tab active-tab-index focus-tab set-url-input
-            commit-url finish-navigation main]))
+  (:export [empty-chrome new-tab active-tab-index focus-tab close-tab set-url-input
+            commit-url commit-tab-url history-target history-at commit-history finish-navigation main]))
 
 ;; --- accessors (html_document.kotoba option idiom) -------------------------
 
 (defn get-d [d :document k :keyword] :document
-  (option-or (document-get d k) (document-null)))
+  (if (= (document-kind d) :map)
+    (option-or (document-get d k) (document-null))
+    (document-null)))
 
 (defn get-s [d :document k :keyword] :string
   (option-or (document-string-value (get-d d k)) ""))
@@ -53,6 +55,7 @@
 (defn new-tab [chrome :document url :string] :document
   ;; (update chrome :chrome/next-tab-id inc) + conj a tab + focus it.
   ;; id = (str "tab-" next-tab-id); a nil url history seed -> empty history.
+  (if (>= (document-count (get-d chrome :chrome/tabs)) 32) chrome
   (let [n (get-i chrome :chrome/next-tab-id)
         id (string-concat "tab-" (string-from-i64 n))
         hist (if (string=? url "")
@@ -62,6 +65,7 @@
                           :tab/url (document-string url)
                           :tab/title (document-string "")
                           :tab/history hist
+                          :tab/history-index (document-i64 (if (string=? url "") -1 0))
                           :tab/status (document-keyword :idle))
         tabs (document-vector-conj (get-d chrome :chrome/tabs) tab)]
     (document-assoc
@@ -70,7 +74,7 @@
        (document-assoc chrome :chrome/tabs tabs)
        :chrome/next-tab-id (document-i64 (+ n 1)))
       :chrome/active-tab-id (document-string id))
-     :chrome/url-input (document-string url))))
+     :chrome/url-input (document-string url)))))
 
 (defn tab-count [chrome :document] :i64
   (document-count (get-d chrome :chrome/tabs)))
@@ -108,6 +112,27 @@
                          :chrome/active-tab-id (document-string tab-id))
          :chrome/url-input (document-string (get-s tab :tab/url)))))))
 
+(defn tabs-without [tabs :document index :i64 i :i64 result :document] :document
+  (if (>= i (document-count tabs)) result
+    (tabs-without tabs index (+ i 1)
+      (if (= i index) result (document-vector-conj result (tab-at-doc tabs i))))))
+
+(defn close-tab [chrome :document tab-id :string] :document
+  (let [tabs (get-d chrome :chrome/tabs)
+        i (scan-for-id tabs tab-id 0 (tab-count chrome))]
+    (if (< i 0) chrome
+      (let [remaining (tabs-without tabs i 0 (document-vector))
+            without (document-assoc chrome :chrome/tabs remaining)
+            next (if (string=? tab-id (get-s (get-d chrome :chrome/last-navigation) :tab/id))
+                   (document-dissoc without :chrome/last-navigation) without)
+            active? (string=? tab-id (get-s chrome :chrome/active-tab-id))
+            n (document-count remaining)]
+        (cond (not active?) next
+              (= n 0) (document-assoc
+                        (document-assoc next :chrome/active-tab-id (document-string ""))
+                        :chrome/url-input (document-string ""))
+              :else (focus-tab next (get-s (tab-at-doc remaining (if (< i n) i (- n 1))) :tab/id)))))))
+
 (defn set-url-input [chrome :document value :string] :document
   (document-assoc chrome :chrome/url-input (document-string value)))
 
@@ -115,21 +140,71 @@
   ;; Rebuild `tabs` with index `i` replaced by `tab` (document-assoc has no
   ;; vector-index write: its 3-arg key form takes a keyword/document only).
   ;; Forward recursion carrying the built prefix in `acc`.
-  (if (> k (document-count tabs))
+  (if (>= k (document-count tabs))
     acc
     (if (= k i)
       (tabs-assoc tabs i tab (+ k 1) (document-vector-conj acc tab))
       (tabs-assoc tabs i tab (+ k 1)
                   (document-vector-conj acc (tab-at-doc tabs k))))))
 
+(defn history-tail [hist :document i :i64 acc :document] :document
+  (if (>= i (document-count hist)) acc
+    (history-tail hist (+ i 1) (document-vector-conj acc (tab-at-doc hist i)))))
+
+(defn bounded-history [hist :document url :string] :document
+  ;; Native document vectors hold at most 32 items. Retain the newest 31
+  ;; before adding the next navigation, so an ordinary browsing session
+  ;; cannot trap when the history reaches that limit.
+  (let [n (document-count hist)
+        retained (if (>= n 32) (history-tail hist (+ (- n 32) 1) (document-vector)) hist)]
+    (document-vector-conj retained (document-string url))))
+
+(defn history-prefix [hist :document end :i64 i :i64 acc :document] :document
+  (if (or (>= i end) (>= i (document-count hist))) acc
+    (history-prefix hist end (+ i 1) (document-vector-conj acc (tab-at-doc hist i)))))
+
 (defn updated-tab [tab :document url :string hist :document] :document
   ;; commit-url's mapv branch for the active tab: url + :loading + history conj.
-  (document-assoc
-   (document-assoc
-    (document-assoc tab
-                    :tab/url (document-string url))
-    :tab/status (document-keyword :loading))
-   :tab/history (document-vector-conj hist (document-string url))))
+  (let [prefix (history-prefix hist (+ (get-i tab :tab/history-index) 1) 0 (document-vector))
+        next (bounded-history prefix url)]
+    (document-assoc
+      (document-assoc
+        (document-assoc
+          (document-assoc tab :tab/url (document-string url))
+          :tab/status (document-keyword :loading))
+        :tab/history next)
+      :tab/history-index (document-i64 (- (document-count next) 1)))))
+
+(defn history-target [chrome :document tab-id :string delta :i64] :document
+  (let [i (scan-for-id (get-d chrome :chrome/tabs) tab-id 0 (tab-count chrome))]
+    (if (or (< i 0) (and (not= delta -1) (not= delta 1))) (document-null)
+      (let [tab (tab-at chrome i)
+            hist (get-d tab :tab/history)
+            target (+ (get-i tab :tab/history-index) delta)]
+        (if (or (< target 0) (>= target (document-count hist))) (document-null)
+          (document-map :index (document-i64 target) :url (tab-at-doc hist target)))))))
+
+(defn history-at [chrome :document tab-id :string index :i64] :document
+  (let [i (scan-for-id (get-d chrome :chrome/tabs) tab-id 0 (tab-count chrome))]
+    (if (< i 0) (document-null)
+      (let [hist (get-d (tab-at chrome i) :tab/history)]
+        (if (or (< index 0) (>= index (document-count hist))) (document-null)
+          (tab-at-doc hist index))))))
+
+(defn commit-history [chrome :document tab-id :string index :i64 url :string] :document
+  (let [tabs (get-d chrome :chrome/tabs)
+        i (scan-for-id tabs tab-id 0 (tab-count chrome))]
+    (if (< i 0) chrome
+      (let [tab (tab-at-doc tabs i) hist (get-d tab :tab/history)]
+        (if (or (< index 0) (>= index (document-count hist))
+                (not (string=? url (option-or (document-string-value (tab-at-doc hist index)) ""))))
+          chrome
+          (let [updated (document-assoc
+                          (document-assoc (document-assoc tab :tab/url (document-string url))
+                                          :tab/history-index (document-i64 index))
+                          :tab/status (document-keyword :idle))
+                state (document-assoc chrome :chrome/tabs (tabs-assoc tabs i updated 0 (document-vector)))]
+            (if (string=? tab-id (get-s chrome :chrome/active-tab-id)) (set-url-input state url) state)))))))
 
 (defn update-tab [tabs :document i :i64 tab :document url :string hist :document] :document
   (tabs-assoc tabs i (updated-tab tab url hist) 0 (document-vector)))
@@ -155,6 +230,21 @@
          (document-assoc chrome
                          :chrome/tabs tabs)
          :chrome/last-navigation nav)))))
+
+(defn commit-tab-url [chrome :document tab-id :string url :string] :document
+  ;; A host-confirmed navigation may complete on a background tab. Update
+  ;; its URL/history without changing focus or another tab's address input.
+  (let [tabs (get-d chrome :chrome/tabs)
+        i (scan-for-id tabs tab-id 0 (tab-count chrome))]
+    (if (< i 0) chrome
+      (let [tab (tab-at-doc tabs i)
+            updated (document-assoc (updated-tab tab url (get-d tab :tab/history))
+                                    :tab/status (document-keyword :idle))
+            state (document-assoc chrome :chrome/tabs
+                                  (tabs-assoc tabs i updated 0 (document-vector)))]
+        (if (string=? tab-id (get-s chrome :chrome/active-tab-id))
+          (set-url-input state url)
+          state)))))
 
 (defn finish-navigation [chrome :document tab-id :string title :string status :keyword] :document
   ;; (finish-navigation chrome tab-id {:title t :status s}): unknown ids are
@@ -185,15 +275,18 @@
                             "https://example.com") 0 1)
         p-status (if (= (get-k a1 :tab/status) :loading) 0 1)
         p-hist (if (= (document-count (get-d a1 :tab/history)) 2) 0 1)
-        p-hist0 (if (string=? (get-s (tab-at-doc (get-d a1 :tab/history) 0) :tab/none)
+        p-hist0 (if (string=? (option-or (document-string-value
+                                          (tab-at-doc (get-d a1 :tab/history) 0)) "")
                               "kotoba://home") 0 1)
+        p-tab-count (if (= (tab-count c1b) 1) 0 1)
         ;; fixture 2: tabs-can-be-focused-and-finished
         c2 (new-tab (new-tab (empty-chrome) "kotoba://one") "kotoba://two")
         first-id (get-s (tab-at c2 0) :tab/id)
         c2b (finish-navigation (focus-tab c2 first-id) first-id "One" :idle)
         a2 (tab-at c2b (active-tab-index c2b))
+        p-two-tabs (if (= (tab-count c2b) 2) 0 1)
         p-focus (if (string=? (get-s c2b :chrome/active-tab-id) first-id) 0 1)
         p-title (if (string=? (get-s a2 :tab/title) "One") 0 1)
         p-input (if (string=? (get-s c2b :chrome/url-input) "kotoba://one") 0 1)]
-    (+ p-url (+ p-nav (+ p-status (+ p-hist (+ p-hist0
-      (+ p-focus (+ p-title p-input)))))))))
+    (+ p-url (+ p-nav (+ p-status (+ p-hist (+ p-hist0 (+ p-tab-count
+      (+ p-two-tabs (+ p-focus (+ p-title p-input)))))))))))

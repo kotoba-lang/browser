@@ -1,0 +1,29 @@
+(ns browser.native-storage-test
+  (:require [browser.storage :as storage])
+  (:export [main]))
+
+(defn value [store :document partition :string url :string] :string
+  (option-or (document-string-value
+              (option-or (storage/get-value store partition url (document-keyword :token))
+                         (document-null))) "missing"))
+
+(defn main [] :i64
+  (let [empty (storage/empty-store)
+        key (document-keyword :token)
+        one (storage/put-value empty "personal" "https://example.com/a" key (document-string "personal"))
+        two (storage/put-value one "work" "https://example.com:443/b" key (document-string "work"))
+        three (storage/put-value two "personal" "https://other.example/a" key (document-string "other"))
+        denied (storage/put-value three "personal" "mailto:a@example.com" key (document-string "secret"))
+        denied-delete (storage/delete-value denied "personal" "data:text/plain,a" key)
+        removed (storage/delete-value denied-delete "work" "https://example.com/" key)
+        unicode (storage/put-value removed "personal" "https://faß.de/" key (document-string "secret"))]
+    (cond (not (string=? (value removed "personal" "https://example.com/b") "personal")) 1
+          (not (string=? (value removed "personal" "https://other.example/") "other")) 2
+          (not (string=? (value removed "work" "https://example.com/") "missing")) 3
+          (not (string=? (value removed "personal" "mailto:b@example.com") "missing")) 4
+          (not= (document-count (storage/origin-entries removed "personal" "data:text/plain,a")) 0) 5
+          (not (string=? (value removed "personal" "https://example.com?x") "personal")) 6
+          (not (string=? (value removed "personal" "https://evil.example\\@example.com/x") "missing")) 7
+          (not (string=? (value unicode "personal" "https://fass.de/") "missing")) 8
+          (not (string=? (value unicode "personal" "https://faß.de/") "missing")) 9
+          :else 0)))

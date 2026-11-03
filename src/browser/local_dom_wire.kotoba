@@ -1,0 +1,45 @@
+(ns browser.local-dom-wire
+  (:require [browser.local-dom-commit :as commit])
+  (:export [encode]))
+
+;; This is the bounded JSON transport for already-admitted shell operations,
+;; not an authority grant or a generic JSON encoder. Keyword spellings keep
+;; their leading colon, which is part of the host protocol.
+(defn item [d :document i :i64] :document
+  (option-or (document-vector-at d i) (document-null)))
+
+(defn scalar [d :document] [:option :string]
+  (let [kind (document-kind d)]
+    (cond (= kind :keyword)
+          (option-some-of [:option :string]
+            (document-edn-print (document-string (document-edn-print d))))
+          (= kind :string)
+          (if (> (string-byte-length (option-or (document-string-value d) "")) 1048576)
+            (option-none-of [:option :string])
+            (option-some-of [:option :string] (document-edn-print d)))
+          (= kind :bool) (option-some-of [:option :string] (document-edn-print d))
+          (= kind :i64)
+          (let [n (option-or (document-i64-value d) 0)]
+            (if (or (< n -9007199254740991) (> n 9007199254740991))
+              (option-none-of [:option :string])
+              (option-some-of [:option :string] (document-edn-print d))))
+          :else (option-none-of [:option :string]))))
+
+(defn value [d :document depth :i64] [:option :string]
+  (if (= (document-kind d) :vector)
+    (if (or (>= depth 3) (> (document-count d) 32)) (option-none-of [:option :string])
+      (loop [i 0 out "["]
+        (if (= i (document-count d))
+          (option-some-of [:option :string] (string-concat out "]"))
+          (let [part (value (item d i) (+ depth 1))
+                next (string-concat out (string-concat (if (= i 0) "" ",") (option-or part "")))]
+            (if (or (not (option-some?-of [:option :string] part)) (> (string-byte-length next) 1048575))
+              (option-none-of [:option :string])
+              (recur (+ i 1) next))))))
+    (scalar d)))
+
+(defn encode [state :document snapshot :document batches :document] [:option :string]
+  (let [admitted (commit/prepare state snapshot batches)]
+    (if (option-some?-of [:option :document] admitted)
+      (value (option-or admitted (document-null)) 0)
+      (option-none-of [:option :string]))))

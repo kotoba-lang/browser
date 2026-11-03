@@ -1,0 +1,51 @@
+(ns browser.native-local-controller-test
+  (:require [browser.local-session :as session]
+            [browser.local-controller :as controller]
+            [browser.local-view :as view]
+            [kotoba.wasm.dom :as dom])
+  (:export [main]))
+
+(defn event [kind :keyword] :document (document-map :type (document-keyword kind)))
+(defn text-event [kind :keyword text :string] :document
+  (document-map :type (document-keyword kind) :text (document-string text)))
+(defn field [d :document k :keyword] :document
+  (option-or (document-get d k) (document-null)))
+(defn item [d :document i :i64] :document
+  (option-or (document-vector-at d i) (document-null)))
+(defn text [d :document] :string (option-or (document-string-value d) ""))
+
+(defn main [] :i64
+  (let [empty (session/empty-session "p")
+        opened (controller/dispatch empty (event :tab/new))
+        typed (controller/dispatch opened (text-event :address/insert "https://example.com/"))
+        started (controller/dispatch typed (event :address/composition-start))
+        composing (controller/dispatch started (text-event :address/composition-update "日本"))
+        blocked (controller/dispatch composing (event :address/submit))
+        finished (controller/dispatch blocked (text-event :address/composition-end "日本"))
+        submitted (controller/dispatch finished (event :address/submit))
+        forged (controller/dispatch submitted (event :navigation/confirm))
+        malformed (controller/dispatch forged (event :address/insert))
+        scalar (controller/dispatch submitted (document-string "not-an-event"))
+        tree (dom/tree (view/render malformed))
+        input (item (field tree :children) 1)
+        committed (session/confirm-navigation malformed "tab-1" 1 "https://example.com/日本")
+        tab2 (controller/dispatch committed (event :tab/new))
+        focused (controller/dispatch tab2 (text-event :tab/focus "tab-1"))
+        emoji (session/address-insert (session/open-tab empty "") "A😀B")
+        replaced (controller/dispatch emoji (document-map :type (document-keyword :address/insert)
+                                  :text (document-string "X") :selection-anchor (document-i64 3)
+                                  :selection-focus (document-i64 1)))
+        deleted (controller/dispatch replaced (document-map :type (document-keyword :address/delete)
+                                  :selection-anchor (document-i64 1) :selection-focus (document-i64 1)))]
+    (cond (not= (session/pending-generation opened "tab-1") 0) 1
+          (not= (session/pending-generation blocked "tab-1") 0) 2
+          (not= (session/pending-generation submitted "tab-1") 1) 3
+          (not (string=? (session/active-url forged) "")) 4
+          (not (string=? (text (field (field input :attrs) :value)) "https://example.com/日本")) 5
+          (not (string=? (session/active-url committed) "https://example.com/日本")) 6
+          (not= (session/pending-generation tab2 "tab-2") 0) 7
+          (not (string=? (session/active-url focused) "https://example.com/日本")) 8
+          (not (document-equal? submitted scalar)) 9
+          (not (string=? (text (field (field replaced :session/address-editor) :text/value)) "AXB")) 10
+          (not (string=? (text (field (field deleted :session/address-editor) :text/value)) "AB")) 11
+          :else 0)))

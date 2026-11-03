@@ -1,0 +1,38 @@
+(ns browser.native-snapshot-codec-test
+  (:require [browser.local-session :as session] [browser.local-snapshot-codec :as codec])
+  (:export [main]))
+(defn field [d :document k :keyword] :document (option-or (document-get d k) (document-null)))
+(defn text [d :document] :string (option-or (document-string-value d) ""))
+(defn none? [s :string] :bool (not (option-some?-of [:option :document] (codec/decode s "local"))))
+(defn width [c :i64] :i64 (cond (< c 128) 1 (< c 2048) 2 (< c 65536) 3 :else 4))
+(defn all-truncations-rejected? [s :string] :bool
+  (loop [i 0]
+    (if (>= i (string-length s)) true
+      (if (not (none? (string-substring s 0 i))) false
+        (recur (+ i (width (string-code-point-at s i))))))))
+(defn main [] :i64
+  (let [a (session/open-tab (session/empty-session "p") "https://one.example/猫|雪")
+        b (session/confirm-navigation a "tab-1" 1 "https://one.example/猫|雪")
+        titled (session/set-page-title b "tab-1" "title|😀\n")
+        c (session/open-tab titled "https://two.example/")
+        d (session/confirm-navigation c "tab-2" 2 "https://two.example/")
+        selected (session/focus-tab d "tab-1")
+        pending (session/commit-address (session/set-address selected "https://pending.example/"))
+        encoded (codec/encode pending) wire (option-or encoded "")
+        decoded (codec/decode wire "restored") state (option-or decoded (document-null))
+        tabs (field (field state :session/chrome) :chrome/tabs)
+        again (codec/encode state) empty (codec/encode (session/empty-session "p"))]
+    (if (and (option-some?-of [:option :string] encoded) (option-some?-of [:option :document] decoded)
+             (string=? (session/active-url state) "https://one.example/猫|雪")
+             (= (document-count tabs) 2) (string=? (text (field (option-or (document-vector-at tabs 0) (document-null)) :tab/title)) "title|😀\n")
+             (= (session/pending-generation state "tab-1") 0)
+             (string=? wire (option-or again "")) (all-truncations-rejected? wire)
+             (string=? (option-or empty "") "BSS1|1|0|0|")
+             (option-some?-of [:option :document] (codec/decode (option-or empty "") "local"))
+             (none? "") (none? "BSS2|1|0|0|") (none? "BSS1|01|0|0|")
+             (none? "BSS1|0|0|0|") (none? "BSS1|9007199254740992|0|0|")
+             (none? "BSS1|1|0|33|") (none? "BSS1|1|0|0|trailing")
+             (none? "BSS1|1|1|1|1|猫0|0|0|")
+             (none? "BSS1|1|1|1|4097|x") (none? "BSS1|1|1|1|0|0|33|0|")
+             (none? "BSS1|1|1|1|0|0|0|1|")
+             (not (option-some?-of [:option :document] (codec/decode wire "")))) 0 1)))

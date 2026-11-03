@@ -1,0 +1,17 @@
+(ns browser.native-snapshot-codec-limit-test
+  (:require [browser.local-session :as session] [browser.local-snapshot-codec :as codec]) (:export [main]))
+(defn field [d :document k :keyword] :document (option-or (document-get d k) (document-null)))
+(defn main [] :i64
+  ;; 32 tabs with two references of 1,024 bytes each meet the 65,536-byte
+  ;; aggregate limit exactly. No external input or capability is involved.
+  (let [chunk "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        url (string-concat chunk (string-concat chunk (string-concat chunk chunk)))
+        tab (string-concat "1024|" (string-concat url (string-concat "0|1|1|1024|" url)))
+        wire (loop [i 0 out "BSS1|1|1|32|"]
+               (if (= i 32) out (recur (+ i 1) (string-concat out tab))))
+        decoded (codec/decode wire "local") state (option-or decoded (document-null))
+        again (codec/encode state)]
+    (if (and (option-some?-of [:option :document] decoded)
+             (= (document-count (field (field state :session/chrome) :chrome/tabs)) 32)
+             (string=? (session/active-url state) url)
+             (option-some?-of [:option :string] again) (string=? (option-or again "") wire)) 0 1)))

@@ -1,0 +1,299 @@
+(ns browser.local-session
+  (:require [browser-chrome :as chrome]
+            [browser.storage :as storage]
+            [browser.text-edit :as edit])
+  (:export [empty-session open-tab focus-tab close-tab set-address commit-address
+            pending-generation request-history request-link confirm-navigation confirm-text-navigation cancel-navigation
+            address-insert address-backspace address-delete address-select address-move address-select-all
+            address-composition-start address-composition-update address-composition-end
+            active-url active-html-page remember-html-page set-page-title put-value get-value delete-value]))
+
+;; Pure local state only. A navigation intent is data, not permission to fetch.
+(defn field [d :document key :keyword] :document
+  (option-or (document-get d key) (document-null)))
+
+(defn text [d :document] :string
+  (option-or (document-string-value d) ""))
+
+(defn integer [d :document] :i64
+  (option-or (document-i64-value d) 0))
+
+(defn boolean-value [d :document] :bool
+  (option-or (document-bool-value d) false))
+
+(defn editor-document [e [:ref :browser.text-edit/state]] :document
+  (document-map :text/value (document-string (:text/value e))
+                :text/caret (document-i64 (:text/caret e))
+                :text/selection-start (document-i64 (:text/selection-start e))
+                :text/selection-end (document-i64 (:text/selection-end e))
+                :text/composition (document-string (:text/composition e))
+                :text/composing (document-bool (:text/composing e))))
+
+(defn editor-state [session :document] [:ref :browser.text-edit/state]
+  (let [d (field session :session/address-editor)]
+    (record [:ref :browser.text-edit/state]
+            (text (field d :text/value)) (integer (field d :text/caret))
+            (integer (field d :text/selection-start)) (integer (field d :text/selection-end))
+            (text (field d :text/composition)) (boolean-value (field d :text/composing)))))
+
+(defn with-chrome [session :document state :document] :document
+  ;; Replace the address editor only when the chrome state chooses a new URL.
+  (document-assoc (document-assoc session :session/chrome state)
+                  :session/address-editor
+                  (editor-document (edit/insert-text (edit/empty-state)
+                                                     (text (field state :chrome/url-input))))))
+
+(defn with-editor [session :document e [:ref :browser.text-edit/state]] :document
+  (document-assoc
+    (document-assoc session :session/address-editor (editor-document e))
+    :session/chrome (chrome/set-url-input (field session :session/chrome) (:text/value e))))
+
+(defn empty-session [partition :string] :document
+  (document-map :session/chrome (chrome/empty-chrome)
+                :session/store (storage/empty-store)
+                :session/partition (document-string partition)
+                :session/pending (document-map)
+                :session/committed (document-map)
+                :session/pages (document-map)
+                :session/html-pages (document-map)
+                :session/address-editor (editor-document (edit/empty-state))
+                :session/next-generation (document-i64 1)))
+
+(defn queue-navigation [session :document tab-id :string url :string] :document
+  (let [generation (integer (field session :session/next-generation))
+        pending (field session :session/pending)
+        entry (document-map :url (document-string url)
+                            :generation (document-i64 generation))]
+    (document-assoc
+      (document-assoc session :session/pending
+                      (document-assoc pending (document-string tab-id) entry))
+      :session/next-generation (document-i64 (+ generation 1)))))
+
+(defn open-tab [session :document url :string] :document
+  (let [previous (field session :session/chrome)
+        opened (chrome/new-tab previous "")
+        state (chrome/set-url-input opened url)
+        tab-id (text (field state :chrome/active-tab-id))]
+    (if (document-equal? previous opened) session
+      (if (string=? url "") (with-chrome session state)
+        (queue-navigation (with-chrome session state) tab-id url)))))
+
+(defn focus-tab [session :document tab-id :string] :document
+  (let [state (chrome/focus-tab (field session :session/chrome) tab-id)
+        pending (pending-entry session tab-id)
+        next (if (> (integer (field pending :generation)) 0)
+               (chrome/set-url-input state (text (field pending :url))) state)]
+    (if (and (>= (chrome/active-tab-index state) 0)
+             (string=? tab-id (text (field state :chrome/active-tab-id))))
+      (with-chrome session next)
+      session)))
+
+(defn close-tab [session :document tab-id :string] :document
+  (let [state (field session :session/chrome)
+        closed (chrome/close-tab state tab-id)]
+    (if (document-equal? state closed) session
+      (let [active? (string=? tab-id (text (field state :chrome/active-tab-id)))
+            cleared (document-assoc
+                      (document-assoc
+                        (document-assoc session :session/pending
+                          (document-dissoc (field session :session/pending) (document-string tab-id)))
+                        :session/committed
+                          (document-dissoc (field session :session/committed) (document-string tab-id)))
+                      :session/pages
+                        (document-dissoc (field session :session/pages) (document-string tab-id)))
+            cleared-html (document-assoc cleared :session/html-pages
+                          (document-dissoc (html-pages cleared) (document-string tab-id)))
+            updated (document-assoc cleared-html :session/chrome closed)
+            active (text (field closed :chrome/active-tab-id))]
+        (if active?
+          (if (string=? active "") (with-chrome updated closed) (focus-tab updated active))
+          updated)))))
+
+(defn set-address [session :document url :string] :document
+  (with-chrome session (chrome/set-url-input (field session :session/chrome) url)))
+
+(defn address-insert [session :document value :string] :document
+  (with-editor session (edit/insert-text (editor-state session) value)))
+
+(defn address-backspace [session :document] :document
+  (with-editor session (edit/delete-backward (editor-state session))))
+
+(defn address-delete [session :document] :document
+  (with-editor session (edit/delete-forward (editor-state session))))
+
+(defn address-select [session :document start :i64 end :i64] :document
+  (with-editor session (edit/select (editor-state session) start end)))
+
+(defn address-move [session :document delta :i64 extend? :bool] :document
+  (with-editor session (edit/move-caret (editor-state session) delta
+                       (record [:ref :browser.text-edit/options] extend?))))
+
+(defn address-select-all [session :document] :document
+  (with-editor session (edit/select-all (editor-state session))))
+
+(defn address-composition-start [session :document] :document
+  (with-editor session (edit/composition-start (editor-state session))))
+
+(defn address-composition-update [session :document value :string] :document
+  (with-editor session (edit/composition-update (editor-state session) value)))
+
+(defn address-composition-end [session :document value :string] :document
+  (with-editor session (edit/composition-end (editor-state session) value)))
+
+(defn commit-address [session :document] :document
+  (let [state (field session :session/chrome)]
+    (if (or (< (chrome/active-tab-index state) 0)
+            (:text/composing (editor-state session))) session
+      (let [tab-id (text (field state :chrome/active-tab-id))
+            url (text (field state :chrome/url-input))
+            next (document-assoc state :chrome/last-navigation
+                                 (document-map :tab/id (document-string tab-id)
+                                               :url (document-string url)))]
+        (queue-navigation (document-assoc session :session/chrome next) tab-id url)))))
+
+(defn request-history [session :document delta :i64] :document
+  ;; A history click requests a new navigation; it does not grant a fetch or
+  ;; move the committed cursor. Denial/cancellation leaves the page intact.
+  (let [state (field session :session/chrome)
+        tab-id (text (field state :chrome/active-tab-id))
+        target (chrome/history-target state tab-id delta)]
+    (if (or (= (document-kind target) :null) (:text/composing (editor-state session))) session
+      (let [url (text (field target :url))
+            next (document-assoc (chrome/set-url-input state url) :chrome/last-navigation
+                                  (document-map :tab/id (document-string tab-id) :url (document-string url)))
+            queued (queue-navigation (with-chrome session next) tab-id url)
+            pending (field queued :session/pending)
+            entry (option-or (document-get pending (document-string tab-id)) (document-map))]
+        (document-assoc queued :session/pending
+          (document-assoc pending (document-string tab-id)
+            (document-assoc entry :history-index (field target :index))))))))
+
+(defn request-link [session :document tab-id :string url :string] :document
+  ;; The authenticated host must bind this input to a trusted click on the
+  ;; current page and resolve/validate its URL. This only queues an intent.
+  (let [state (field session :session/chrome)]
+    (if (or (not (string=? tab-id (text (field state :chrome/active-tab-id))))
+            (not (option-some?-of [:option :string] (active-html-page session)))
+            (:text/composing (editor-state session)) (string=? url "")) session
+      (commit-address (set-address session url)))))
+
+(defn pending-entry [session :document tab-id :string] :document
+  (option-or (document-get (field session :session/pending) (document-string tab-id))
+             (document-map)))
+
+(defn pending-generation [session :document tab-id :string] :i64
+  (integer (field (pending-entry session tab-id) :generation)))
+
+(defn cancel-navigation [session :document tab-id :string generation :i64] :document
+  (if (and (> generation 0) (= generation (pending-generation session tab-id)))
+    (let [state (field session :session/chrome)
+          active? (string=? tab-id (text (field state :chrome/active-tab-id)))
+          ;; Preserve typing or an IME composition begun while consent was
+          ;; pending. Only restore the committed URL if the editor still
+          ;; contains the cancelled request's original value.
+          restore? (and active? (not (:text/composing (editor-state session)))
+                        (string=? (text (field state :chrome/url-input)) (text (field (pending-entry session tab-id) :url))))
+          next (if restore?
+                 (chrome/focus-tab state tab-id) state)]
+      (let [updated (document-assoc session :session/pending
+                                    (document-dissoc (field session :session/pending) (document-string tab-id)))]
+        (if restore?
+          (with-chrome updated next)
+          (document-assoc updated :session/chrome next))))
+    session))
+
+(defn confirm-navigation [session :document tab-id :string generation :i64 url :string] :document
+  ;; The embedding host must validate and authorize the response first. No
+  ;; redirects are admitted by this local model; URL must match the request.
+  (let [pending (pending-entry session tab-id)]
+    (if (and (> generation 0)
+             (= generation (integer (field pending :generation)))
+             (string=? url (text (field pending :url)))
+             (or (= (document-kind (field pending :history-index)) :null)
+                 (document-equal? (chrome/history-at (field session :session/chrome) tab-id
+                                  (integer (field pending :history-index))) (document-string url))))
+      (let [state (field session :session/chrome)
+            committed (if (= (document-kind (field pending :history-index)) :null)
+                        (chrome/commit-tab-url state tab-id url)
+                        (chrome/commit-history state tab-id (integer (field pending :history-index)) url))
+            ;; A response must not overwrite typing or an IME composition
+            ;; started after the request, even when the tab is still active.
+            next (if (string=? tab-id (text (field state :chrome/active-tab-id)))
+                   (chrome/set-url-input committed (text (field state :chrome/url-input)))
+                   committed)
+            cleared (document-assoc session :session/pending
+                                    (document-dissoc (field session :session/pending) (document-string tab-id)))
+            updated (document-assoc cleared :session/chrome next)]
+        (document-assoc
+          (document-assoc
+            (document-assoc updated :session/pages
+                            (document-dissoc (field session :session/pages) (document-string tab-id)))
+            :session/html-pages (document-dissoc (html-pages session) (document-string tab-id)))
+          :session/committed
+          (document-assoc (field session :session/committed)
+                          (document-string tab-id) (document-string url))))
+      session)))
+
+(defn confirm-text-navigation [session :document tab-id :string generation :i64 url :string body :string] :document
+  ;; Only for an already-authorized, decoded text/plain response supplied by
+  ;; the host. Text is data, not HTML; the host owns MIME/charset validation,
+  ;; response limits, authorization and protection against forged responses.
+  (let [pending (pending-entry session tab-id)]
+    (if (and (> generation 0)
+             (= generation (integer (field pending :generation)))
+             (string=? url (text (field pending :url))))
+      (let [confirmed (confirm-navigation session tab-id generation url)]
+        (document-assoc confirmed :session/pages
+                        (document-assoc (field confirmed :session/pages)
+                                        (document-string tab-id) (document-string body))))
+      session)))
+
+(defn active-url [session :document] :string
+  (let [state (field session :session/chrome)
+        i (chrome/active-tab-index state)]
+    (if (< i 0) ""
+      (let [tab-id (text (field state :chrome/active-tab-id))]
+        (text (option-or (document-get (field session :session/committed)
+                                       (document-string tab-id))
+                         (document-null)))))))
+
+;; Older sessions may not contain the HTML page map.
+(defn html-pages [session :document] :document
+  (let [pages (field session :session/html-pages)]
+    (if (= (document-kind pages) :map) pages (document-map))))
+
+;; Only an already-confirmed tab/URL can retain a host-supplied page wire.
+;; This records data; it is not an authorization or a network operation.
+(defn remember-html-page [session :document tab-id :string url :string wire :string] :document
+  (let [committed (text (option-or (document-get (field session :session/committed) (document-string tab-id)) (document-null)))]
+    (if (or (string=? url "") (not (string=? committed url)) (string=? wire "")) session
+      (document-assoc session :session/html-pages
+                      (document-assoc (html-pages session) (document-string tab-id) (document-string wire))))))
+
+(defn set-page-title [session :document tab-id :string title :string] :document
+  (document-assoc session :session/chrome
+                  (chrome/finish-navigation (field session :session/chrome) tab-id title :idle)))
+
+(defn active-html-page [session :document] [:option :string]
+  (let [state (field session :session/chrome)
+        tab-id (text (field state :chrome/active-tab-id))]
+    (if (or (< (chrome/active-tab-index state) 0) (string=? (active-url session) ""))
+      (option-none-of [:option :string])
+      (document-string-value (option-or (document-get (html-pages session) (document-string tab-id)) (document-null))))))
+
+(defn put-value [session :document key :document value :document] :document
+  (document-assoc session :session/store
+    (storage/put-value (field session :session/store)
+                       (text (field session :session/partition))
+                       (active-url session) key value)))
+
+(defn get-value [session :document key :document] [:option :document]
+  (storage/get-value (field session :session/store)
+                     (text (field session :session/partition))
+                     (active-url session) key))
+
+(defn delete-value [session :document key :document] :document
+  (document-assoc session :session/store
+    (storage/delete-value (field session :session/store)
+                          (text (field session :session/partition))
+                          (active-url session) key)))

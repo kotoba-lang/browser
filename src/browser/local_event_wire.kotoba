@@ -1,0 +1,60 @@
+(ns browser.local-event-wire
+  (:export [decode]))
+
+;; B1|kind|target|anchor|focus|delta|extend|text. Only the seven header
+;; separators are structural; text is the remaining UTF-8 string verbatim.
+(defn item [d :document i :i64] :document
+  (option-or (document-vector-at d i) (document-null)))
+(defn text [d :document] :string (option-or (document-string-value d) ""))
+(defn fields [s :string start :i64 n :i64 acc :document] :document
+  (if (= n 7) (document-vector-conj acc (document-string (string-substring s start (string-length s))))
+    (let [end (loop [i start]
+                (cond (>= i (string-length s)) -1
+                      (= (string-code-point-at s i) 124) i
+                      (> (string-code-point-at s i) 127) -1
+                      :else (recur (+ i 1))))]
+      (if (< end 0) (document-null)
+        (fields s (+ end 1) (+ n 1)
+                (document-vector-conj acc (document-string (string-substring s start end))))))))
+
+;; Only -1 or unsigned, canonical decimal up to seven digits is admitted.
+(defn number [s :string] :i64
+  (let [n (string-length s)]
+    (cond (string=? s "-1") -1
+          (or (= n 0) (> n 7) (and (> n 1) (= (string-code-point-at s 0) 48))) -2
+          :else (loop [i 0 v 0]
+                  (if (= i n) v
+                    (let [c (string-code-point-at s i)]
+                      (if (or (< c 48) (> c 57)) -2 (recur (+ i 1) (+ (* v 10) (- c 48))))))))))
+
+(defn event-kind [s :string] :keyword
+  (cond (string=? s ":ui/click") :ui/click (string=? s ":ui/text") :ui/text
+        (string=? s ":ui/backspace") :ui/backspace (string=? s ":ui/delete") :ui/delete
+        (string=? s ":ui/move") :ui/move (string=? s ":ui/select-all") :ui/select-all
+        (string=? s ":ui/composition-start") :ui/composition-start
+        (string=? s ":ui/composition-update") :ui/composition-update
+        (string=? s ":ui/composition-end") :ui/composition-end
+        (string=? s ":ui/submit") :ui/submit :else :unknown))
+
+(defn decode [wire :string] [:option :document]
+  (if (> (string-byte-length wire) 65664) (option-none-of [:option :document])
+    (let [p (fields wire 0 0 (document-vector))]
+      (if (not= (document-kind p) :vector) (option-none-of [:option :document])
+    (let [version (text (item p 0)) kind (event-kind (text (item p 1)))
+          id (number (text (item p 2))) anchor (number (text (item p 3)))
+          focus (number (text (item p 4))) delta (number (text (item p 5)))
+          extend (number (text (item p 6))) payload (text (item p 7))
+          text-kind (or (= kind :ui/text) (= kind :ui/composition-update) (= kind :ui/composition-end))
+          selection? (and (>= anchor 0) (>= focus 0) (<= anchor 1048576) (<= focus 1048576))]
+      (if (or (not (string=? version "B1")) (= kind :unknown)
+              (< id 1) (> id 256) (not (or (and (= anchor -1) (= focus -1)) selection?))
+              (< delta -1) (> delta 1) (< extend 0) (> extend 1)
+              (and (not= kind :ui/move) (or (not= delta 0) (not= extend 0)))
+              (and (not text-kind) (not (string=? payload ""))) (> (string-byte-length payload) 65536))
+        (option-none-of [:option :document])
+        (let [event (document-map :type (document-keyword kind) :target (document-i64 id)
+                                  :text (document-string payload) :delta (document-i64 delta)
+                                  :extend (document-bool (= extend 1)))]
+          (option-some-of [:option :document]
+            (if selection? (document-assoc (document-assoc event :selection-anchor (document-i64 anchor))
+                                            :selection-focus (document-i64 focus)) event)))))))))

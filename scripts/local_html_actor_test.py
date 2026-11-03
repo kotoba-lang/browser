@@ -1,0 +1,192 @@
+"""Exercise the experimental HTML actor over local pipes; peer authentication is not implemented."""
+import io
+import json
+import os
+from pathlib import Path
+import select
+import subprocess
+import time
+
+
+def snapshot_actor_control(command, env, timeout):
+    url = 'https://example.test/猫'
+    size = len(url.encode('utf-8'))
+    snapshot = f'BSS1|2|1|1|{size}|{url}0|1|1|{size}|{url}'
+    payloads = ['S1|99', 'R1|1|BSS1|bad', 'R1|1|' + 'x' * 70000,
+                'R1|1|' + 'x' * 131195, 'S1|1',
+                'R1|1|' + snapshot, 'R1|2|' + snapshot, 'S1|2']
+    data = b''.join(str(len(value.encode())).encode() + b'\n' + value.encode() for value in payloads) + b'0\n'
+    proc = subprocess.run(list(map(str, command)), input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                          env=env, timeout=timeout)
+    assert proc.returncode == 0 and not proc.stderr, (proc.returncode, proc.stderr[-1000:])
+    stream = io.BytesIO(proc.stdout)
+    def frame(expected_revision):
+        header = stream.readline().rstrip(b'\r\n').split()
+        assert len(header) == 3 and header[0] == b'FRAME' and int(header[1]) == expected_revision, header
+        return json.loads(stream.read(int(header[2])))
+    def saved(expected_revision):
+        header = stream.readline().rstrip(b'\r\n').split()
+        assert len(header) == 3 and header[0] == b'SFRAME' and int(header[1]) == expected_revision, header
+        return stream.read(int(header[2])).decode('utf-8')
+    frame(1)
+    for _ in range(4): assert stream.readline().rstrip(b'\r\n') == b'REJECT'
+    assert saved(1) == 'BSS1|1|0|0|'
+    restored = frame(2)
+    assert any(op[0] == ':dom/set-attr' and op[2] == ':value' and op[3] == url for batch in restored for op in batch)
+    assert stream.readline().rstrip(b'\r\n') == b'REJECT'
+    assert saved(2) == snapshot
+    assert b':status :ok :result 0' in stream.read()
+    return proc.stdout
+
+
+def snapshot_actor_large_control(command, env, timeout):
+    prefix = 'https://example.test/'
+    url = prefix + 'x' * (4096 - len(prefix))
+    history = ('4096|' + url) * 14
+    snapshot = 'BSS1|16|1|1|4096|' + url + '0|14|14|' + history
+    payloads = ['R1|1|' + snapshot, 'S1|2']
+    data = b''.join(str(len(value.encode())).encode() + b'\n' + value.encode() for value in payloads) + b'0\n'
+    proc = subprocess.run(list(map(str, command)), input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                          env=env, timeout=timeout)
+    assert proc.returncode == 0 and not proc.stderr, (proc.returncode, proc.stderr[-1000:])
+    stream = io.BytesIO(proc.stdout)
+    for rev in (1, 2):
+        header = stream.readline().rstrip(b'\r\n').split()
+        assert len(header) == 3 and header[0] == b'FRAME' and int(header[1]) == rev, header
+        json.loads(stream.read(int(header[2])))
+    header = stream.readline().rstrip(b'\r\n').split()
+    assert len(header) == 3 and header[0] == b'SFRAME' and header[1] == b'2', header
+    assert stream.read(int(header[2])).decode('utf-8') == snapshot
+    assert b':status :ok :result 0' in stream.read()
+    return proc.stdout
+
+
+def run_actor(command, env, output, timeout=90):
+    process = subprocess.Popen(list(map(str, command)), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, env=env, bufsize=0)
+    buffer = b''
+    observed = bytearray()
+
+    def more(deadline):
+        nonlocal buffer
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or not select.select([process.stdout], [], [], remaining)[0]:
+            raise AssertionError(('actor timeout', bytes(observed[-1000:])))
+        data = os.read(process.stdout.fileno(), 65536)
+        if not data:
+            raise AssertionError(('actor EOF', bytes(observed[-1000:])))
+        buffer += data
+        observed.extend(data)
+
+    def line(deadline):
+        nonlocal buffer
+        while b'\n' not in buffer:
+            more(deadline)
+        value, buffer = buffer.split(b'\n', 1)
+        return value.rstrip(b'\r')
+
+    def frame(revision, page=False, notice=None):
+        nonlocal buffer
+        deadline = time.monotonic() + timeout
+        header = line(deadline)
+        fields = header.split()
+        assert fields[0] == (b'NFRAME' if notice else b'PFRAME' if page else b'FRAME') and int(fields[1]) == revision, header
+        assert len(fields) == (5 if notice else 4 if page else 3)
+        shell_len = int(fields[2]); page_len = int(fields[3]) if page or notice else 0
+        intent_len = int(fields[4]) if notice else 0
+        size = shell_len + page_len + intent_len
+        assert 0 < shell_len and size <= 1048576 and (not page or page_len > 0)
+        while len(buffer) < size:
+            more(deadline)
+        raw, buffer = buffer[:size], buffer[size:]
+        if notice: assert json.loads(raw[shell_len + page_len:]) == notice
+        return json.loads(raw[:shell_len]), json.loads(raw[shell_len:shell_len + page_len]) if page else None
+
+    def send(payload):
+        raw = payload.encode('utf-8')
+        process.stdin.write(str(len(raw)).encode() + b'\n' + raw)
+        process.stdin.flush()
+
+    def event(rev, wire):
+        send(str(rev) + '|' + wire)
+
+    def response(rev, generation, tab, url, body):
+        send(f'H1|{rev}|{generation}|{tab}|{len(url.encode())}|{url}{body}')
+
+    def address(shell):
+        return next(op[3] for batch in shell for op in batch if op[0] == ':dom/set-attr' and op[2] == ':value')
+
+    def reject():
+        assert line(time.monotonic() + timeout) == b'REJECT'
+
+    try:
+        assert address(frame(1)[0]) == ''
+        event(1, 'B1|:ui/click|3|-1|-1|0|0|'); frame(2)
+        url = 'https://one.example/'
+        event(2, 'B1|:ui/text|9|0|0|0|0|' + url); assert address(frame(3)[0]) == url
+        event(3, 'B1|:ui/submit|9|-1|-1|0|0|'); frame(4, notice={'tab':'tab-1', 'generation':1, 'url':url})
+        body = '<section><h1>Hi <em>世界</em></h1><p><strong>重要</strong> <code>x</code></p></section>'
+        response(3, 1, 'tab-1', url, body); reject()
+        response(4, 1, 'tab-1', 'https://other.example/', body); reject()
+        response(4, 1, 'tab-1', url, '<script>x</script>'); reject()
+        send('H1|4|'); reject()
+        send('H1|4|1|tab-1|1|😀'); reject()  # byte boundary inside a UTF-8 scalar
+        response(4, 1, 'tab-1', url, body)
+        shell, page = frame(5, True)
+        assert address(shell) == url and any(op[0] == ':dom/create-element' and op[2] == ':h1' for batch in page for op in batch)
+        response(5, 1, 'tab-1', url, body); reject()
+        event(5, 'B1|:ui/text|9|20|20|0|0|x'); shell, after = frame(6, True)
+        assert address(shell) == url + 'x' and after == page
+        event(6, 'B1|:ui/submit|9|-1|-1|0|0|')
+        frame(7, True, {'tab':'tab-1', 'generation':2, 'url':url + 'x'})
+        send('C1|6|2|tab-1'); reject()  # stale frame
+        send('C1|7|1|tab-1'); reject()  # stale generation
+        send('C1|7|2|tab-1|extra'); reject()
+        send('C1|7|2|tab-1'); shell, cancelled = frame(8, True)
+        assert address(shell) == url and cancelled == page
+        response(8, 2, 'tab-1', url + 'x', body); reject()
+        event(8, 'B1|:ui/click|5|-1|-1|0|0|'); frame(9)  # open a second blank tab
+        event(9, 'B1|:ui/click|3|-1|-1|0|0|'); _, restored = frame(10, True)
+        assert restored == page
+        send('L1|9|tab-1|https://one.example/next'); reject()
+        send('L1|10|tab-2|https://one.example/next'); reject()
+        send('L1|10|tab-1|javascript:alert(1)'); reject()
+        send('L1|10|tab-1|https://one.example/next')
+        frame(11, True, {'tab':'tab-1', 'generation':3, 'url':'https://one.example/next'})
+        next_url = 'https://one.example/next'; next_body = '<section><h1>Next page</h1></section>'
+        response(11, 3, 'tab-1', next_url, next_body)
+        shell, next_page = frame(12, True)
+        assert address(shell) == next_url and next_page != page
+        def action_id(projection, action):
+            return next(op[1] for batch in projection for op in batch
+                        if op[0] == ':dom/set-attr' and op[2] == ':data-action' and op[3] == action)
+        event(12, f'B1|:ui/click|{action_id(shell, ":history/back")}|-1|-1|0|0|')
+        frame(13, True, {'tab':'tab-1', 'generation':4, 'url':url})
+        response(13, 4, 'tab-1', url, body); shell, previous_page = frame(14, True)
+        assert address(shell) == url and previous_page == page
+        event(14, f'B1|:ui/click|{action_id(shell, ":history/forward")}|-1|-1|0|0|')
+        frame(15, True, {'tab':'tab-1', 'generation':5, 'url':next_url})
+        response(15, 5, 'tab-1', next_url, next_body); shell, forward_page = frame(16, True)
+        assert address(shell) == next_url and forward_page == next_page
+        process.stdin.write(b'0\n'); process.stdin.flush()
+        tail, errors = process.communicate(timeout=timeout)
+        observed.extend(tail)
+        assert process.returncode == 0 and not errors and b':status :ok :result 0' in observed
+    finally:
+        Path(output).write_bytes(observed)
+        if process.poll() is None:
+            process.kill(); process.wait(timeout=10)
+
+    invalid = subprocess.run(list(map(str, command)), input=b'01\n', stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, env=env, timeout=timeout)
+    assert b':status :ok :result 2' in invalid.stdout and b'PFRAME ' not in invalid.stdout
+    denied = subprocess.run(list(map(str, command)), input=b'0\n', stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, env=dict(env, KEXE_ALLOW='37,39'), timeout=timeout)
+    combined = denied.stdout + denied.stderr
+    assert b':wire 41' in combined and b':refused' in combined and b'PFRAME ' not in combined
+    snapshot_result = snapshot_actor_control(command, dict(env, KEXE_STRUCTURED_REPORT='1', KEXE_ALLOW='37,39,41'), max(timeout, 180))
+    Path(str(output) + '.snapshot').write_bytes(snapshot_result)
+    snapshot_large = snapshot_actor_large_control(command, dict(env, KEXE_STRUCTURED_REPORT='1', KEXE_ALLOW='37,39,41'), max(timeout, 180))
+    Path(str(output) + '.snapshot-large').write_bytes(snapshot_large)
+    Path(str(output) + '.invalid').write_bytes(invalid.stdout + invalid.stderr)
+    Path(str(output) + '.denied').write_bytes(combined)

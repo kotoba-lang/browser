@@ -1,0 +1,12 @@
+(ns browser.native-snapshot-codec-boundary-test
+  (:require [browser.local-snapshot-codec :as codec]) (:export [main]))
+(defn main [] :i64
+  (let [chunk "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+        large (loop [i 0 out ""] (if (= i 16) out (recur (+ i 1) (string-concat out chunk))))
+        one (string-concat "BSS1|1|1|1|4096|" (string-concat large (string-concat "0|1|1|4096|" large)))
+        normal (codec/decode one "local")
+        small (string-concat chunk (string-concat chunk (string-concat chunk (string-concat chunk "z"))))
+        tab (string-concat "1025|" (string-concat small (string-concat "0|1|1|1025|" small)))
+        oversized (loop [i 0 out "BSS1|1|1|32|"] (if (= i 32) out (recur (+ i 1) (string-concat out tab))))]
+    (if (and (option-some?-of [:option :document] normal)
+             (not (option-some?-of [:option :document] (codec/decode oversized "local")))) 0 1)))

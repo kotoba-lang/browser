@@ -1,0 +1,25 @@
+(ns browser.native-local-dom-commit-test
+  (:require [browser.local-session :as session]
+            [browser.local-view :as view]
+            [browser.local-dom-commit :as commit]
+            [kotoba.wasm.dom :as dom])
+  (:export [main]))
+
+(defn item [d :document i :i64] :document
+  (option-or (document-vector-at d i) (document-null)))
+
+(defn main [] :i64
+  (let [one (session/open-tab (session/empty-session "p") "https://one.example/")
+        ready (session/confirm-navigation one "tab-1" 1 "https://one.example/")
+        two (session/open-tab ready "https://two.example/")
+        page (session/confirm-text-navigation two "tab-2" 2 "https://two.example/" "<script>inert</script>")
+        snapshot (view/render page)
+        transaction (dom/consume-op-transaction snapshot)
+        batches (item transaction 0)
+        forged (document-vector (item batches 0))
+        stale (session/address-insert page "x")]
+    (cond (not (option-some?-of [:option :document] (commit/prepare page snapshot batches))) 1
+          (option-some?-of [:option :document] (commit/prepare page snapshot forged)) 2
+          (option-some?-of [:option :document] (commit/prepare stale snapshot batches)) 3
+          (option-some?-of [:option :document] (commit/prepare page snapshot (document-null))) 4
+          :else 0)))

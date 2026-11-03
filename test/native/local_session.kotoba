@@ -1,0 +1,133 @@
+(ns browser.native-local-session-test
+  (:require [browser.local-session :as session])
+  (:export [main]))
+
+(defn field [d :document k :keyword] :document
+  (option-or (document-get d k) (document-null)))
+
+(defn text [d :document] :string
+  (option-or (document-string-value d) ""))
+
+(defn value [s :document] :string
+  (text (option-or (session/get-value s (document-keyword :token))
+                   (document-null))))
+
+(defn tab [s :document i :i64] :document
+  (option-or (document-vector-at (field (field s :session/chrome) :chrome/tabs) i)
+             (document-null)))
+
+(defn history-test [] :i64
+  (let [one (session/confirm-navigation (session/open-tab (session/empty-session "h") "https://a/") "tab-1" 1 "https://a/")
+        two (session/confirm-navigation (session/commit-address (session/set-address one "https://b/")) "tab-1" 2 "https://b/")
+        requested (session/request-history two -1)
+        denied (session/cancel-navigation requested "tab-1" 3)
+        stale (session/confirm-navigation denied "tab-1" 3 "https://a/")
+        requested-again (session/request-history stale -1)
+        back (session/confirm-navigation requested-again "tab-1" 4 "https://a/")
+        forward-pending (session/request-history back 1)
+        forward (session/confirm-navigation forward-pending "tab-1" 5 "https://b/")
+        back2 (session/confirm-navigation (session/request-history forward -1) "tab-1" 6 "https://a/")
+        branch (session/confirm-navigation (session/commit-address (session/set-address back2 "https://c/")) "tab-1" 7 "https://c/")
+        no-forward (session/request-history branch 1)
+        history (field (tab branch 0) :tab/history)]
+    (cond (not (string=? (session/active-url requested) "https://b/")) 41
+          (not= (session/pending-generation requested "tab-1") 3) 42
+          (not (document-equal? denied stale)) 43
+          (not (string=? (session/active-url back) "https://a/")) 44
+          (not= (document-count (field (tab back 0) :tab/history)) 2) 45
+          (not (string=? (session/active-url forward) "https://b/")) 46
+          (not= (document-count history) 2) 47
+          (not (document-equal? branch no-forward)) 48
+          (not (string=? (text (option-or (document-vector-at history 1) (document-null))) "https://c/")) 49
+          :else 0)))
+
+(defn main [] :i64
+  (let [key (document-keyword :token)
+        empty (session/put-value (session/empty-session "personal") key (document-string "forbidden"))
+        first-open (session/open-tab empty "https://one.example/a")
+        first-confirm (session/confirm-navigation first-open "tab-1" 1 "https://one.example/a")
+        one (session/put-value first-confirm key (document-string "one"))
+        second-open (session/open-tab one "https://two.example/")
+        second-confirm (session/confirm-navigation second-open "tab-2" 2 "https://two.example/")
+        two (session/put-value second-confirm key (document-string "two"))
+        focused (session/focus-tab two "tab-1")
+        pending (session/commit-address (session/set-address focused "https://two.example/next"))
+        intent (field (field pending :session/chrome) :chrome/last-navigation)
+        stale (session/confirm-navigation pending "tab-1" 1 "https://two.example/next")
+        wrong-tab (session/confirm-navigation pending "tab-2" 3 "https://two.example/next")
+        redirect (session/confirm-navigation pending "tab-1" 3 "https://evil.example/")
+        navigated (session/confirm-navigation pending "tab-1" 3 "https://two.example/next")
+        typing-pending (session/address-insert pending "!")
+        typing-confirmed (session/confirm-navigation typing-pending "tab-1" 3 "https://two.example/next")
+        composing-pending (session/address-composition-update (session/address-composition-start pending) "日本")
+        composing-confirmed (session/confirm-navigation composing-pending "tab-1" 3 "https://two.example/next")
+        again (session/commit-address (session/set-address navigated "https://two.example/next"))
+        old-response (session/confirm-navigation again "tab-1" 3 "https://two.example/next")
+        confirmed (session/confirm-navigation again "tab-1" 4 "https://two.example/next")
+        pending-cancel (session/commit-address (session/set-address confirmed "https://one.example/"))
+        cancelled (session/cancel-navigation pending-cancel "tab-1" 5)
+        cancel-typing (session/cancel-navigation (session/address-insert pending-cancel "!") "tab-1" 5)
+        cancel-compose (session/cancel-navigation (session/address-composition-update (session/address-composition-start pending-cancel) "日本") "tab-1" 5)
+        late (session/confirm-navigation cancelled "tab-1" 5 "https://one.example/")
+        opaque (session/open-tab late "mailto:person@example.com")
+        opaque-ready (session/confirm-navigation opaque "tab-3" 6 "mailto:person@example.com")
+        denied (session/put-value opaque-ready key (document-string "secret"))
+        restored (session/focus-tab denied "tab-2")
+        deleted (session/delete-value restored key)
+        bg-pending (session/commit-address (session/set-address two "https://third.example/"))
+        bg-focus (session/focus-tab bg-pending "tab-1")
+        bg-confirmed (session/confirm-navigation bg-focus "tab-2" 3 "https://third.example/")
+        bg-active (session/focus-tab bg-confirmed "tab-2")
+        base-edit (session/set-address two "https://example.com/")
+        typed (session/address-insert base-edit "あ😀")
+        moved (session/address-move typed -1 false)
+        erased (session/address-backspace moved)
+        unknown-erased (session/address-backspace (session/focus-tab moved "missing"))
+        compose (session/address-composition-update (session/address-composition-start erased) "日本")
+        blocked (session/commit-address compose)
+        finished (session/address-composition-end compose "日本")
+        submitted (session/commit-address finished)
+        selected (session/address-insert (session/address-select-all finished) "https://new.example/")]
+    (cond (not= (history-test) 0) (history-test)
+          (not (string=? (value empty) "")) 1
+          (not (string=? (value first-open) "")) 10
+          (not (string=? (text (field (tab first-open 0) :tab/url)) "")) 20
+          (not (string=? (value second-open) "")) 11
+          (not (string=? (value focused) "one")) 2
+          (not (string=? (value two) "two")) 3
+          (not (string=? (value pending) "one")) 12
+          (not= (document-count (field (tab pending 0) :tab/history)) 1) 21
+          (not (string=? (value stale) "one")) 13
+          (not (string=? (value (session/focus-tab wrong-tab "tab-1")) "one")) 14
+          (not (string=? (value redirect) "one")) 15
+          (not (string=? (session/active-url navigated) "https://two.example/next")) 4
+          (not (string=? (text (field intent :url)) "https://two.example/next")) 5
+          (not (string=? (value navigated) "two")) 6
+          (not (string=? (text (field (field typing-confirmed :session/chrome) :chrome/url-input)) "https://two.example/next!")) 36
+          (not (option-or (document-bool-value (field (field composing-confirmed :session/address-editor) :text/composing)) false)) 37
+          (not (string=? (text (field (field composing-confirmed :session/address-editor) :text/composition)) "日本")) 38
+          (not= (session/pending-generation old-response "tab-1") 4) 16
+          (not= (session/pending-generation confirmed "tab-1") 0) 17
+          (not (string=? (value cancelled) "two")) 18
+          (not= (document-count (field (tab cancelled 0) :tab/history)) 3) 22
+          (not (string=? (text (field (field cancelled :session/chrome) :chrome/url-input)) "https://two.example/next")) 23
+          (not (string=? (text (field (field cancel-typing :session/chrome) :chrome/url-input)) "https://one.example/!")) 50
+          (not (option-or (document-bool-value (field (field cancel-compose :session/address-editor) :text/composing)) false)) 51
+          (not (string=? (text (field (field cancel-compose :session/address-editor) :text/composition)) "日本")) 52
+          (not (string=? (value late) "two")) 19
+          (not (string=? (value denied) "")) 7
+          (not (string=? (value restored) "two")) 8
+          (not (string=? (value deleted) "")) 9
+          (not (string=? (session/active-url bg-confirmed) "https://one.example/a")) 24
+          (not (string=? (text (field (field bg-confirmed :session/chrome) :chrome/url-input)) "https://one.example/a")) 25
+          (not (string=? (text (field (tab bg-confirmed 1) :tab/url)) "https://third.example/")) 26
+          (not (string=? (session/active-url bg-active) "https://third.example/")) 27
+          (not (string=? (value bg-active) "")) 28
+          (not (string=? (text (field (field typed :session/chrome) :chrome/url-input)) "https://example.com/あ😀")) 29
+          (not (string=? (text (field (field erased :session/chrome) :chrome/url-input)) "https://example.com/😀")) 30
+          (not (string=? (text (field (field unknown-erased :session/chrome) :chrome/url-input)) "https://example.com/😀")) 35
+          (not= (session/pending-generation blocked "tab-2") 0) 31
+          (not (string=? (text (field (field finished :session/chrome) :chrome/url-input)) "https://example.com/日本😀")) 32
+          (not= (session/pending-generation submitted "tab-2") 3) 33
+          (not (string=? (text (field (field selected :session/chrome) :chrome/url-input)) "https://new.example/")) 34
+          :else 0)))

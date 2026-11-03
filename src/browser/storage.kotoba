@@ -1,0 +1,43 @@
+(ns browser.storage
+  (:require [browser-origin :as origin])
+  (:export [empty-store put-value get-value delete-value origin-entries]))
+
+;; Immutable local data, partitioned by profile and origin. Until the host
+;; supplies distinct opaque-document identities, unsupported origins cannot
+;; access storage. This module does not implement persistence or permission.
+(defn empty-store [] :document
+  (document-map))
+
+(defn child [d :document key :document] :document
+  (option-or (document-get d key) (document-map)))
+
+(defn origin-entries [store :document partition :string url :string] :document
+  (if (origin/same-origin? url url)
+    (child (child store (document-string partition))
+           (document-string (origin/origin url)))
+    (document-map)))
+
+(defn get-value [store :document partition :string url :string key :document] [:option :document]
+  (document-get (origin-entries store partition url) key))
+
+(defn put-value [store :document partition :string url :string key :document value :document] :document
+  (if (origin/same-origin? url url)
+    (let [p (document-string partition)
+          o (document-string (origin/origin url))
+          partitions (child store p)
+          entries (child partitions o)]
+      (document-assoc store p
+        (document-assoc partitions o (document-assoc entries key value))))
+    store))
+
+(defn delete-value [store :document partition :string url :string key :document] :document
+  (if (origin/same-origin? url url)
+    (let [p (document-string partition)
+          o (document-string (origin/origin url))
+          partitions (child store p)
+          entries (child partitions o)]
+      (if (document-contains entries key)
+        (document-assoc store p
+          (document-assoc partitions o (document-dissoc entries key)))
+        store))
+    store))

@@ -1,0 +1,35 @@
+(ns browser.local-actor-frame
+  (:capabilities [:io/write :io/write-error])
+  (:export [emit-frame emit-html-frame]))
+(defn field [d :document k :keyword] :document (option-or (document-get d k) (document-null)))
+(defn emit-frame [frame :document] :i64
+  (let [revision (option-or (document-i64-value (field frame :revision)) 0)
+        wire (option-or (document-string-value (field frame :wire)) "")
+        page (option-or (document-string-value (field frame :page-wire)) "")
+        prefix (if (string=? page "") "FRAME " "PFRAME ")
+        suffix (if (string=? page "") "" (string-concat " " (string-from-i64 (string-byte-length page))))
+        header (string-concat prefix (string-concat (string-from-i64 revision)
+                 (string-concat " " (string-concat (string-from-i64 (string-byte-length wire))
+                   (string-concat suffix "\n")))))
+        out (typed-cap-call :io/write :string :string (string-concat header (string-concat wire page)))
+        flush (typed-cap-call :io/write-error :string :string "")]
+    0))
+
+(defn emit-html-frame [frame :document] :i64
+  (let [navigation (field frame :navigation)]
+    (if (= (document-kind navigation) :null) (emit-frame frame)
+      (let [revision (option-or (document-i64-value (field frame :revision)) 0)
+            wire (option-or (document-string-value (field frame :wire)) "")
+            page (option-or (document-string-value (field frame :page-wire)) "")
+            tab (document-edn-print (field navigation :tab))
+            url (document-edn-print (field navigation :url))
+            generation (option-or (document-i64-value (field navigation :generation)) 0)
+            intent (string-concat "{\"tab\":" (string-concat tab (string-concat ",\"generation\":"
+                     (string-concat (string-from-i64 generation) (string-concat ",\"url\":" (string-concat url "}"))))))
+            header (string-concat "NFRAME " (string-concat (string-from-i64 revision)
+                     (string-concat " " (string-concat (string-from-i64 (string-byte-length wire))
+                       (string-concat " " (string-concat (string-from-i64 (string-byte-length page))
+                         (string-concat " " (string-concat (string-from-i64 (string-byte-length intent)) "\n"))))))))
+            out (typed-cap-call :io/write :string :string (string-concat header (string-concat wire (string-concat page intent))))
+            flush (typed-cap-call :io/write-error :string :string "")]
+        0))))

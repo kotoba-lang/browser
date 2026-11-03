@@ -1,0 +1,36 @@
+(ns browser.native-origin-test
+  (:require [browser-origin :as origin])
+  (:export [main]))
+
+;; The origin subset must scan whole UTF-8 code points while finding the
+;; authority terminator and last userinfo separator.
+(defn main [] :i64
+  (cond (not (string=? (origin/origin "HTTPS://Example.com:443/path") "https://example.com")) 1
+        (not (string=? (origin/origin "https://éあ😀@EXAMPLE.com/path") "https://example.com")) 2
+        (not (string=? (origin/origin "https://éあ😀@sub@EXAMPLE.com:443/") "https://example.com")) 3
+        (not (string=? (origin/origin "https://éあ😀@example.com") "https://example.com")) 4
+        (not (origin/same-origin? "https://éあ😀@example.com/" "https://example.com:443/")) 5
+        (origin/same-origin? "https://éあ😀@attacker.example/" "https://example.com/") 6
+        (not (origin/internal? "kotoba://shell/apps")) 7
+        (origin/same-origin? "mailto:a@example.com" "mailto:b@example.com") 8
+        (origin/same-origin? "/one" "/two") 9
+        (origin/same-origin? "data:text/plain,a" "data:text/plain,b") 10
+        (origin/same-origin? "https:///one" "https:///two") 11
+        (origin/same-origin? "other://host/a" "other://host/b") 12
+        (not (origin/same-origin? "kotoba://shell/a" "kotoba://shell/b")) 13
+        (not (origin/same-origin? "wss://example.com:443/a" "wss://example.com/b")) 14
+        (not (string=? (origin/origin "https://victim.example?@attacker.example/path") "https://victim.example")) 15
+        (not (string=? (origin/origin "https://example.com:443#frag/other") "https://example.com")) 16
+        (not (string=? (:path (origin/parse-url "https://example.com?x=1#top")) "/?x=1#top")) 17
+        (not (string=? (:path (origin/parse-url "https://example.com#top")) "/#top")) 18
+        (not (origin/same-origin? "https://example.com?x" "https://example.com/")) 19
+        (not (string=? (origin/origin "https://evil.example\\@victim.example/path") "https://evil.example")) 20
+        (not (string=? (:path (origin/parse-url "https://example.com\\docs")) "/docs")) 21
+        (origin/same-origin? "https://evil.example\\@victim.example/path" "https://victim.example/") 22
+        (origin/same-origin? "https://faß.de/" "https://fass.de/") 23
+        (origin/same-origin? "https://faß.de/" "https://faß.de/") 24
+        (origin/same-origin? "https://example.com:65536/" "https://example.com:65536/") 25
+        (origin/same-origin? "https://example.com:443:443/" "https://example.com:443:443/") 26
+        (origin/same-origin? "https://example%2ecom/" "https://example%2ecom/") 27
+        (not (origin/same-origin? "https://é@EXAMPLE.com:443/" "https://example.com/")) 28
+        :else 0))

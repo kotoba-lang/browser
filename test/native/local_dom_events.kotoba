@@ -1,0 +1,113 @@
+(ns browser.native-local-dom-events-test
+  (:require [browser.local-session :as session]
+            [browser.local-view :as view]
+            [browser.local-dom-events :as bridge]
+            [kotoba.wasm.dom :as dom])
+  (:export [main]))
+
+(defn field [d :document k :keyword] :document
+  (option-or (document-get d k) (document-null)))
+(defn item [d :document i :i64] :document
+  (option-or (document-vector-at d i) (document-null)))
+(defn number [d :document] :i64 (option-or (document-i64-value d) 0))
+(defn text [d :document] :string (option-or (document-string-value d) ""))
+(defn children [node :document] :document (field node :children))
+(defn id [node :document] :i64 (number (field node :node/id)))
+(defn event [kind :keyword target :i64] :document
+  (document-map :type (document-keyword kind) :target (document-i64 target)))
+
+(defn open-many [state :document remaining :i64] :document
+  (if (= remaining 0) state (open-many (session/open-tab state "") (- remaining 1))))
+
+(defn history-click-test [] :i64
+  (let [one (session/confirm-navigation (session/open-tab (session/empty-session "h") "https://a/") "tab-1" 1 "https://a/")
+        two (session/confirm-navigation (session/commit-address (session/set-address one "https://b/")) "tab-1" 2 "https://b/")
+        snapshot (view/render two)
+        nav (item (children (dom/tree snapshot)) 2)
+        back-id (id (item (children nav) 0))
+        pending (bridge/dispatch two snapshot (event :ui/click back-id))
+        stale (bridge/dispatch pending snapshot (event :ui/click back-id))
+        confirmed (session/confirm-navigation pending "tab-1" 3 "https://a/")
+        snapshot2 (view/render confirmed)
+        nav2 (item (children (dom/tree snapshot2)) 2)
+        forward-id (id (item (children nav2) 1))
+        next (bridge/dispatch confirmed snapshot2 (event :ui/click forward-id))]
+    (cond (not= (session/pending-generation pending "tab-1") 3) 31
+          (not (string=? (session/active-url pending) "https://b/")) 32
+          (not (document-equal? pending stale)) 33
+          (not (string=? (session/active-url confirmed) "https://a/")) 34
+          (not= (session/pending-generation next "tab-1") 4) 35
+          :else 0)))
+
+(defn main [] :i64
+  (let [empty (session/empty-session "p")
+        frame0 (view/render empty)
+        tree0 (dom/tree frame0)
+        new-id (id (item (children (item (children tree0) 0)) 0))
+        opened (bridge/dispatch empty frame0 (event :ui/click new-id))
+        stale (bridge/dispatch opened frame0 (event :ui/click new-id))
+        frame1 (view/render opened)
+        tree1 (dom/tree frame1)
+        input-id (id (item (children tree1) 1))
+        typed (bridge/dispatch opened frame1
+                (document-map :type (document-keyword :ui/text) :target (document-i64 input-id)
+                              :text (document-string "https://example.com/日本")))
+        old-input (bridge/dispatch typed frame1 (event :ui/backspace input-id))
+        frame2 (view/render typed)
+        forward (bridge/dispatch typed frame2
+                  (document-map :type (document-keyword :ui/delete) :target (document-i64 input-id)
+                                :selection-anchor (document-i64 8) :selection-focus (document-i64 8)))
+        submitted (bridge/dispatch typed frame2 (event :ui/submit input-id))
+        frame3 (view/render submitted)
+        forged (bridge/dispatch submitted frame3 (event :ui/confirm input-id))
+        invalid (bridge/dispatch forged frame3 (event :ui/text 9999))
+        input (item (children (dom/tree (view/render invalid))) 1)
+        ready (session/confirm-navigation invalid "tab-1" 1 "https://example.com/日本")
+        frame4 (view/render ready)
+        tree4 (dom/tree frame4)
+        nav4 (item (children tree4) 0)
+        add-id (id (item (children nav4) 1))
+        second (bridge/dispatch ready frame4 (event :ui/click add-id))
+        frame5 (view/render second)
+        tab1-id (id (item (children (item (children (dom/tree frame5)) 0)) 0))
+        focused (bridge/dispatch second frame5 (event :ui/click tab1-id))
+        editing (session/address-insert focused "draft")
+        background-closed (session/close-tab editing "tab-2")
+        queued (session/open-tab focused "https://pending.example/")
+        frame6 (view/render queued)
+        nav6 (item (children (dom/tree frame6)) 0)
+        close-id (id (item (children nav6) 4))
+        closed (bridge/dispatch queued frame6 (event :ui/click close-id))
+        delayed (session/confirm-text-navigation closed "tab-3" 2 "https://pending.example/" "late")
+        bad-close (session/close-tab closed "missing")
+        bg (session/close-tab closed "tab-2")
+        final (session/close-tab bg "tab-1")
+        many (open-many empty 13)
+        many-frame (view/render many)
+        many-input (id (item (children (dom/tree many-frame)) 1))
+        many-typed (bridge/dispatch many many-frame
+                     (document-map :type (document-keyword :ui/text)
+                                   :target (document-i64 many-input) :text (document-string "many")))]
+    (cond (not= (history-click-test) 0) (history-click-test)
+          (not (document-equal? opened stale)) 1
+          (not (document-equal? typed old-input)) 2
+          (not= (session/pending-generation submitted "tab-1") 1) 3
+          (not (string=? (session/active-url forged) "")) 4
+          (not (document-equal? forged invalid)) 5
+          (not (string=? (text (field (field input :attrs) :value)) "https://example.com/日本")) 6
+          (not (string=? (session/active-url focused) "https://example.com/日本")) 7
+          (not= (session/pending-generation second "tab-2") 0) 8
+          (not= (session/pending-generation queued "tab-3") 2) 9
+          (not= (session/pending-generation closed "tab-3") 0) 10
+          (not (document-equal? closed delayed)) 11
+          (not (document-equal? closed bad-close)) 12
+          (not (string=? (session/active-url closed) "")) 13
+          (not (string=? (session/active-url bg) "https://example.com/日本")) 14
+          (not (string=? (session/active-url final) "")) 15
+          (not (document-equal? (field editing :session/address-editor)
+                                (field background-closed :session/address-editor))) 16
+          (not (string=? (session/active-url background-closed) "https://example.com/日本")) 17
+          (<= many-input 32) 18
+          (not (string=? (text (field (field many-typed :session/address-editor) :text/value)) "many")) 19
+          (not (string=? (text (field (field forward :session/address-editor) :text/value)) "https://xample.com/日本")) 20
+          :else 0)))

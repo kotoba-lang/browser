@@ -1,0 +1,26 @@
+(ns browser.native-local-dom-wire-test
+  (:require [browser.local-session :as session]
+            [browser.local-view :as view]
+            [browser.local-dom-wire :as wire]
+            [kotoba.wasm.dom :as dom])
+  (:capabilities [:io/write])
+  (:export [main]))
+
+(defn item [d :document i :i64] :document
+  (option-or (document-vector-at d i) (document-null)))
+
+(defn main [] :i64
+  (let [one (session/open-tab (session/empty-session "p") "https://one.example/")
+        ready (session/confirm-navigation one "tab-1" 1 "https://one.example/")
+        two (session/open-tab ready "https://two.example/")
+        page (session/confirm-text-navigation two "tab-2" 2 "https://two.example/" "<script>\"safe\"</script>\n日本\t")
+        snapshot (view/render page)
+        batches (item (dom/consume-op-transaction snapshot) 0)
+        encoded (wire/encode page snapshot batches)
+        stale (wire/encode (session/address-insert page "x") snapshot batches)
+        truncated (wire/encode page snapshot (document-vector (item batches 0)))]
+    (cond (not (option-some?-of [:option :string] encoded)) 1
+          (option-some?-of [:option :string] stale) 2
+          (option-some?-of [:option :string] truncated) 3
+          :else (let [printed (typed-cap-call :io/write :string :string
+                                 (string-concat "WIRE1 " (string-concat (option-or encoded "") "\n")))] 0))))
