@@ -58,26 +58,26 @@ jobs:
         run: python3 scripts/check-local-html-response.py --browser "$(command -v google-chrome)" --output "$RUNNER_TEMP/html-response"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          repository: kotoba-lang/wasm-webcomponent
-          ref: e00ae75e1c589f76b4f53a88a5e3256c98c9e162
+          repository: kotoba-lang/kotoba
+          ref: 135e733a8a6ecee895ba0a68c76548be8ca895e1
           path: _broker
           persist-credentials: false
       - name: Verify canonical broker and response boundary offline
         run: >-
           python3 scripts/check-local-broker-response.py --browser "$(command -v google-chrome)"
-          --broker "$PWD/_broker/src/kotoba-client-runtime.js" --output "$RUNNER_TEMP/broker-response"
+          --broker "$PWD/_broker/lib/kotoba.wasmWebcomponent/src/kotoba-client-runtime.js" --output "$RUNNER_TEMP/broker-response"
       - name: Verify broker loopback HTTPS and certificate negative control
         run: |
           python3 scripts/check-local-broker-https.py --browser "$(command -v google-chrome)" \
-            --broker "$PWD/_broker/src/kotoba-client-runtime.js" --output "$RUNNER_TEMP/broker-https"
+            --broker "$PWD/_broker/lib/kotoba.wasmWebcomponent/src/kotoba-client-runtime.js" --output "$RUNNER_TEMP/broker-https"
           python3 scripts/check-local-broker-https.py --negative-no-cert-exception --browser "$(command -v google-chrome)" \
-            --broker "$PWD/_broker/src/kotoba-client-runtime.js" --output "$RUNNER_TEMP/broker-https-negative"
+            --broker "$PWD/_broker/lib/kotoba.wasmWebcomponent/src/kotoba-client-runtime.js" --output "$RUNNER_TEMP/broker-https-negative"
           python3 scripts/check-local-broker-https.py --negative-no-cors --browser "$(command -v google-chrome)" \
-            --broker "$PWD/_broker/src/kotoba-client-runtime.js" --output "$RUNNER_TEMP/broker-https-cors"
+            --broker "$PWD/_broker/lib/kotoba.wasmWebcomponent/src/kotoba-client-runtime.js" --output "$RUNNER_TEMP/broker-https-cors"
       - name: Verify slow loopback HTTPS response cancellation
         run: >-
           python3 scripts/check-local-slow-html-https.py --browser "$(command -v google-chrome)"
-          --broker "$PWD/_broker/src/kotoba-client-runtime.js" --output "$RUNNER_TEMP/slow-html-https"
+          --broker "$PWD/_broker/lib/kotoba.wasmWebcomponent/src/kotoba-client-runtime.js" --output "$RUNNER_TEMP/slow-html-https"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:

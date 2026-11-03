@@ -21,7 +21,7 @@ import time
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
-BROKER_SHA = '7f760128c3a58098123c31ec3dd34b9c871932e3933f2c952facc4ab0e647212'
+BROKER_SHA = '7ce9367be68652b30fb15eb3eb385968792774006bb3d67d56646803e2bb36cc'
 spec = importlib.util.spec_from_file_location('native_live', ROOT / 'scripts/check-local-native-live.py')
 live = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(live)
@@ -141,7 +141,7 @@ def main():
                     assert any(f.get('corsErrorStatus') for f in failures), failures
                     (output / 'cors-receipt.json').write_text(json.dumps({'status':'PASS_CORS_RESPONSE_REFUSED',
                         'browser':version, 'brokerSha256':BROKER_SHA, 'serverRequests':requests, 'failures':failures,
-                        'limitations':['test-only loopback HTTPS; automated consent; archived unreviewed broker',
+                        'limitations':['test-only loopback HTTPS; automated consent; product integration unreviewed',
                                        'server received request; CORS only refused response access',
                                        'test certificate exception; no real service or production qualification']}, indent=2) + '\n')
                     print('PASS_CORS_RESPONSE_REFUSED', version)
@@ -166,7 +166,7 @@ def main():
                'stagedSources':{path.name:sha(path.read_bytes()) for path in sorted(stage.iterdir())},
                'limitations':['self-signed certificate exception scoped to fixture public key in isolated test browser; no TLS trust qualification',
                               'CDP restricts HTTPS to one loopback URL and supplies automated clicks',
-                              'archived broker bytes; shared runtime review and canonical integration remain open',
+                              'canonical broker fixture; shared runtime qualification and product integration remain open',
                               'no human consent, real service, production host or native actor']}
     (output / 'receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
     print(receipt['status'], version, 'server requests:', len(requests))

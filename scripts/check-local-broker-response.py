@@ -13,7 +13,7 @@ import time
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
-BROKER_SHA = '7f760128c3a58098123c31ec3dd34b9c871932e3933f2c952facc4ab0e647212'
+BROKER_SHA = '7ce9367be68652b30fb15eb3eb385968792774006bb3d67d56646803e2bb36cc'
 spec = importlib.util.spec_from_file_location('native_live', ROOT / 'scripts/check-local-native-live.py')
 live = importlib.util.module_from_spec(spec); spec.loader.exec_module(live)
 
