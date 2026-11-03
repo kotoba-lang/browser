@@ -78,7 +78,7 @@ def run(args):
             next_html = NEXT_HTML_FIXTURE
             if args.broker:
                 broker_bytes = args.broker.read_bytes()
-                assert hashlib.sha256(broker_bytes).hexdigest() == '7f760128c3a58098123c31ec3dd34b9c871932e3933f2c952facc4ab0e647212'
+                assert hashlib.sha256(broker_bytes).hexdigest() == '7ce9367be68652b30fb15eb3eb385968792774006bb3d67d56646803e2bb36cc'
                 stage = Path(profile) / 'fixture'
                 files = ['test/browser-native/local_html_broker_live.html', 'test/browser-native/local_html_live_test.js',
                          'test/browser-native/local_broker_response_test.js', 'src/browser/local_dom_host.js',

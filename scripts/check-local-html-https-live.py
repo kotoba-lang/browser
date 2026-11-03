@@ -74,7 +74,7 @@ def main():
     assert receipt['status'] == 'PASS_LOOPBACK_HTTPS_HTML_LIVE' and not receipt['syntheticResponse']
     receipt.update({'status':'PASS_LOOPBACK_HTTPS_ACTOR_SERVER', 'serverRequests':requests,
                     'wrapperSha256':hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-                    'limitations':receipt['limitations'] + ['archived broker bytes; canonical source review incomplete',
+                    'limitations':receipt['limitations'] + ['canonical broker fixture; product integration and shared runtime qualification remain open',
                         'self-signed certificate exception is test-only; no TLS trust qualification', 'no human consent or real external service']})
     (output / 'receipt.json').write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + '\n')
     print(receipt['status'], receipt['chrome'], 'server requests:', len(requests))
