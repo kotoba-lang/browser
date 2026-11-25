@@ -3,6 +3,6 @@
     "id": 1,
     "priority": 1,
     "action": {"type": "block"},
-    "condition": {"urlFilter": "/tracker.js", "requestDomains": ["ads.example"], "resourceTypes": ["script"]}
+    "condition": {"urlFilter": "|https://ads.example/tracker.js", "requestDomains": ["ads.example"], "resourceTypes": ["script"]}
   }
 ]

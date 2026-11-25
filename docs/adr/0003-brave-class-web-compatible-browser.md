@@ -106,15 +106,35 @@ Mapping rules:
    extended to extensions; L65 unchanged).
 6. **`declarativeNetRequest` rules are declarative data** validated at install
    time against the descriptor; there is no runtime-ambient request-rewriting
-   path.
+   path. **Static rules are validated and applied only within the descriptor's
+   approved exact origins** (scheme, host and port):
+   - *Validation.* A rule is admitted only if its condition alone shows that it
+     cannot match a request URL outside those origins. In v1 that means a
+     `urlFilter` that begins with `|<origin>/`, where `<origin>` is the
+     serialization of an approved origin (`|https://news.example/…`).
+     `requestDomains` may narrow that match further but never establishes it,
+     and may list only the hosts of approved origins.
+   - *Refusal.* Chrome semantics that would widen the scope are not admitted:
+     `requestDomains` also matches subdomains and constrains neither scheme nor
+     port, and an absent or unanchored `urlFilter`, `||` and `|<origin>^` can
+     match other subdomains, schemes or ports. `regexFilter` is outside the v1
+     slice. One such rule refuses the whole install under rule 4; the host
+     never narrows, drops or rewrites a rule to make it fit.
+   - *Application.* An admitted rule takes effect only when the request URL's
+     origin and the request initiator's origin, if it has one, are both
+     approved. A subdomain, another scheme or another port of an approved host
+     is an undeclared origin.
 
 Stated deviation, part of the documented subset: an extension written for
 Chrome's ambient authority will meet descriptor approval **and** a fresh-consent
 prompt for every `chrome.*` operation — reads included — where Chrome proceeds
-silently, and undeclared capabilities fail closed. A member that is synchronous
-in Chrome (`runtime.id`, `runtime.getURL`, `onMessage.addListener`) keeps its
-synchronous shape; the host suspends the calling extension context until the
-prompt is answered. That is a contract requirement, not a bug to hide.
+silently, and undeclared capabilities fail closed. A static
+`declarativeNetRequest` ruleset that Chrome would accept is refused at install
+unless its rules are shown to stay within the approved exact origins, and an
+admitted rule does not act for a page on an undeclared origin (rule 6). A member
+that is synchronous in Chrome (`runtime.id`, `runtime.getURL`,
+`onMessage.addListener`) keeps its synchronous shape; the host suspends the
+calling extension context until the prompt is answered. That is a contract requirement, not a bug to hide.
 
 ### Ruling 3 — the compatibility score is a pinned fixture corpus
 
@@ -123,7 +143,8 @@ No "Chrome API compatible" claim exists outside this corpus:
 - **MV3 manifest keys (v1):** `manifest_version` (3), `name`, `version`,
   `permissions`, `host_permissions`, `content_scripts`,
   `background.service_worker`, `action`, `commands`,
-  `declarative_net_request.rule_resources` (static rulesets only).
+  `declarative_net_request.rule_resources` (static rulesets only, within the
+  approved exact origins).
 - **`chrome.*` namespace slice (v1), every operation `each-operation`:**
   `chrome.runtime` (`onMessage.addListener`/`sendMessage`/`getURL`/`id`),
   `chrome.storage` (`local`/`sync` get/set/remove), `chrome.tabs`
@@ -133,7 +154,10 @@ No "Chrome API compatible" claim exists outside this corpus:
 - **Frozen corpus:** `conformance/webext/v1/`, pinned by its `SHA256SUMS`.
 - **Negative fixtures (mandatory):** undeclared origin, undeclared permission,
   overscoped `tabs.query`, deny-then-network (proves no request is sent),
-  undeclared `chrome.*` namespace.
+  undeclared `chrome.*` namespace. The corpus also shows that static
+  `declarativeNetRequest` rules do not reach an undeclared origin under a
+  declared domain: wider rulesets are refused, and an admitted rule has no
+  effect on another subdomain, scheme or port.
 - **Acceptance test:** mamori's WebExtension design (README:111) runs against
   the kotoba browser runtime — CMP/TCF consent read, vendor mapping, one-click
   deny.

@@ -11,27 +11,162 @@
   "fixture": {
     "extensionId": "abcdefghijklmnopabcdefghijklmnop",
     "tabs": [
-      {"id": 7, "windowId": 1, "index": 0, "active": true, "url": "https://news.example/article", "title": "Article"},
-      {"id": 8, "windowId": 1, "index": 1, "active": false, "url": "https://ads.example/", "title": "Ads"}
+      {
+        "id": 7,
+        "windowId": 1,
+        "index": 0,
+        "active": true,
+        "url": "https://news.example/article",
+        "title": "Article"
+      },
+      {
+        "id": 8,
+        "windowId": 1,
+        "index": 1,
+        "active": false,
+        "url": "https://ads.example/",
+        "title": "Ads"
+      }
     ],
     "cookies": [
-      {"name": "euconsent-v2", "value": "allow-all", "domain": "news.example", "hostOnly": true, "path": "/", "secure": false, "httpOnly": false, "sameSite": "unspecified", "session": true, "storeId": "0"},
-      {"name": "lang", "value": "en", "domain": "news.example", "hostOnly": true, "path": "/", "secure": false, "httpOnly": false, "sameSite": "unspecified", "session": true, "storeId": "0"},
-      {"name": "id", "value": "a1", "domain": "ads.example", "hostOnly": true, "path": "/", "secure": false, "httpOnly": false, "sameSite": "unspecified", "session": true, "storeId": "0"}
+      {
+        "name": "euconsent-v2",
+        "value": "allow-all",
+        "domain": "news.example",
+        "hostOnly": true,
+        "path": "/",
+        "secure": false,
+        "httpOnly": false,
+        "sameSite": "unspecified",
+        "session": true,
+        "storeId": "0"
+      },
+      {
+        "name": "lang",
+        "value": "en",
+        "domain": "news.example",
+        "hostOnly": true,
+        "path": "/",
+        "secure": false,
+        "httpOnly": false,
+        "sameSite": "unspecified",
+        "session": true,
+        "storeId": "0"
+      },
+      {
+        "name": "id",
+        "value": "a1",
+        "domain": "ads.example",
+        "hostOnly": true,
+        "path": "/",
+        "secure": false,
+        "httpOnly": false,
+        "sameSite": "unspecified",
+        "session": true,
+        "storeId": "0"
+      }
     ],
     "storage": {
-      "local": {"vendors": ["v1", "v2"], "locale": "ja"},
-      "sync": {"policy": "ask", "region": "eu"}
+      "local": {
+        "vendors": [
+          "v1",
+          "v2"
+        ],
+        "locale": "ja"
+      },
+      "sync": {
+        "policy": "ask",
+        "region": "eu"
+      }
     },
     "listeners": [],
     "dynamicRules": [],
     "network": {
-      "https://news.example/article": {"status": 200, "contentType": "text/html", "body": "<!doctype html><link rel=\"icon\" href=\"data:,\"><title>Article</title>"},
-      "https://news.example/privacy": {"status": 200, "contentType": "text/html", "body": "<!doctype html><link rel=\"icon\" href=\"data:,\"><title>Privacy</title>"},
-      "https://ads.example/": {"status": 200, "contentType": "text/html", "body": "<!doctype html><link rel=\"icon\" href=\"data:,\"><title>Ads</title>"},
-      "https://news.example/tracked": {"status": 200, "contentType": "text/html", "body": "<!doctype html><link rel=\"icon\" href=\"data:,\"><title>Tracked</title><script src=\"/tracker.js\"></script><script src=\"/app.js\"></script>"},
-      "https://news.example/tracker.js": {"status": 200, "contentType": "text/javascript", "body": ""},
-      "https://news.example/app.js": {"status": 200, "contentType": "text/javascript", "body": ""}
+      "https://news.example/article": {
+        "status": 200,
+        "contentType": "text/html",
+        "body": "<!doctype html><link rel=\"icon\" href=\"data:,\"><title>Article</title>"
+      },
+      "https://news.example/privacy": {
+        "status": 200,
+        "contentType": "text/html",
+        "body": "<!doctype html><link rel=\"icon\" href=\"data:,\"><title>Privacy</title>"
+      },
+      "https://ads.example/": {
+        "status": 200,
+        "contentType": "text/html",
+        "body": "<!doctype html><link rel=\"icon\" href=\"data:,\"><title>Ads</title>"
+      },
+      "https://news.example/tracked": {
+        "status": 200,
+        "contentType": "text/html",
+        "body": "<!doctype html><link rel=\"icon\" href=\"data:,\"><title>Tracked</title><script src=\"/tracker.js\"></script><script src=\"/app.js\"></script>"
+      },
+      "https://news.example/tracker.js": {
+        "status": 200,
+        "contentType": "text/javascript",
+        "body": ""
+      },
+      "https://news.example/app.js": {
+        "status": 200,
+        "contentType": "text/javascript",
+        "body": ""
+      },
+      "https://sub.news.example/tracked": {
+        "status": 200,
+        "contentType": "text/html",
+        "body": "<!doctype html><link rel=\"icon\" href=\"data:,\"><title>Tracked</title><script src=\"/tracker.js\"></script><script src=\"/app.js\"></script>"
+      },
+      "https://sub.news.example/tracker.js": {
+        "status": 200,
+        "contentType": "text/javascript",
+        "body": ""
+      },
+      "https://sub.news.example/app.js": {
+        "status": 200,
+        "contentType": "text/javascript",
+        "body": ""
+      },
+      "http://news.example/tracked": {
+        "status": 200,
+        "contentType": "text/html",
+        "body": "<!doctype html><link rel=\"icon\" href=\"data:,\"><title>Tracked</title><script src=\"/tracker.js\"></script><script src=\"/app.js\"></script>"
+      },
+      "http://news.example/tracker.js": {
+        "status": 200,
+        "contentType": "text/javascript",
+        "body": ""
+      },
+      "http://news.example/app.js": {
+        "status": 200,
+        "contentType": "text/javascript",
+        "body": ""
+      },
+      "https://news.example:8443/tracked": {
+        "status": 200,
+        "contentType": "text/html",
+        "body": "<!doctype html><link rel=\"icon\" href=\"data:,\"><title>Tracked</title><script src=\"/tracker.js\"></script><script src=\"/app.js\"></script>"
+      },
+      "https://news.example:8443/tracker.js": {
+        "status": 200,
+        "contentType": "text/javascript",
+        "body": ""
+      },
+      "https://news.example:8443/app.js": {
+        "status": 200,
+        "contentType": "text/javascript",
+        "body": ""
+      },
+      "https://news.example/mixed": {
+        "status": 200,
+        "contentType": "text/html",
+        "body": "<!doctype html><link rel=\"icon\" href=\"data:,\"><title>Mixed</title><script src=\"/tracker.js\"></script><script src=\"https://sub.news.example/tracker.js\"></script><script src=\"https://news.example:8443/tracker.js\"></script>"
+      },
+      "https://sub.news.example/mixed": {
+        "status": 200,
+        "contentType": "text/html",
+        "body": "<!doctype html><link rel=\"icon\" href=\"data:,\"><title>Mixed</title><script src=\"https://news.example/tracker.js\"></script><script src=\"/tracker.js\"></script>"
+      }
     },
     "packageFiles": {
       "background.js": "",
@@ -44,7 +179,13 @@
     {
       "id": "P01-runtime-getURL",
       "manifest": "manifests/cmp-reader.json",
-      "call": {"namespace": "chrome.runtime", "method": "getURL", "args": ["options.html"]},
+      "call": {
+        "namespace": "chrome.runtime",
+        "method": "getURL",
+        "args": [
+          "options.html"
+        ]
+      },
       "consent": "approve",
       "expect": {
         "outcome": "consent-required",
@@ -54,175 +195,467 @@
         "stateAfter": "unchanged",
         "requests": [],
         "audit": [
-          {":audit/event": ":webext/effect", ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop", ":webext/operation": "chrome.runtime.getURL", ":consent/decision": ":approved", ":origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop"}
+          {
+            ":audit/event": ":webext/effect",
+            ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop",
+            ":webext/operation": "chrome.runtime.getURL",
+            ":consent/decision": ":approved",
+            ":origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop"
+          }
         ]
       }
     },
     {
       "id": "P02-runtime-sendMessage",
       "manifest": "manifests/cmp-reader.json",
-      "context": {"kind": "content_script", "tabId": 7, "frameId": 0},
-      "seed": {"listeners": [{"context": "service_worker", "event": "chrome.runtime.onMessage", "respond": {"vendors": ["v1", "v2"]}}]},
-      "call": {"namespace": "chrome.runtime", "method": "sendMessage", "args": [{"type": "read-consent"}]},
+      "context": {
+        "kind": "content_script",
+        "tabId": 7,
+        "frameId": 0
+      },
+      "seed": {
+        "listeners": [
+          {
+            "context": "service_worker",
+            "event": "chrome.runtime.onMessage",
+            "respond": {
+              "vendors": [
+                "v1",
+                "v2"
+              ]
+            }
+          }
+        ]
+      },
+      "call": {
+        "namespace": "chrome.runtime",
+        "method": "sendMessage",
+        "args": [
+          {
+            "type": "read-consent"
+          }
+        ]
+      },
       "consent": "approve",
       "expect": {
         "outcome": "consent-required",
         "prompts": 1,
         "executed": true,
-        "result": {"vendors": ["v1", "v2"]},
-        "delivered": [{"context": "service_worker", "message": {"type": "read-consent"}, "sender": {"id": "abcdefghijklmnopabcdefghijklmnop", "url": "https://news.example/article", "origin": "https://news.example", "frameId": 0, "tab": {"id": 7}}}],
+        "result": {
+          "vendors": [
+            "v1",
+            "v2"
+          ]
+        },
+        "delivered": [
+          {
+            "context": "service_worker",
+            "message": {
+              "type": "read-consent"
+            },
+            "sender": {
+              "id": "abcdefghijklmnopabcdefghijklmnop",
+              "url": "https://news.example/article",
+              "origin": "https://news.example",
+              "frameId": 0,
+              "tab": {
+                "id": 7
+              }
+            }
+          }
+        ],
         "stateAfter": "unchanged",
         "requests": [],
         "audit": [
-          {":audit/event": ":webext/effect", ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop", ":webext/operation": "chrome.runtime.sendMessage", ":consent/decision": ":approved", ":origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop"}
+          {
+            ":audit/event": ":webext/effect",
+            ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop",
+            ":webext/operation": "chrome.runtime.sendMessage",
+            ":consent/decision": ":approved",
+            ":origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop"
+          }
         ]
       }
     },
     {
       "id": "P03-storage-local-get",
       "manifest": "manifests/cmp-reader.json",
-      "call": {"namespace": "chrome.storage.local", "method": "get", "args": ["vendors"]},
+      "call": {
+        "namespace": "chrome.storage.local",
+        "method": "get",
+        "args": [
+          "vendors"
+        ]
+      },
       "consent": "approve",
       "expect": {
         "outcome": "consent-required",
         "prompts": 1,
         "executed": true,
-        "result": {"vendors": ["v1", "v2"]},
+        "result": {
+          "vendors": [
+            "v1",
+            "v2"
+          ]
+        },
         "stateAfter": "unchanged",
         "requests": [],
         "audit": [
-          {":audit/event": ":webext/effect", ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop", ":webext/operation": "chrome.storage.local.get", ":consent/decision": ":approved", ":origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop"}
+          {
+            ":audit/event": ":webext/effect",
+            ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop",
+            ":webext/operation": "chrome.storage.local.get",
+            ":consent/decision": ":approved",
+            ":origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop"
+          }
         ]
       }
     },
     {
       "id": "P04-storage-local-set",
       "manifest": "manifests/cmp-reader.json",
-      "call": {"namespace": "chrome.storage.local", "method": "set", "args": [{"vendors": []}]},
+      "call": {
+        "namespace": "chrome.storage.local",
+        "method": "set",
+        "args": [
+          {
+            "vendors": []
+          }
+        ]
+      },
       "consent": "approve",
       "expect": {
         "outcome": "consent-required",
         "prompts": 1,
         "executed": true,
-        "result": {"$undefined": true},
+        "result": {
+          "$undefined": true
+        },
         "stateAfter": {
           "storage": {
-            "local": {"vendors": [], "locale": "ja"},
-            "sync": {"policy": "ask", "region": "eu"}
+            "local": {
+              "vendors": [],
+              "locale": "ja"
+            },
+            "sync": {
+              "policy": "ask",
+              "region": "eu"
+            }
           }
         },
         "requests": [],
         "audit": [
-          {":audit/event": ":webext/effect", ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop", ":webext/operation": "chrome.storage.local.set", ":consent/decision": ":approved", ":origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop"}
+          {
+            ":audit/event": ":webext/effect",
+            ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop",
+            ":webext/operation": "chrome.storage.local.set",
+            ":consent/decision": ":approved",
+            ":origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop"
+          }
         ]
       }
     },
     {
       "id": "P05-tabs-query-declared",
       "manifest": "manifests/cmp-reader.json",
-      "call": {"namespace": "chrome.tabs", "method": "query", "args": [{"url": "https://news.example/*"}]},
+      "call": {
+        "namespace": "chrome.tabs",
+        "method": "query",
+        "args": [
+          {
+            "url": "https://news.example/*"
+          }
+        ]
+      },
       "consent": "approve",
       "expect": {
         "outcome": "consent-required",
         "prompts": 1,
         "executed": true,
-        "resultSubset": [{"id": 7, "windowId": 1, "index": 0, "active": true, "url": "https://news.example/article", "title": "Article"}],
+        "resultSubset": [
+          {
+            "id": 7,
+            "windowId": 1,
+            "index": 0,
+            "active": true,
+            "url": "https://news.example/article",
+            "title": "Article"
+          }
+        ],
         "stateAfter": "unchanged",
         "requests": [],
         "audit": [
-          {":audit/event": ":webext/effect", ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop", ":webext/operation": "chrome.tabs.query", ":consent/decision": ":approved", ":origin": "https://news.example"}
+          {
+            ":audit/event": ":webext/effect",
+            ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop",
+            ":webext/operation": "chrome.tabs.query",
+            ":consent/decision": ":approved",
+            ":origin": "https://news.example"
+          }
         ]
       }
     },
     {
       "id": "P06-tabs-create",
       "manifest": "manifests/cmp-reader.json",
-      "call": {"namespace": "chrome.tabs", "method": "create", "args": [{"url": "https://news.example/privacy", "index": 2, "active": true}]},
+      "call": {
+        "namespace": "chrome.tabs",
+        "method": "create",
+        "args": [
+          {
+            "url": "https://news.example/privacy",
+            "index": 2,
+            "active": true
+          }
+        ]
+      },
       "consent": "approve",
       "expect": {
         "outcome": "consent-required",
         "prompts": 1,
         "executed": true,
-        "resultSubset": {"windowId": 1, "index": 2, "active": true},
+        "resultSubset": {
+          "windowId": 1,
+          "index": 2,
+          "active": true
+        },
         "stateAfter": {
           "tabs": [
-            {"id": 7, "windowId": 1, "index": 0, "active": false, "url": "https://news.example/article", "title": "Article"},
-            {"id": 8, "windowId": 1, "index": 1, "active": false, "url": "https://ads.example/", "title": "Ads"},
-            {"windowId": 1, "index": 2, "active": true, "url": "https://news.example/privacy", "title": "Privacy"}
+            {
+              "id": 7,
+              "windowId": 1,
+              "index": 0,
+              "active": false,
+              "url": "https://news.example/article",
+              "title": "Article"
+            },
+            {
+              "id": 8,
+              "windowId": 1,
+              "index": 1,
+              "active": false,
+              "url": "https://ads.example/",
+              "title": "Ads"
+            },
+            {
+              "windowId": 1,
+              "index": 2,
+              "active": true,
+              "url": "https://news.example/privacy",
+              "title": "Privacy"
+            }
           ]
         },
-        "requests": [{"method": "GET", "url": "https://news.example/privacy"}],
+        "requests": [
+          {
+            "method": "GET",
+            "url": "https://news.example/privacy"
+          }
+        ],
         "audit": [
-          {":audit/event": ":webext/effect", ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop", ":webext/operation": "chrome.tabs.create", ":consent/decision": ":approved", ":origin": "https://news.example"}
+          {
+            ":audit/event": ":webext/effect",
+            ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop",
+            ":webext/operation": "chrome.tabs.create",
+            ":consent/decision": ":approved",
+            ":origin": "https://news.example"
+          }
         ]
       }
     },
     {
       "id": "P07-cookies-get-approved-origin",
       "manifest": "manifests/cmp-reader.json",
-      "call": {"namespace": "chrome.cookies", "method": "get", "args": [{"url": "https://news.example/", "name": "euconsent-v2"}]},
+      "call": {
+        "namespace": "chrome.cookies",
+        "method": "get",
+        "args": [
+          {
+            "url": "https://news.example/",
+            "name": "euconsent-v2"
+          }
+        ]
+      },
       "consent": "approve",
       "expect": {
         "outcome": "consent-required",
         "prompts": 1,
         "executed": true,
-        "result": {"name": "euconsent-v2", "value": "allow-all", "domain": "news.example", "hostOnly": true, "path": "/", "secure": false, "httpOnly": false, "sameSite": "unspecified", "session": true, "storeId": "0"},
+        "result": {
+          "name": "euconsent-v2",
+          "value": "allow-all",
+          "domain": "news.example",
+          "hostOnly": true,
+          "path": "/",
+          "secure": false,
+          "httpOnly": false,
+          "sameSite": "unspecified",
+          "session": true,
+          "storeId": "0"
+        },
         "stateAfter": "unchanged",
         "requests": [],
         "audit": [
-          {":audit/event": ":webext/effect", ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop", ":webext/operation": "chrome.cookies.get", ":consent/decision": ":approved", ":origin": "https://news.example"}
+          {
+            ":audit/event": ":webext/effect",
+            ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop",
+            ":webext/operation": "chrome.cookies.get",
+            ":consent/decision": ":approved",
+            ":origin": "https://news.example"
+          }
         ]
       }
     },
     {
       "id": "P08-cookies-set-approved-origin",
       "manifest": "manifests/cmp-reader.json",
-      "call": {"namespace": "chrome.cookies", "method": "set", "args": [{"url": "https://news.example/", "name": "euconsent-v2", "value": "deny-all"}]},
+      "call": {
+        "namespace": "chrome.cookies",
+        "method": "set",
+        "args": [
+          {
+            "url": "https://news.example/",
+            "name": "euconsent-v2",
+            "value": "deny-all"
+          }
+        ]
+      },
       "consent": "approve",
       "expect": {
         "outcome": "consent-required",
         "prompts": 1,
         "executed": true,
-        "result": {"name": "euconsent-v2", "value": "deny-all", "domain": "news.example", "hostOnly": true, "path": "/", "secure": false, "httpOnly": false, "sameSite": "unspecified", "session": true, "storeId": "0"},
+        "result": {
+          "name": "euconsent-v2",
+          "value": "deny-all",
+          "domain": "news.example",
+          "hostOnly": true,
+          "path": "/",
+          "secure": false,
+          "httpOnly": false,
+          "sameSite": "unspecified",
+          "session": true,
+          "storeId": "0"
+        },
         "stateAfter": {
           "cookies": [
-            {"name": "euconsent-v2", "value": "deny-all", "domain": "news.example", "hostOnly": true, "path": "/", "secure": false, "httpOnly": false, "sameSite": "unspecified", "session": true, "storeId": "0"},
-            {"name": "lang", "value": "en", "domain": "news.example", "hostOnly": true, "path": "/", "secure": false, "httpOnly": false, "sameSite": "unspecified", "session": true, "storeId": "0"},
-            {"name": "id", "value": "a1", "domain": "ads.example", "hostOnly": true, "path": "/", "secure": false, "httpOnly": false, "sameSite": "unspecified", "session": true, "storeId": "0"}
+            {
+              "name": "euconsent-v2",
+              "value": "deny-all",
+              "domain": "news.example",
+              "hostOnly": true,
+              "path": "/",
+              "secure": false,
+              "httpOnly": false,
+              "sameSite": "unspecified",
+              "session": true,
+              "storeId": "0"
+            },
+            {
+              "name": "lang",
+              "value": "en",
+              "domain": "news.example",
+              "hostOnly": true,
+              "path": "/",
+              "secure": false,
+              "httpOnly": false,
+              "sameSite": "unspecified",
+              "session": true,
+              "storeId": "0"
+            },
+            {
+              "name": "id",
+              "value": "a1",
+              "domain": "ads.example",
+              "hostOnly": true,
+              "path": "/",
+              "secure": false,
+              "httpOnly": false,
+              "sameSite": "unspecified",
+              "session": true,
+              "storeId": "0"
+            }
           ]
         },
         "requests": [],
         "audit": [
-          {":audit/event": ":webext/effect", ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop", ":webext/operation": "chrome.cookies.set", ":consent/decision": ":approved", ":origin": "https://news.example"}
+          {
+            ":audit/event": ":webext/effect",
+            ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop",
+            ":webext/operation": "chrome.cookies.set",
+            ":consent/decision": ":approved",
+            ":origin": "https://news.example"
+          }
         ]
       }
     },
     {
       "id": "P09-scripting-executeScript-declared",
       "manifest": "manifests/cmp-reader.json",
-      "call": {"namespace": "chrome.scripting", "method": "executeScript", "args": [{"target": {"tabId": 7}, "files": ["inject.js"]}]},
+      "call": {
+        "namespace": "chrome.scripting",
+        "method": "executeScript",
+        "args": [
+          {
+            "target": {
+              "tabId": 7
+            },
+            "files": [
+              "inject.js"
+            ]
+          }
+        ]
+      },
       "consent": "approve",
       "expect": {
         "outcome": "consent-required",
         "prompts": 1,
         "executed": true,
-        "resultSubset": [{"frameId": 0, "result": "Article"}],
+        "resultSubset": [
+          {
+            "frameId": 0,
+            "result": "Article"
+          }
+        ],
         "stateAfter": {
           "tabs": [
-            {"id": 7, "windowId": 1, "index": 0, "active": true, "url": "https://news.example/article", "title": "Injected"},
-            {"id": 8, "windowId": 1, "index": 1, "active": false, "url": "https://ads.example/", "title": "Ads"}
+            {
+              "id": 7,
+              "windowId": 1,
+              "index": 0,
+              "active": true,
+              "url": "https://news.example/article",
+              "title": "Injected"
+            },
+            {
+              "id": 8,
+              "windowId": 1,
+              "index": 1,
+              "active": false,
+              "url": "https://ads.example/",
+              "title": "Ads"
+            }
           ]
         },
         "requests": [],
         "audit": [
-          {":audit/event": ":webext/effect", ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop", ":webext/operation": "chrome.scripting.executeScript", ":consent/decision": ":approved", ":origin": "https://news.example"}
+          {
+            ":audit/event": ":webext/effect",
+            ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop",
+            ":webext/operation": "chrome.scripting.executeScript",
+            ":consent/decision": ":approved",
+            ":origin": "https://news.example"
+          }
         ]
       }
     },
     {
       "id": "P10-runtime-id",
       "manifest": "manifests/cmp-reader.json",
-      "call": {"namespace": "chrome.runtime", "property": "id"},
+      "call": {
+        "namespace": "chrome.runtime",
+        "property": "id"
+      },
       "consent": "approve",
       "expect": {
         "outcome": "consent-required",
@@ -232,215 +665,508 @@
         "stateAfter": "unchanged",
         "requests": [],
         "audit": [
-          {":audit/event": ":webext/effect", ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop", ":webext/operation": "chrome.runtime.id", ":consent/decision": ":approved", ":origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop"}
+          {
+            ":audit/event": ":webext/effect",
+            ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop",
+            ":webext/operation": "chrome.runtime.id",
+            ":consent/decision": ":approved",
+            ":origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop"
+          }
         ]
       }
     },
     {
       "id": "P11-runtime-onMessage-addListener",
       "manifest": "manifests/cmp-reader.json",
-      "call": {"namespace": "chrome.runtime", "method": "onMessage.addListener", "args": [{"$listener": {"respond": {"vendors": ["v1", "v2"]}}}]},
+      "call": {
+        "namespace": "chrome.runtime",
+        "method": "onMessage.addListener",
+        "args": [
+          {
+            "$listener": {
+              "respond": {
+                "vendors": [
+                  "v1",
+                  "v2"
+                ]
+              }
+            }
+          }
+        ]
+      },
       "consent": "approve",
       "expect": {
         "outcome": "consent-required",
         "prompts": 1,
         "executed": true,
-        "result": {"$undefined": true},
+        "result": {
+          "$undefined": true
+        },
         "stateAfter": {
-          "listeners": [{"context": "service_worker", "event": "chrome.runtime.onMessage", "respond": {"vendors": ["v1", "v2"]}}]
+          "listeners": [
+            {
+              "context": "service_worker",
+              "event": "chrome.runtime.onMessage",
+              "respond": {
+                "vendors": [
+                  "v1",
+                  "v2"
+                ]
+              }
+            }
+          ]
         },
         "requests": [],
         "audit": [
-          {":audit/event": ":webext/effect", ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop", ":webext/operation": "chrome.runtime.onMessage.addListener", ":consent/decision": ":approved", ":origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop"}
+          {
+            ":audit/event": ":webext/effect",
+            ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop",
+            ":webext/operation": "chrome.runtime.onMessage.addListener",
+            ":consent/decision": ":approved",
+            ":origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop"
+          }
         ]
       }
     },
     {
       "id": "P12-storage-local-remove",
       "manifest": "manifests/cmp-reader.json",
-      "call": {"namespace": "chrome.storage.local", "method": "remove", "args": ["vendors"]},
+      "call": {
+        "namespace": "chrome.storage.local",
+        "method": "remove",
+        "args": [
+          "vendors"
+        ]
+      },
       "consent": "approve",
       "expect": {
         "outcome": "consent-required",
         "prompts": 1,
         "executed": true,
-        "result": {"$undefined": true},
+        "result": {
+          "$undefined": true
+        },
         "stateAfter": {
           "storage": {
-            "local": {"locale": "ja"},
-            "sync": {"policy": "ask", "region": "eu"}
+            "local": {
+              "locale": "ja"
+            },
+            "sync": {
+              "policy": "ask",
+              "region": "eu"
+            }
           }
         },
         "requests": [],
         "audit": [
-          {":audit/event": ":webext/effect", ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop", ":webext/operation": "chrome.storage.local.remove", ":consent/decision": ":approved", ":origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop"}
+          {
+            ":audit/event": ":webext/effect",
+            ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop",
+            ":webext/operation": "chrome.storage.local.remove",
+            ":consent/decision": ":approved",
+            ":origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop"
+          }
         ]
       }
     },
     {
       "id": "P13-storage-sync-get",
       "manifest": "manifests/cmp-reader.json",
-      "call": {"namespace": "chrome.storage.sync", "method": "get", "args": [["policy", "region"]]},
+      "call": {
+        "namespace": "chrome.storage.sync",
+        "method": "get",
+        "args": [
+          [
+            "policy",
+            "region"
+          ]
+        ]
+      },
       "consent": "approve",
       "expect": {
         "outcome": "consent-required",
         "prompts": 1,
         "executed": true,
-        "result": {"policy": "ask", "region": "eu"},
+        "result": {
+          "policy": "ask",
+          "region": "eu"
+        },
         "stateAfter": "unchanged",
         "requests": [],
         "audit": [
-          {":audit/event": ":webext/effect", ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop", ":webext/operation": "chrome.storage.sync.get", ":consent/decision": ":approved", ":origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop"}
+          {
+            ":audit/event": ":webext/effect",
+            ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop",
+            ":webext/operation": "chrome.storage.sync.get",
+            ":consent/decision": ":approved",
+            ":origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop"
+          }
         ]
       }
     },
     {
       "id": "P14-storage-sync-set",
       "manifest": "manifests/cmp-reader.json",
-      "call": {"namespace": "chrome.storage.sync", "method": "set", "args": [{"policy": "deny-all"}]},
+      "call": {
+        "namespace": "chrome.storage.sync",
+        "method": "set",
+        "args": [
+          {
+            "policy": "deny-all"
+          }
+        ]
+      },
       "consent": "approve",
       "expect": {
         "outcome": "consent-required",
         "prompts": 1,
         "executed": true,
-        "result": {"$undefined": true},
+        "result": {
+          "$undefined": true
+        },
         "stateAfter": {
           "storage": {
-            "local": {"vendors": ["v1", "v2"], "locale": "ja"},
-            "sync": {"policy": "deny-all", "region": "eu"}
+            "local": {
+              "vendors": [
+                "v1",
+                "v2"
+              ],
+              "locale": "ja"
+            },
+            "sync": {
+              "policy": "deny-all",
+              "region": "eu"
+            }
           }
         },
         "requests": [],
         "audit": [
-          {":audit/event": ":webext/effect", ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop", ":webext/operation": "chrome.storage.sync.set", ":consent/decision": ":approved", ":origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop"}
+          {
+            ":audit/event": ":webext/effect",
+            ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop",
+            ":webext/operation": "chrome.storage.sync.set",
+            ":consent/decision": ":approved",
+            ":origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop"
+          }
         ]
       }
     },
     {
       "id": "P15-storage-sync-remove",
       "manifest": "manifests/cmp-reader.json",
-      "call": {"namespace": "chrome.storage.sync", "method": "remove", "args": [["policy"]]},
+      "call": {
+        "namespace": "chrome.storage.sync",
+        "method": "remove",
+        "args": [
+          [
+            "policy"
+          ]
+        ]
+      },
       "consent": "approve",
       "expect": {
         "outcome": "consent-required",
         "prompts": 1,
         "executed": true,
-        "result": {"$undefined": true},
+        "result": {
+          "$undefined": true
+        },
         "stateAfter": {
           "storage": {
-            "local": {"vendors": ["v1", "v2"], "locale": "ja"},
-            "sync": {"region": "eu"}
+            "local": {
+              "vendors": [
+                "v1",
+                "v2"
+              ],
+              "locale": "ja"
+            },
+            "sync": {
+              "region": "eu"
+            }
           }
         },
         "requests": [],
         "audit": [
-          {":audit/event": ":webext/effect", ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop", ":webext/operation": "chrome.storage.sync.remove", ":consent/decision": ":approved", ":origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop"}
+          {
+            ":audit/event": ":webext/effect",
+            ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop",
+            ":webext/operation": "chrome.storage.sync.remove",
+            ":consent/decision": ":approved",
+            ":origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop"
+          }
         ]
       }
     },
     {
       "id": "P16-tabs-get",
       "manifest": "manifests/cmp-reader.json",
-      "call": {"namespace": "chrome.tabs", "method": "get", "args": [7]},
+      "call": {
+        "namespace": "chrome.tabs",
+        "method": "get",
+        "args": [
+          7
+        ]
+      },
       "consent": "approve",
       "expect": {
         "outcome": "consent-required",
         "prompts": 1,
         "executed": true,
-        "resultSubset": {"id": 7, "windowId": 1, "index": 0, "active": true, "url": "https://news.example/article", "title": "Article"},
+        "resultSubset": {
+          "id": 7,
+          "windowId": 1,
+          "index": 0,
+          "active": true,
+          "url": "https://news.example/article",
+          "title": "Article"
+        },
         "stateAfter": "unchanged",
         "requests": [],
         "audit": [
-          {":audit/event": ":webext/effect", ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop", ":webext/operation": "chrome.tabs.get", ":consent/decision": ":approved", ":origin": "https://news.example"}
+          {
+            ":audit/event": ":webext/effect",
+            ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop",
+            ":webext/operation": "chrome.tabs.get",
+            ":consent/decision": ":approved",
+            ":origin": "https://news.example"
+          }
         ]
       }
     },
     {
       "id": "P17-tabs-update",
       "manifest": "manifests/cmp-reader.json",
-      "call": {"namespace": "chrome.tabs", "method": "update", "args": [7, {"url": "https://news.example/privacy"}]},
+      "call": {
+        "namespace": "chrome.tabs",
+        "method": "update",
+        "args": [
+          7,
+          {
+            "url": "https://news.example/privacy"
+          }
+        ]
+      },
       "consent": "approve",
       "expect": {
         "outcome": "consent-required",
         "prompts": 1,
         "executed": true,
-        "resultSubset": {"id": 7, "windowId": 1, "index": 0},
+        "resultSubset": {
+          "id": 7,
+          "windowId": 1,
+          "index": 0
+        },
         "stateAfter": {
           "tabs": [
-            {"id": 7, "windowId": 1, "index": 0, "active": true, "url": "https://news.example/privacy", "title": "Privacy"},
-            {"id": 8, "windowId": 1, "index": 1, "active": false, "url": "https://ads.example/", "title": "Ads"}
+            {
+              "id": 7,
+              "windowId": 1,
+              "index": 0,
+              "active": true,
+              "url": "https://news.example/privacy",
+              "title": "Privacy"
+            },
+            {
+              "id": 8,
+              "windowId": 1,
+              "index": 1,
+              "active": false,
+              "url": "https://ads.example/",
+              "title": "Ads"
+            }
           ]
         },
-        "requests": [{"method": "GET", "url": "https://news.example/privacy"}],
+        "requests": [
+          {
+            "method": "GET",
+            "url": "https://news.example/privacy"
+          }
+        ],
         "audit": [
-          {":audit/event": ":webext/effect", ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop", ":webext/operation": "chrome.tabs.update", ":consent/decision": ":approved", ":origin": "https://news.example"}
+          {
+            ":audit/event": ":webext/effect",
+            ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop",
+            ":webext/operation": "chrome.tabs.update",
+            ":consent/decision": ":approved",
+            ":origin": "https://news.example"
+          }
         ]
       }
     },
     {
       "id": "P18-tabs-remove",
       "manifest": "manifests/cmp-reader.json",
-      "call": {"namespace": "chrome.tabs", "method": "remove", "args": [7]},
+      "call": {
+        "namespace": "chrome.tabs",
+        "method": "remove",
+        "args": [
+          7
+        ]
+      },
       "consent": "approve",
       "expect": {
         "outcome": "consent-required",
         "prompts": 1,
         "executed": true,
-        "result": {"$undefined": true},
+        "result": {
+          "$undefined": true
+        },
         "stateAfter": {
           "tabs": [
-            {"id": 8, "windowId": 1, "index": 0, "active": true, "url": "https://ads.example/", "title": "Ads"}
+            {
+              "id": 8,
+              "windowId": 1,
+              "index": 0,
+              "active": true,
+              "url": "https://ads.example/",
+              "title": "Ads"
+            }
           ]
         },
         "requests": [],
         "audit": [
-          {":audit/event": ":webext/effect", ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop", ":webext/operation": "chrome.tabs.remove", ":consent/decision": ":approved", ":origin": "https://news.example"}
+          {
+            ":audit/event": ":webext/effect",
+            ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop",
+            ":webext/operation": "chrome.tabs.remove",
+            ":consent/decision": ":approved",
+            ":origin": "https://news.example"
+          }
         ]
       }
     },
     {
       "id": "P19-cookies-getAll",
       "manifest": "manifests/cmp-reader.json",
-      "call": {"namespace": "chrome.cookies", "method": "getAll", "args": [{"url": "https://news.example/"}]},
+      "call": {
+        "namespace": "chrome.cookies",
+        "method": "getAll",
+        "args": [
+          {
+            "url": "https://news.example/"
+          }
+        ]
+      },
       "consent": "approve",
       "expect": {
         "outcome": "consent-required",
         "prompts": 1,
         "executed": true,
-        "result": [{"name": "euconsent-v2", "value": "allow-all", "domain": "news.example", "hostOnly": true, "path": "/", "secure": false, "httpOnly": false, "sameSite": "unspecified", "session": true, "storeId": "0"}, {"name": "lang", "value": "en", "domain": "news.example", "hostOnly": true, "path": "/", "secure": false, "httpOnly": false, "sameSite": "unspecified", "session": true, "storeId": "0"}],
+        "result": [
+          {
+            "name": "euconsent-v2",
+            "value": "allow-all",
+            "domain": "news.example",
+            "hostOnly": true,
+            "path": "/",
+            "secure": false,
+            "httpOnly": false,
+            "sameSite": "unspecified",
+            "session": true,
+            "storeId": "0"
+          },
+          {
+            "name": "lang",
+            "value": "en",
+            "domain": "news.example",
+            "hostOnly": true,
+            "path": "/",
+            "secure": false,
+            "httpOnly": false,
+            "sameSite": "unspecified",
+            "session": true,
+            "storeId": "0"
+          }
+        ],
         "stateAfter": "unchanged",
         "requests": [],
         "audit": [
-          {":audit/event": ":webext/effect", ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop", ":webext/operation": "chrome.cookies.getAll", ":consent/decision": ":approved", ":origin": "https://news.example"}
+          {
+            ":audit/event": ":webext/effect",
+            ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop",
+            ":webext/operation": "chrome.cookies.getAll",
+            ":consent/decision": ":approved",
+            ":origin": "https://news.example"
+          }
         ]
       }
     },
     {
       "id": "P20-cookies-remove",
       "manifest": "manifests/cmp-reader.json",
-      "call": {"namespace": "chrome.cookies", "method": "remove", "args": [{"url": "https://news.example/", "name": "euconsent-v2"}]},
+      "call": {
+        "namespace": "chrome.cookies",
+        "method": "remove",
+        "args": [
+          {
+            "url": "https://news.example/",
+            "name": "euconsent-v2"
+          }
+        ]
+      },
       "consent": "approve",
       "expect": {
         "outcome": "consent-required",
         "prompts": 1,
         "executed": true,
-        "result": {"url": "https://news.example/", "name": "euconsent-v2", "storeId": "0"},
+        "result": {
+          "url": "https://news.example/",
+          "name": "euconsent-v2",
+          "storeId": "0"
+        },
         "stateAfter": {
           "cookies": [
-            {"name": "lang", "value": "en", "domain": "news.example", "hostOnly": true, "path": "/", "secure": false, "httpOnly": false, "sameSite": "unspecified", "session": true, "storeId": "0"},
-            {"name": "id", "value": "a1", "domain": "ads.example", "hostOnly": true, "path": "/", "secure": false, "httpOnly": false, "sameSite": "unspecified", "session": true, "storeId": "0"}
+            {
+              "name": "lang",
+              "value": "en",
+              "domain": "news.example",
+              "hostOnly": true,
+              "path": "/",
+              "secure": false,
+              "httpOnly": false,
+              "sameSite": "unspecified",
+              "session": true,
+              "storeId": "0"
+            },
+            {
+              "name": "id",
+              "value": "a1",
+              "domain": "ads.example",
+              "hostOnly": true,
+              "path": "/",
+              "secure": false,
+              "httpOnly": false,
+              "sameSite": "unspecified",
+              "session": true,
+              "storeId": "0"
+            }
           ]
         },
         "requests": [],
         "audit": [
-          {":audit/event": ":webext/effect", ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop", ":webext/operation": "chrome.cookies.remove", ":consent/decision": ":approved", ":origin": "https://news.example"}
+          {
+            ":audit/event": ":webext/effect",
+            ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop",
+            ":webext/operation": "chrome.cookies.remove",
+            ":consent/decision": ":approved",
+            ":origin": "https://news.example"
+          }
         ]
       }
     },
     {
       "id": "N01-undeclared-origin",
       "manifest": "manifests/cmp-reader.json",
-      "call": {"namespace": "chrome.cookies", "method": "get", "args": [{"url": "https://ads.example/", "name": "id"}]},
+      "call": {
+        "namespace": "chrome.cookies",
+        "method": "get",
+        "args": [
+          {
+            "url": "https://ads.example/",
+            "name": "id"
+          }
+        ]
+      },
       "expect": {
         "outcome": "refuse",
         "reason": "origin-not-declared",
@@ -454,7 +1180,16 @@
     {
       "id": "N02-undeclared-permission",
       "manifest": "manifests/no-cookies.json",
-      "call": {"namespace": "chrome.cookies", "method": "get", "args": [{"url": "https://news.example/", "name": "euconsent-v2"}]},
+      "call": {
+        "namespace": "chrome.cookies",
+        "method": "get",
+        "args": [
+          {
+            "url": "https://news.example/",
+            "name": "euconsent-v2"
+          }
+        ]
+      },
       "expect": {
         "outcome": "refuse",
         "reason": "permission-not-declared",
@@ -468,7 +1203,13 @@
     {
       "id": "N03-overscoped-tabs-query",
       "manifest": "manifests/cmp-reader.json",
-      "call": {"namespace": "chrome.tabs", "method": "query", "args": [{}]},
+      "call": {
+        "namespace": "chrome.tabs",
+        "method": "query",
+        "args": [
+          {}
+        ]
+      },
       "expect": {
         "outcome": "refuse",
         "reason": "query-exceeds-declared-matches",
@@ -483,7 +1224,17 @@
       "id": "N04-deny-then-network",
       "manifest": "manifests/cmp-reader.json",
       "control": "P06-tabs-create",
-      "call": {"namespace": "chrome.tabs", "method": "create", "args": [{"url": "https://news.example/privacy", "index": 2, "active": true}]},
+      "call": {
+        "namespace": "chrome.tabs",
+        "method": "create",
+        "args": [
+          {
+            "url": "https://news.example/privacy",
+            "index": 2,
+            "active": true
+          }
+        ]
+      },
       "consent": "deny",
       "expect": {
         "outcome": "consent-required",
@@ -498,7 +1249,15 @@
     {
       "id": "N05-undeclared-namespace",
       "manifest": "manifests/cmp-reader.json",
-      "call": {"namespace": "chrome.history", "method": "search", "args": [{"text": ""}]},
+      "call": {
+        "namespace": "chrome.history",
+        "method": "search",
+        "args": [
+          {
+            "text": ""
+          }
+        ]
+      },
       "expect": {
         "outcome": "refuse",
         "reason": "namespace-outside-v1-slice",
@@ -522,7 +1281,31 @@
       "id": "N07-dnr-runtime-rule",
       "manifest": "manifests/dnr.json",
       "control": "I02-install-dnr-static",
-      "call": {"namespace": "chrome.declarativeNetRequest", "method": "updateDynamicRules", "args": [{"addRules": [{"id": 2, "action": {"type": "block"}, "condition": {"urlFilter": "/ad.js", "requestDomains": ["news.example"], "resourceTypes": ["script"]}}]}]},
+      "call": {
+        "namespace": "chrome.declarativeNetRequest",
+        "method": "updateDynamicRules",
+        "args": [
+          {
+            "addRules": [
+              {
+                "id": 2,
+                "action": {
+                  "type": "block"
+                },
+                "condition": {
+                  "urlFilter": "/ad.js",
+                  "requestDomains": [
+                    "news.example"
+                  ],
+                  "resourceTypes": [
+                    "script"
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
       "expect": {
         "outcome": "refuse",
         "reason": "no-runtime-request-rewriting",
@@ -538,7 +1321,16 @@
       "manifest": "manifests/cmp-reader.json",
       "control": "P20-cookies-remove",
       "installApproved": true,
-      "call": {"namespace": "chrome.cookies", "method": "remove", "args": [{"url": "https://news.example/", "name": "euconsent-v2"}]},
+      "call": {
+        "namespace": "chrome.cookies",
+        "method": "remove",
+        "args": [
+          {
+            "url": "https://news.example/",
+            "name": "euconsent-v2"
+          }
+        ]
+      },
       "consent": "none",
       "expect": {
         "outcome": "consent-required",
@@ -552,7 +1344,20 @@
     {
       "id": "N09-executeScript-undeclared-tab-origin",
       "manifest": "manifests/cmp-reader.json",
-      "call": {"namespace": "chrome.scripting", "method": "executeScript", "args": [{"target": {"tabId": 8}, "files": ["inject.js"]}]},
+      "call": {
+        "namespace": "chrome.scripting",
+        "method": "executeScript",
+        "args": [
+          {
+            "target": {
+              "tabId": 8
+            },
+            "files": [
+              "inject.js"
+            ]
+          }
+        ]
+      },
       "expect": {
         "outcome": "refuse",
         "reason": "origin-not-declared",
@@ -566,7 +1371,20 @@
     {
       "id": "N10-executeScript-target-url",
       "manifest": "manifests/cmp-reader.json",
-      "call": {"namespace": "chrome.scripting", "method": "executeScript", "args": [{"target": {"url": "https://news.example/article"}, "files": ["inject.js"]}]},
+      "call": {
+        "namespace": "chrome.scripting",
+        "method": "executeScript",
+        "args": [
+          {
+            "target": {
+              "url": "https://news.example/article"
+            },
+            "files": [
+              "inject.js"
+            ]
+          }
+        ]
+      },
       "expect": {
         "outcome": "refuse",
         "reason": "argument-shape-not-declared",
@@ -580,7 +1398,15 @@
     {
       "id": "N11-tabs-create-undeclared-origin",
       "manifest": "manifests/cmp-reader.json",
-      "call": {"namespace": "chrome.tabs", "method": "create", "args": [{"url": "https://ads.example/"}]},
+      "call": {
+        "namespace": "chrome.tabs",
+        "method": "create",
+        "args": [
+          {
+            "url": "https://ads.example/"
+          }
+        ]
+      },
       "expect": {
         "outcome": "refuse",
         "reason": "origin-not-declared",
@@ -594,7 +1420,16 @@
     {
       "id": "N12-tabs-update-undeclared-origin",
       "manifest": "manifests/cmp-reader.json",
-      "call": {"namespace": "chrome.tabs", "method": "update", "args": [7, {"url": "https://ads.example/"}]},
+      "call": {
+        "namespace": "chrome.tabs",
+        "method": "update",
+        "args": [
+          7,
+          {
+            "url": "https://ads.example/"
+          }
+        ]
+      },
       "expect": {
         "outcome": "refuse",
         "reason": "origin-not-declared",
@@ -608,7 +1443,13 @@
     {
       "id": "N13-tabs-get-undeclared-origin",
       "manifest": "manifests/cmp-reader.json",
-      "call": {"namespace": "chrome.tabs", "method": "get", "args": [8]},
+      "call": {
+        "namespace": "chrome.tabs",
+        "method": "get",
+        "args": [
+          8
+        ]
+      },
       "expect": {
         "outcome": "refuse",
         "reason": "origin-not-declared",
@@ -622,7 +1463,16 @@
     {
       "id": "N14-tabs-remove-mixed-origins",
       "manifest": "manifests/cmp-reader.json",
-      "call": {"namespace": "chrome.tabs", "method": "remove", "args": [[7, 8]]},
+      "call": {
+        "namespace": "chrome.tabs",
+        "method": "remove",
+        "args": [
+          [
+            7,
+            8
+          ]
+        ]
+      },
       "expect": {
         "outcome": "refuse",
         "reason": "origin-not-declared",
@@ -636,7 +1486,13 @@
     {
       "id": "N15-cookies-getAll-unscoped",
       "manifest": "manifests/cmp-reader.json",
-      "call": {"namespace": "chrome.cookies", "method": "getAll", "args": [{}]},
+      "call": {
+        "namespace": "chrome.cookies",
+        "method": "getAll",
+        "args": [
+          {}
+        ]
+      },
       "expect": {
         "outcome": "refuse",
         "reason": "query-exceeds-declared-matches",
@@ -650,7 +1506,17 @@
     {
       "id": "N16-cookies-set-undeclared-origin",
       "manifest": "manifests/cmp-reader.json",
-      "call": {"namespace": "chrome.cookies", "method": "set", "args": [{"url": "https://ads.example/", "name": "id", "value": "x"}]},
+      "call": {
+        "namespace": "chrome.cookies",
+        "method": "set",
+        "args": [
+          {
+            "url": "https://ads.example/",
+            "name": "id",
+            "value": "x"
+          }
+        ]
+      },
       "expect": {
         "outcome": "refuse",
         "reason": "origin-not-declared",
@@ -664,7 +1530,16 @@
     {
       "id": "N17-cookies-remove-undeclared-origin",
       "manifest": "manifests/cmp-reader.json",
-      "call": {"namespace": "chrome.cookies", "method": "remove", "args": [{"url": "https://ads.example/", "name": "id"}]},
+      "call": {
+        "namespace": "chrome.cookies",
+        "method": "remove",
+        "args": [
+          {
+            "url": "https://ads.example/",
+            "name": "id"
+          }
+        ]
+      },
       "expect": {
         "outcome": "refuse",
         "reason": "origin-not-declared",
@@ -678,7 +1553,15 @@
     {
       "id": "N18-storage-undeclared-permission",
       "manifest": "manifests/dnr.json",
-      "call": {"namespace": "chrome.storage.local", "method": "set", "args": [{"vendors": []}]},
+      "call": {
+        "namespace": "chrome.storage.local",
+        "method": "set",
+        "args": [
+          {
+            "vendors": []
+          }
+        ]
+      },
       "expect": {
         "outcome": "refuse",
         "reason": "permission-not-declared",
@@ -692,7 +1575,13 @@
     {
       "id": "N19-storage-area-outside-slice",
       "manifest": "manifests/cmp-reader.json",
-      "call": {"namespace": "chrome.storage.session", "method": "get", "args": ["vendors"]},
+      "call": {
+        "namespace": "chrome.storage.session",
+        "method": "get",
+        "args": [
+          "vendors"
+        ]
+      },
       "expect": {
         "outcome": "refuse",
         "reason": "namespace-outside-v1-slice",
@@ -706,7 +1595,11 @@
     {
       "id": "N20-storage-method-outside-slice",
       "manifest": "manifests/cmp-reader.json",
-      "call": {"namespace": "chrome.storage.local", "method": "clear", "args": []},
+      "call": {
+        "namespace": "chrome.storage.local",
+        "method": "clear",
+        "args": []
+      },
       "expect": {
         "outcome": "refuse",
         "reason": "operation-outside-v1-slice",
@@ -729,7 +1622,16 @@
     {
       "id": "N22-tabs-update-undeclared-tab",
       "manifest": "manifests/cmp-reader.json",
-      "call": {"namespace": "chrome.tabs", "method": "update", "args": [8, {"url": "https://news.example/privacy"}]},
+      "call": {
+        "namespace": "chrome.tabs",
+        "method": "update",
+        "args": [
+          8,
+          {
+            "url": "https://news.example/privacy"
+          }
+        ]
+      },
       "expect": {
         "outcome": "refuse",
         "reason": "origin-not-declared",
@@ -741,10 +1643,88 @@
       }
     },
     {
+      "id": "N23-dnr-static-domain-scope",
+      "manifest": "manifests/dnr-domain-scope.json",
+      "install": true,
+      "expect": {
+        "outcome": "install-refuse",
+        "reason": "rule-scope-exceeds-declared-origins"
+      }
+    },
+    {
+      "id": "N24-dnr-static-domain-anchor",
+      "manifest": "manifests/dnr-domain-anchor.json",
+      "install": true,
+      "expect": {
+        "outcome": "install-refuse",
+        "reason": "rule-scope-exceeds-declared-origins"
+      }
+    },
+    {
+      "id": "N25-dnr-static-open-port",
+      "manifest": "manifests/dnr-open-port.json",
+      "install": true,
+      "expect": {
+        "outcome": "install-refuse",
+        "reason": "rule-scope-exceeds-declared-origins"
+      }
+    },
+    {
+      "id": "N26-dnr-static-regex",
+      "manifest": "manifests/dnr-regex.json",
+      "install": true,
+      "expect": {
+        "outcome": "install-refuse",
+        "reason": "rule-condition-outside-v1-slice"
+      }
+    },
+    {
+      "id": "N27-dnr-static-undeclared-subdomain",
+      "manifest": "manifests/dnr-subdomain.json",
+      "install": true,
+      "expect": {
+        "outcome": "install-refuse",
+        "reason": "rule-origin-not-declared"
+      }
+    },
+    {
+      "id": "N28-dnr-static-undeclared-scheme",
+      "manifest": "manifests/dnr-scheme.json",
+      "install": true,
+      "expect": {
+        "outcome": "install-refuse",
+        "reason": "rule-origin-not-declared"
+      }
+    },
+    {
+      "id": "N29-dnr-static-undeclared-port",
+      "manifest": "manifests/dnr-port.json",
+      "install": true,
+      "expect": {
+        "outcome": "install-refuse",
+        "reason": "rule-origin-not-declared"
+      }
+    },
+    {
+      "id": "N30-dnr-static-mixed-ruleset",
+      "manifest": "manifests/dnr-mixed.json",
+      "install": true,
+      "expect": {
+        "outcome": "install-refuse",
+        "reason": "rule-scope-exceeds-declared-origins"
+      }
+    },
+    {
       "id": "D01-runtime-getURL",
       "manifest": "manifests/cmp-reader.json",
       "control": "P01-runtime-getURL",
-      "call": {"namespace": "chrome.runtime", "method": "getURL", "args": ["options.html"]},
+      "call": {
+        "namespace": "chrome.runtime",
+        "method": "getURL",
+        "args": [
+          "options.html"
+        ]
+      },
       "consent": "deny",
       "expect": {
         "outcome": "consent-required",
@@ -760,9 +1740,34 @@
       "id": "D02-runtime-sendMessage",
       "manifest": "manifests/cmp-reader.json",
       "control": "P02-runtime-sendMessage",
-      "context": {"kind": "content_script", "tabId": 7, "frameId": 0},
-      "seed": {"listeners": [{"context": "service_worker", "event": "chrome.runtime.onMessage", "respond": {"vendors": ["v1", "v2"]}}]},
-      "call": {"namespace": "chrome.runtime", "method": "sendMessage", "args": [{"type": "read-consent"}]},
+      "context": {
+        "kind": "content_script",
+        "tabId": 7,
+        "frameId": 0
+      },
+      "seed": {
+        "listeners": [
+          {
+            "context": "service_worker",
+            "event": "chrome.runtime.onMessage",
+            "respond": {
+              "vendors": [
+                "v1",
+                "v2"
+              ]
+            }
+          }
+        ]
+      },
+      "call": {
+        "namespace": "chrome.runtime",
+        "method": "sendMessage",
+        "args": [
+          {
+            "type": "read-consent"
+          }
+        ]
+      },
       "consent": "deny",
       "expect": {
         "outcome": "consent-required",
@@ -779,7 +1784,13 @@
       "id": "D03-storage-local-get",
       "manifest": "manifests/cmp-reader.json",
       "control": "P03-storage-local-get",
-      "call": {"namespace": "chrome.storage.local", "method": "get", "args": ["vendors"]},
+      "call": {
+        "namespace": "chrome.storage.local",
+        "method": "get",
+        "args": [
+          "vendors"
+        ]
+      },
       "consent": "deny",
       "expect": {
         "outcome": "consent-required",
@@ -795,7 +1806,15 @@
       "id": "D04-storage-local-set",
       "manifest": "manifests/cmp-reader.json",
       "control": "P04-storage-local-set",
-      "call": {"namespace": "chrome.storage.local", "method": "set", "args": [{"vendors": []}]},
+      "call": {
+        "namespace": "chrome.storage.local",
+        "method": "set",
+        "args": [
+          {
+            "vendors": []
+          }
+        ]
+      },
       "consent": "deny",
       "expect": {
         "outcome": "consent-required",
@@ -811,7 +1830,15 @@
       "id": "D05-tabs-query-declared",
       "manifest": "manifests/cmp-reader.json",
       "control": "P05-tabs-query-declared",
-      "call": {"namespace": "chrome.tabs", "method": "query", "args": [{"url": "https://news.example/*"}]},
+      "call": {
+        "namespace": "chrome.tabs",
+        "method": "query",
+        "args": [
+          {
+            "url": "https://news.example/*"
+          }
+        ]
+      },
       "consent": "deny",
       "expect": {
         "outcome": "consent-required",
@@ -827,7 +1854,16 @@
       "id": "D07-cookies-get-approved-origin",
       "manifest": "manifests/cmp-reader.json",
       "control": "P07-cookies-get-approved-origin",
-      "call": {"namespace": "chrome.cookies", "method": "get", "args": [{"url": "https://news.example/", "name": "euconsent-v2"}]},
+      "call": {
+        "namespace": "chrome.cookies",
+        "method": "get",
+        "args": [
+          {
+            "url": "https://news.example/",
+            "name": "euconsent-v2"
+          }
+        ]
+      },
       "consent": "deny",
       "expect": {
         "outcome": "consent-required",
@@ -843,7 +1879,17 @@
       "id": "D08-cookies-set-approved-origin",
       "manifest": "manifests/cmp-reader.json",
       "control": "P08-cookies-set-approved-origin",
-      "call": {"namespace": "chrome.cookies", "method": "set", "args": [{"url": "https://news.example/", "name": "euconsent-v2", "value": "deny-all"}]},
+      "call": {
+        "namespace": "chrome.cookies",
+        "method": "set",
+        "args": [
+          {
+            "url": "https://news.example/",
+            "name": "euconsent-v2",
+            "value": "deny-all"
+          }
+        ]
+      },
       "consent": "deny",
       "expect": {
         "outcome": "consent-required",
@@ -859,7 +1905,20 @@
       "id": "D09-scripting-executeScript-declared",
       "manifest": "manifests/cmp-reader.json",
       "control": "P09-scripting-executeScript-declared",
-      "call": {"namespace": "chrome.scripting", "method": "executeScript", "args": [{"target": {"tabId": 7}, "files": ["inject.js"]}]},
+      "call": {
+        "namespace": "chrome.scripting",
+        "method": "executeScript",
+        "args": [
+          {
+            "target": {
+              "tabId": 7
+            },
+            "files": [
+              "inject.js"
+            ]
+          }
+        ]
+      },
       "consent": "deny",
       "expect": {
         "outcome": "consent-required",
@@ -875,7 +1934,10 @@
       "id": "D10-runtime-id",
       "manifest": "manifests/cmp-reader.json",
       "control": "P10-runtime-id",
-      "call": {"namespace": "chrome.runtime", "property": "id"},
+      "call": {
+        "namespace": "chrome.runtime",
+        "property": "id"
+      },
       "consent": "deny",
       "expect": {
         "outcome": "consent-required",
@@ -891,7 +1953,22 @@
       "id": "D11-runtime-onMessage-addListener",
       "manifest": "manifests/cmp-reader.json",
       "control": "P11-runtime-onMessage-addListener",
-      "call": {"namespace": "chrome.runtime", "method": "onMessage.addListener", "args": [{"$listener": {"respond": {"vendors": ["v1", "v2"]}}}]},
+      "call": {
+        "namespace": "chrome.runtime",
+        "method": "onMessage.addListener",
+        "args": [
+          {
+            "$listener": {
+              "respond": {
+                "vendors": [
+                  "v1",
+                  "v2"
+                ]
+              }
+            }
+          }
+        ]
+      },
       "consent": "deny",
       "expect": {
         "outcome": "consent-required",
@@ -907,7 +1984,13 @@
       "id": "D12-storage-local-remove",
       "manifest": "manifests/cmp-reader.json",
       "control": "P12-storage-local-remove",
-      "call": {"namespace": "chrome.storage.local", "method": "remove", "args": ["vendors"]},
+      "call": {
+        "namespace": "chrome.storage.local",
+        "method": "remove",
+        "args": [
+          "vendors"
+        ]
+      },
       "consent": "deny",
       "expect": {
         "outcome": "consent-required",
@@ -923,7 +2006,16 @@
       "id": "D13-storage-sync-get",
       "manifest": "manifests/cmp-reader.json",
       "control": "P13-storage-sync-get",
-      "call": {"namespace": "chrome.storage.sync", "method": "get", "args": [["policy", "region"]]},
+      "call": {
+        "namespace": "chrome.storage.sync",
+        "method": "get",
+        "args": [
+          [
+            "policy",
+            "region"
+          ]
+        ]
+      },
       "consent": "deny",
       "expect": {
         "outcome": "consent-required",
@@ -939,7 +2031,15 @@
       "id": "D14-storage-sync-set",
       "manifest": "manifests/cmp-reader.json",
       "control": "P14-storage-sync-set",
-      "call": {"namespace": "chrome.storage.sync", "method": "set", "args": [{"policy": "deny-all"}]},
+      "call": {
+        "namespace": "chrome.storage.sync",
+        "method": "set",
+        "args": [
+          {
+            "policy": "deny-all"
+          }
+        ]
+      },
       "consent": "deny",
       "expect": {
         "outcome": "consent-required",
@@ -955,7 +2055,15 @@
       "id": "D15-storage-sync-remove",
       "manifest": "manifests/cmp-reader.json",
       "control": "P15-storage-sync-remove",
-      "call": {"namespace": "chrome.storage.sync", "method": "remove", "args": [["policy"]]},
+      "call": {
+        "namespace": "chrome.storage.sync",
+        "method": "remove",
+        "args": [
+          [
+            "policy"
+          ]
+        ]
+      },
       "consent": "deny",
       "expect": {
         "outcome": "consent-required",
@@ -971,7 +2079,13 @@
       "id": "D16-tabs-get",
       "manifest": "manifests/cmp-reader.json",
       "control": "P16-tabs-get",
-      "call": {"namespace": "chrome.tabs", "method": "get", "args": [7]},
+      "call": {
+        "namespace": "chrome.tabs",
+        "method": "get",
+        "args": [
+          7
+        ]
+      },
       "consent": "deny",
       "expect": {
         "outcome": "consent-required",
@@ -987,7 +2101,16 @@
       "id": "D17-tabs-update",
       "manifest": "manifests/cmp-reader.json",
       "control": "P17-tabs-update",
-      "call": {"namespace": "chrome.tabs", "method": "update", "args": [7, {"url": "https://news.example/privacy"}]},
+      "call": {
+        "namespace": "chrome.tabs",
+        "method": "update",
+        "args": [
+          7,
+          {
+            "url": "https://news.example/privacy"
+          }
+        ]
+      },
       "consent": "deny",
       "expect": {
         "outcome": "consent-required",
@@ -1003,7 +2126,13 @@
       "id": "D18-tabs-remove",
       "manifest": "manifests/cmp-reader.json",
       "control": "P18-tabs-remove",
-      "call": {"namespace": "chrome.tabs", "method": "remove", "args": [7]},
+      "call": {
+        "namespace": "chrome.tabs",
+        "method": "remove",
+        "args": [
+          7
+        ]
+      },
       "consent": "deny",
       "expect": {
         "outcome": "consent-required",
@@ -1019,7 +2148,15 @@
       "id": "D19-cookies-getAll",
       "manifest": "manifests/cmp-reader.json",
       "control": "P19-cookies-getAll",
-      "call": {"namespace": "chrome.cookies", "method": "getAll", "args": [{"url": "https://news.example/"}]},
+      "call": {
+        "namespace": "chrome.cookies",
+        "method": "getAll",
+        "args": [
+          {
+            "url": "https://news.example/"
+          }
+        ]
+      },
       "consent": "deny",
       "expect": {
         "outcome": "consent-required",
@@ -1035,7 +2172,16 @@
       "id": "D20-cookies-remove",
       "manifest": "manifests/cmp-reader.json",
       "control": "P20-cookies-remove",
-      "call": {"namespace": "chrome.cookies", "method": "remove", "args": [{"url": "https://news.example/", "name": "euconsent-v2"}]},
+      "call": {
+        "namespace": "chrome.cookies",
+        "method": "remove",
+        "args": [
+          {
+            "url": "https://news.example/",
+            "name": "euconsent-v2"
+          }
+        ]
+      },
       "consent": "deny",
       "expect": {
         "outcome": "consent-required",
@@ -1052,28 +2198,83 @@
       "manifest": "manifests/cmp-reader.json",
       "steps": [
         {
-          "call": {"namespace": "chrome.tabs", "method": "create", "args": [{"url": "https://news.example/privacy", "index": 2, "active": true}]},
+          "call": {
+            "namespace": "chrome.tabs",
+            "method": "create",
+            "args": [
+              {
+                "url": "https://news.example/privacy",
+                "index": 2,
+                "active": true
+              }
+            ]
+          },
           "consent": "approve",
           "expect": {
             "outcome": "consent-required",
             "prompts": 1,
             "executed": true,
-            "resultSubset": {"windowId": 1, "index": 2, "active": true},
+            "resultSubset": {
+              "windowId": 1,
+              "index": 2,
+              "active": true
+            },
             "stateAfter": {
               "tabs": [
-                {"id": 7, "windowId": 1, "index": 0, "active": false, "url": "https://news.example/article", "title": "Article"},
-                {"id": 8, "windowId": 1, "index": 1, "active": false, "url": "https://ads.example/", "title": "Ads"},
-                {"windowId": 1, "index": 2, "active": true, "url": "https://news.example/privacy", "title": "Privacy"}
+                {
+                  "id": 7,
+                  "windowId": 1,
+                  "index": 0,
+                  "active": false,
+                  "url": "https://news.example/article",
+                  "title": "Article"
+                },
+                {
+                  "id": 8,
+                  "windowId": 1,
+                  "index": 1,
+                  "active": false,
+                  "url": "https://ads.example/",
+                  "title": "Ads"
+                },
+                {
+                  "windowId": 1,
+                  "index": 2,
+                  "active": true,
+                  "url": "https://news.example/privacy",
+                  "title": "Privacy"
+                }
               ]
             },
-            "requests": [{"method": "GET", "url": "https://news.example/privacy"}],
+            "requests": [
+              {
+                "method": "GET",
+                "url": "https://news.example/privacy"
+              }
+            ],
             "audit": [
-              {":audit/event": ":webext/effect", ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop", ":webext/operation": "chrome.tabs.create", ":consent/decision": ":approved", ":origin": "https://news.example"}
+              {
+                ":audit/event": ":webext/effect",
+                ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop",
+                ":webext/operation": "chrome.tabs.create",
+                ":consent/decision": ":approved",
+                ":origin": "https://news.example"
+              }
             ]
           }
         },
         {
-          "call": {"namespace": "chrome.tabs", "method": "create", "args": [{"url": "https://news.example/privacy", "index": 2, "active": true}]},
+          "call": {
+            "namespace": "chrome.tabs",
+            "method": "create",
+            "args": [
+              {
+                "url": "https://news.example/privacy",
+                "index": 2,
+                "active": true
+              }
+            ]
+          },
           "consent": "deny",
           "expect": {
             "outcome": "consent-required",
@@ -1092,28 +2293,97 @@
       "manifest": "manifests/cmp-reader.json",
       "steps": [
         {
-          "call": {"namespace": "chrome.cookies", "method": "set", "args": [{"url": "https://news.example/", "name": "euconsent-v2", "value": "deny-all"}]},
+          "call": {
+            "namespace": "chrome.cookies",
+            "method": "set",
+            "args": [
+              {
+                "url": "https://news.example/",
+                "name": "euconsent-v2",
+                "value": "deny-all"
+              }
+            ]
+          },
           "consent": "approve",
           "expect": {
             "outcome": "consent-required",
             "prompts": 1,
             "executed": true,
-            "result": {"name": "euconsent-v2", "value": "deny-all", "domain": "news.example", "hostOnly": true, "path": "/", "secure": false, "httpOnly": false, "sameSite": "unspecified", "session": true, "storeId": "0"},
+            "result": {
+              "name": "euconsent-v2",
+              "value": "deny-all",
+              "domain": "news.example",
+              "hostOnly": true,
+              "path": "/",
+              "secure": false,
+              "httpOnly": false,
+              "sameSite": "unspecified",
+              "session": true,
+              "storeId": "0"
+            },
             "stateAfter": {
               "cookies": [
-                {"name": "euconsent-v2", "value": "deny-all", "domain": "news.example", "hostOnly": true, "path": "/", "secure": false, "httpOnly": false, "sameSite": "unspecified", "session": true, "storeId": "0"},
-                {"name": "lang", "value": "en", "domain": "news.example", "hostOnly": true, "path": "/", "secure": false, "httpOnly": false, "sameSite": "unspecified", "session": true, "storeId": "0"},
-                {"name": "id", "value": "a1", "domain": "ads.example", "hostOnly": true, "path": "/", "secure": false, "httpOnly": false, "sameSite": "unspecified", "session": true, "storeId": "0"}
+                {
+                  "name": "euconsent-v2",
+                  "value": "deny-all",
+                  "domain": "news.example",
+                  "hostOnly": true,
+                  "path": "/",
+                  "secure": false,
+                  "httpOnly": false,
+                  "sameSite": "unspecified",
+                  "session": true,
+                  "storeId": "0"
+                },
+                {
+                  "name": "lang",
+                  "value": "en",
+                  "domain": "news.example",
+                  "hostOnly": true,
+                  "path": "/",
+                  "secure": false,
+                  "httpOnly": false,
+                  "sameSite": "unspecified",
+                  "session": true,
+                  "storeId": "0"
+                },
+                {
+                  "name": "id",
+                  "value": "a1",
+                  "domain": "ads.example",
+                  "hostOnly": true,
+                  "path": "/",
+                  "secure": false,
+                  "httpOnly": false,
+                  "sameSite": "unspecified",
+                  "session": true,
+                  "storeId": "0"
+                }
               ]
             },
             "requests": [],
             "audit": [
-              {":audit/event": ":webext/effect", ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop", ":webext/operation": "chrome.cookies.set", ":consent/decision": ":approved", ":origin": "https://news.example"}
+              {
+                ":audit/event": ":webext/effect",
+                ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop",
+                ":webext/operation": "chrome.cookies.set",
+                ":consent/decision": ":approved",
+                ":origin": "https://news.example"
+              }
             ]
           }
         },
         {
-          "call": {"namespace": "chrome.cookies", "method": "remove", "args": [{"url": "https://news.example/", "name": "euconsent-v2"}]},
+          "call": {
+            "namespace": "chrome.cookies",
+            "method": "remove",
+            "args": [
+              {
+                "url": "https://news.example/",
+                "name": "euconsent-v2"
+              }
+            ]
+          },
           "consent": "none",
           "expect": {
             "outcome": "consent-required",
@@ -1131,22 +2401,57 @@
       "manifest": "manifests/cmp-reader.json",
       "steps": [
         {
-          "call": {"namespace": "chrome.cookies", "method": "get", "args": [{"url": "https://news.example/", "name": "euconsent-v2"}]},
+          "call": {
+            "namespace": "chrome.cookies",
+            "method": "get",
+            "args": [
+              {
+                "url": "https://news.example/",
+                "name": "euconsent-v2"
+              }
+            ]
+          },
           "consent": "approve",
           "expect": {
             "outcome": "consent-required",
             "prompts": 1,
             "executed": true,
-            "result": {"name": "euconsent-v2", "value": "allow-all", "domain": "news.example", "hostOnly": true, "path": "/", "secure": false, "httpOnly": false, "sameSite": "unspecified", "session": true, "storeId": "0"},
+            "result": {
+              "name": "euconsent-v2",
+              "value": "allow-all",
+              "domain": "news.example",
+              "hostOnly": true,
+              "path": "/",
+              "secure": false,
+              "httpOnly": false,
+              "sameSite": "unspecified",
+              "session": true,
+              "storeId": "0"
+            },
             "stateAfter": "unchanged",
             "requests": [],
             "audit": [
-              {":audit/event": ":webext/effect", ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop", ":webext/operation": "chrome.cookies.get", ":consent/decision": ":approved", ":origin": "https://news.example"}
+              {
+                ":audit/event": ":webext/effect",
+                ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop",
+                ":webext/operation": "chrome.cookies.get",
+                ":consent/decision": ":approved",
+                ":origin": "https://news.example"
+              }
             ]
           }
         },
         {
-          "call": {"namespace": "chrome.cookies", "method": "get", "args": [{"url": "https://news.example/", "name": "euconsent-v2"}]},
+          "call": {
+            "namespace": "chrome.cookies",
+            "method": "get",
+            "args": [
+              {
+                "url": "https://news.example/",
+                "name": "euconsent-v2"
+              }
+            ]
+          },
           "consent": "deny",
           "expect": {
             "outcome": "consent-required",
@@ -1165,22 +2470,48 @@
       "manifest": "manifests/cmp-reader.json",
       "steps": [
         {
-          "call": {"namespace": "chrome.storage.sync", "method": "get", "args": [["policy", "region"]]},
+          "call": {
+            "namespace": "chrome.storage.sync",
+            "method": "get",
+            "args": [
+              [
+                "policy",
+                "region"
+              ]
+            ]
+          },
           "consent": "approve",
           "expect": {
             "outcome": "consent-required",
             "prompts": 1,
             "executed": true,
-            "result": {"policy": "ask", "region": "eu"},
+            "result": {
+              "policy": "ask",
+              "region": "eu"
+            },
             "stateAfter": "unchanged",
             "requests": [],
             "audit": [
-              {":audit/event": ":webext/effect", ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop", ":webext/operation": "chrome.storage.sync.get", ":consent/decision": ":approved", ":origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop"}
+              {
+                ":audit/event": ":webext/effect",
+                ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop",
+                ":webext/operation": "chrome.storage.sync.get",
+                ":consent/decision": ":approved",
+                ":origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop"
+              }
             ]
           }
         },
         {
-          "call": {"namespace": "chrome.storage.sync", "method": "set", "args": [{"policy": "deny-all"}]},
+          "call": {
+            "namespace": "chrome.storage.sync",
+            "method": "set",
+            "args": [
+              {
+                "policy": "deny-all"
+              }
+            ]
+          },
           "consent": "none",
           "expect": {
             "outcome": "consent-required",
@@ -1198,36 +2529,109 @@
       "manifest": "manifests/cmp-reader.json",
       "steps": [
         {
-          "call": {"namespace": "chrome.runtime", "method": "onMessage.addListener", "args": [{"$listener": {"respond": {"vendors": ["v1", "v2"]}}}]},
+          "call": {
+            "namespace": "chrome.runtime",
+            "method": "onMessage.addListener",
+            "args": [
+              {
+                "$listener": {
+                  "respond": {
+                    "vendors": [
+                      "v1",
+                      "v2"
+                    ]
+                  }
+                }
+              }
+            ]
+          },
           "consent": "approve",
           "expect": {
             "outcome": "consent-required",
             "prompts": 1,
             "executed": true,
-            "result": {"$undefined": true},
+            "result": {
+              "$undefined": true
+            },
             "stateAfter": {
-              "listeners": [{"context": "service_worker", "event": "chrome.runtime.onMessage", "respond": {"vendors": ["v1", "v2"]}}]
+              "listeners": [
+                {
+                  "context": "service_worker",
+                  "event": "chrome.runtime.onMessage",
+                  "respond": {
+                    "vendors": [
+                      "v1",
+                      "v2"
+                    ]
+                  }
+                }
+              ]
             },
             "requests": [],
             "audit": [
-              {":audit/event": ":webext/effect", ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop", ":webext/operation": "chrome.runtime.onMessage.addListener", ":consent/decision": ":approved", ":origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop"}
+              {
+                ":audit/event": ":webext/effect",
+                ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop",
+                ":webext/operation": "chrome.runtime.onMessage.addListener",
+                ":consent/decision": ":approved",
+                ":origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop"
+              }
             ]
           }
         },
         {
-          "context": {"kind": "content_script", "tabId": 7, "frameId": 0},
-          "call": {"namespace": "chrome.runtime", "method": "sendMessage", "args": [{"type": "read-consent"}]},
+          "context": {
+            "kind": "content_script",
+            "tabId": 7,
+            "frameId": 0
+          },
+          "call": {
+            "namespace": "chrome.runtime",
+            "method": "sendMessage",
+            "args": [
+              {
+                "type": "read-consent"
+              }
+            ]
+          },
           "consent": "approve",
           "expect": {
             "outcome": "consent-required",
             "prompts": 1,
             "executed": true,
-            "result": {"vendors": ["v1", "v2"]},
-            "delivered": [{"context": "service_worker", "message": {"type": "read-consent"}, "sender": {"id": "abcdefghijklmnopabcdefghijklmnop", "url": "https://news.example/article", "origin": "https://news.example", "frameId": 0, "tab": {"id": 7}}}],
+            "result": {
+              "vendors": [
+                "v1",
+                "v2"
+              ]
+            },
+            "delivered": [
+              {
+                "context": "service_worker",
+                "message": {
+                  "type": "read-consent"
+                },
+                "sender": {
+                  "id": "abcdefghijklmnopabcdefghijklmnop",
+                  "url": "https://news.example/article",
+                  "origin": "https://news.example",
+                  "frameId": 0,
+                  "tab": {
+                    "id": 7
+                  }
+                }
+              }
+            ],
             "stateAfter": "unchanged",
             "requests": [],
             "audit": [
-              {":audit/event": ":webext/effect", ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop", ":webext/operation": "chrome.runtime.sendMessage", ":consent/decision": ":approved", ":origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop"}
+              {
+                ":audit/event": ":webext/effect",
+                ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop",
+                ":webext/operation": "chrome.runtime.sendMessage",
+                ":consent/decision": ":approved",
+                ":origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop"
+              }
             ]
           }
         }
@@ -1238,7 +2642,15 @@
       "manifest": "manifests/cmp-reader.json",
       "steps": [
         {
-          "call": {"namespace": "chrome.storage.local", "method": "set", "args": [{"vendors": []}]},
+          "call": {
+            "namespace": "chrome.storage.local",
+            "method": "set",
+            "args": [
+              {
+                "vendors": []
+              }
+            ]
+          },
           "consent": "deny",
           "expect": {
             "outcome": "consent-required",
@@ -1251,22 +2663,44 @@
           }
         },
         {
-          "call": {"namespace": "chrome.storage.local", "method": "set", "args": [{"vendors": []}]},
+          "call": {
+            "namespace": "chrome.storage.local",
+            "method": "set",
+            "args": [
+              {
+                "vendors": []
+              }
+            ]
+          },
           "consent": "approve",
           "expect": {
             "outcome": "consent-required",
             "prompts": 1,
             "executed": true,
-            "result": {"$undefined": true},
+            "result": {
+              "$undefined": true
+            },
             "stateAfter": {
               "storage": {
-                "local": {"vendors": [], "locale": "ja"},
-                "sync": {"policy": "ask", "region": "eu"}
+                "local": {
+                  "vendors": [],
+                  "locale": "ja"
+                },
+                "sync": {
+                  "policy": "ask",
+                  "region": "eu"
+                }
               }
             },
             "requests": [],
             "audit": [
-              {":audit/event": ":webext/effect", ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop", ":webext/operation": "chrome.storage.local.set", ":consent/decision": ":approved", ":origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop"}
+              {
+                ":audit/event": ":webext/effect",
+                ":webext/extension-id": "abcdefghijklmnopabcdefghijklmnop",
+                ":webext/operation": "chrome.storage.local.set",
+                ":consent/decision": ":approved",
+                ":origin": "chrome-extension://abcdefghijklmnopabcdefghijklmnop"
+              }
             ]
           }
         }
@@ -1279,18 +2713,60 @@
       "expect": {
         "outcome": "install-admit",
         "descriptor": {
-          "identity": {"id": "abcdefghijklmnopabcdefghijklmnop", "name": "cmp-reader fixture", "version": "1.0.0"},
-          "consent": "each-operation",
-          "namespaces": ["chrome.runtime", "chrome.storage", "chrome.tabs", "chrome.cookies", "chrome.scripting"],
-          "operations": {
-            "chrome.runtime": ["id", "getURL", "sendMessage", "onMessage.addListener"],
-            "chrome.storage": ["local.get", "local.set", "local.remove", "sync.get", "sync.set", "sync.remove"],
-            "chrome.tabs": ["query", "get", "create", "update", "remove"],
-            "chrome.cookies": ["get", "getAll", "set", "remove"],
-            "chrome.scripting": ["executeScript"]
+          "identity": {
+            "id": "abcdefghijklmnopabcdefghijklmnop",
+            "name": "cmp-reader fixture",
+            "version": "1.0.0"
           },
-          "endpointOrigins": ["https://news.example"],
-          "dataCategories": ["storage", "cookies", "tabs", "scripting"]
+          "consent": "each-operation",
+          "namespaces": [
+            "chrome.runtime",
+            "chrome.storage",
+            "chrome.tabs",
+            "chrome.cookies",
+            "chrome.scripting"
+          ],
+          "operations": {
+            "chrome.runtime": [
+              "id",
+              "getURL",
+              "sendMessage",
+              "onMessage.addListener"
+            ],
+            "chrome.storage": [
+              "local.get",
+              "local.set",
+              "local.remove",
+              "sync.get",
+              "sync.set",
+              "sync.remove"
+            ],
+            "chrome.tabs": [
+              "query",
+              "get",
+              "create",
+              "update",
+              "remove"
+            ],
+            "chrome.cookies": [
+              "get",
+              "getAll",
+              "set",
+              "remove"
+            ],
+            "chrome.scripting": [
+              "executeScript"
+            ]
+          },
+          "endpointOrigins": [
+            "https://news.example"
+          ],
+          "dataCategories": [
+            "storage",
+            "cookies",
+            "tabs",
+            "scripting"
+          ]
         }
       }
     },
@@ -1301,21 +2777,460 @@
       "expect": {
         "outcome": "install-admit",
         "descriptor": {
-          "identity": {"id": "abcdefghijklmnopabcdefghijklmnop", "name": "declarativeNetRequest fixture", "version": "1.0.0"},
-          "consent": "each-operation",
-          "namespaces": ["chrome.runtime"],
-          "operations": {
-            "chrome.runtime": ["id", "getURL", "sendMessage", "onMessage.addListener"]
+          "identity": {
+            "id": "abcdefghijklmnopabcdefghijklmnop",
+            "name": "declarativeNetRequest fixture",
+            "version": "1.0.0"
           },
-          "endpointOrigins": ["https://news.example"],
-          "dataCategories": ["declarativeNetRequest"],
+          "consent": "each-operation",
+          "namespaces": [
+            "chrome.runtime"
+          ],
+          "operations": {
+            "chrome.runtime": [
+              "id",
+              "getURL",
+              "sendMessage",
+              "onMessage.addListener"
+            ]
+          },
+          "endpointOrigins": [
+            "https://news.example"
+          ],
+          "dataCategories": [
+            "declarativeNetRequest"
+          ],
           "rulesets": [
-            {"id": "static", "enabled": true, "path": "rules.json", "rules": [{"id": 1, "priority": 1, "action": {"type": "block"}, "condition": {"urlFilter": "/tracker.js", "requestDomains": ["news.example"], "resourceTypes": ["script"]}}]}
+            {
+              "id": "static",
+              "enabled": true,
+              "path": "rules.json",
+              "rules": [
+                {
+                  "id": 1,
+                  "priority": 1,
+                  "action": {
+                    "type": "block"
+                  },
+                  "condition": {
+                    "urlFilter": "|https://news.example/tracker.js",
+                    "requestDomains": [
+                      "news.example"
+                    ],
+                    "resourceTypes": [
+                      "script"
+                    ]
+                  }
+                }
+              ]
+            }
           ]
         },
         "afterApproval": {
-          "userNavigate": {"tabId": 7, "url": "https://news.example/tracked"},
-          "requests": [{"method": "GET", "url": "https://news.example/tracked"}, {"method": "GET", "url": "https://news.example/app.js"}]
+          "userNavigate": {
+            "tabId": 7,
+            "url": "https://news.example/tracked"
+          },
+          "requests": [
+            {
+              "method": "GET",
+              "url": "https://news.example/tracked"
+            },
+            {
+              "method": "GET",
+              "url": "https://news.example/app.js"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "I03-dnr-static-no-effect-subdomain",
+      "manifest": "manifests/dnr.json",
+      "install": true,
+      "expect": {
+        "outcome": "install-admit",
+        "descriptor": {
+          "identity": {
+            "id": "abcdefghijklmnopabcdefghijklmnop",
+            "name": "declarativeNetRequest fixture",
+            "version": "1.0.0"
+          },
+          "consent": "each-operation",
+          "namespaces": [
+            "chrome.runtime"
+          ],
+          "operations": {
+            "chrome.runtime": [
+              "id",
+              "getURL",
+              "sendMessage",
+              "onMessage.addListener"
+            ]
+          },
+          "endpointOrigins": [
+            "https://news.example"
+          ],
+          "dataCategories": [
+            "declarativeNetRequest"
+          ],
+          "rulesets": [
+            {
+              "id": "static",
+              "enabled": true,
+              "path": "rules.json",
+              "rules": [
+                {
+                  "id": 1,
+                  "priority": 1,
+                  "action": {
+                    "type": "block"
+                  },
+                  "condition": {
+                    "urlFilter": "|https://news.example/tracker.js",
+                    "requestDomains": [
+                      "news.example"
+                    ],
+                    "resourceTypes": [
+                      "script"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "afterApproval": {
+          "userNavigate": {
+            "tabId": 7,
+            "url": "https://sub.news.example/tracked"
+          },
+          "requests": [
+            {
+              "method": "GET",
+              "url": "https://sub.news.example/tracked"
+            },
+            {
+              "method": "GET",
+              "url": "https://sub.news.example/tracker.js"
+            },
+            {
+              "method": "GET",
+              "url": "https://sub.news.example/app.js"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "I04-dnr-static-no-effect-scheme",
+      "manifest": "manifests/dnr.json",
+      "install": true,
+      "expect": {
+        "outcome": "install-admit",
+        "descriptor": {
+          "identity": {
+            "id": "abcdefghijklmnopabcdefghijklmnop",
+            "name": "declarativeNetRequest fixture",
+            "version": "1.0.0"
+          },
+          "consent": "each-operation",
+          "namespaces": [
+            "chrome.runtime"
+          ],
+          "operations": {
+            "chrome.runtime": [
+              "id",
+              "getURL",
+              "sendMessage",
+              "onMessage.addListener"
+            ]
+          },
+          "endpointOrigins": [
+            "https://news.example"
+          ],
+          "dataCategories": [
+            "declarativeNetRequest"
+          ],
+          "rulesets": [
+            {
+              "id": "static",
+              "enabled": true,
+              "path": "rules.json",
+              "rules": [
+                {
+                  "id": 1,
+                  "priority": 1,
+                  "action": {
+                    "type": "block"
+                  },
+                  "condition": {
+                    "urlFilter": "|https://news.example/tracker.js",
+                    "requestDomains": [
+                      "news.example"
+                    ],
+                    "resourceTypes": [
+                      "script"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "afterApproval": {
+          "userNavigate": {
+            "tabId": 7,
+            "url": "http://news.example/tracked"
+          },
+          "requests": [
+            {
+              "method": "GET",
+              "url": "http://news.example/tracked"
+            },
+            {
+              "method": "GET",
+              "url": "http://news.example/tracker.js"
+            },
+            {
+              "method": "GET",
+              "url": "http://news.example/app.js"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "I05-dnr-static-no-effect-port",
+      "manifest": "manifests/dnr.json",
+      "install": true,
+      "expect": {
+        "outcome": "install-admit",
+        "descriptor": {
+          "identity": {
+            "id": "abcdefghijklmnopabcdefghijklmnop",
+            "name": "declarativeNetRequest fixture",
+            "version": "1.0.0"
+          },
+          "consent": "each-operation",
+          "namespaces": [
+            "chrome.runtime"
+          ],
+          "operations": {
+            "chrome.runtime": [
+              "id",
+              "getURL",
+              "sendMessage",
+              "onMessage.addListener"
+            ]
+          },
+          "endpointOrigins": [
+            "https://news.example"
+          ],
+          "dataCategories": [
+            "declarativeNetRequest"
+          ],
+          "rulesets": [
+            {
+              "id": "static",
+              "enabled": true,
+              "path": "rules.json",
+              "rules": [
+                {
+                  "id": 1,
+                  "priority": 1,
+                  "action": {
+                    "type": "block"
+                  },
+                  "condition": {
+                    "urlFilter": "|https://news.example/tracker.js",
+                    "requestDomains": [
+                      "news.example"
+                    ],
+                    "resourceTypes": [
+                      "script"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "afterApproval": {
+          "userNavigate": {
+            "tabId": 7,
+            "url": "https://news.example:8443/tracked"
+          },
+          "requests": [
+            {
+              "method": "GET",
+              "url": "https://news.example:8443/tracked"
+            },
+            {
+              "method": "GET",
+              "url": "https://news.example:8443/tracker.js"
+            },
+            {
+              "method": "GET",
+              "url": "https://news.example:8443/app.js"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "I06-dnr-static-declared-page-mixed-requests",
+      "manifest": "manifests/dnr.json",
+      "install": true,
+      "expect": {
+        "outcome": "install-admit",
+        "descriptor": {
+          "identity": {
+            "id": "abcdefghijklmnopabcdefghijklmnop",
+            "name": "declarativeNetRequest fixture",
+            "version": "1.0.0"
+          },
+          "consent": "each-operation",
+          "namespaces": [
+            "chrome.runtime"
+          ],
+          "operations": {
+            "chrome.runtime": [
+              "id",
+              "getURL",
+              "sendMessage",
+              "onMessage.addListener"
+            ]
+          },
+          "endpointOrigins": [
+            "https://news.example"
+          ],
+          "dataCategories": [
+            "declarativeNetRequest"
+          ],
+          "rulesets": [
+            {
+              "id": "static",
+              "enabled": true,
+              "path": "rules.json",
+              "rules": [
+                {
+                  "id": 1,
+                  "priority": 1,
+                  "action": {
+                    "type": "block"
+                  },
+                  "condition": {
+                    "urlFilter": "|https://news.example/tracker.js",
+                    "requestDomains": [
+                      "news.example"
+                    ],
+                    "resourceTypes": [
+                      "script"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "afterApproval": {
+          "userNavigate": {
+            "tabId": 7,
+            "url": "https://news.example/mixed"
+          },
+          "requests": [
+            {
+              "method": "GET",
+              "url": "https://news.example/mixed"
+            },
+            {
+              "method": "GET",
+              "url": "https://sub.news.example/tracker.js"
+            },
+            {
+              "method": "GET",
+              "url": "https://news.example:8443/tracker.js"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "I07-dnr-static-no-effect-undeclared-initiator",
+      "manifest": "manifests/dnr.json",
+      "install": true,
+      "expect": {
+        "outcome": "install-admit",
+        "descriptor": {
+          "identity": {
+            "id": "abcdefghijklmnopabcdefghijklmnop",
+            "name": "declarativeNetRequest fixture",
+            "version": "1.0.0"
+          },
+          "consent": "each-operation",
+          "namespaces": [
+            "chrome.runtime"
+          ],
+          "operations": {
+            "chrome.runtime": [
+              "id",
+              "getURL",
+              "sendMessage",
+              "onMessage.addListener"
+            ]
+          },
+          "endpointOrigins": [
+            "https://news.example"
+          ],
+          "dataCategories": [
+            "declarativeNetRequest"
+          ],
+          "rulesets": [
+            {
+              "id": "static",
+              "enabled": true,
+              "path": "rules.json",
+              "rules": [
+                {
+                  "id": 1,
+                  "priority": 1,
+                  "action": {
+                    "type": "block"
+                  },
+                  "condition": {
+                    "urlFilter": "|https://news.example/tracker.js",
+                    "requestDomains": [
+                      "news.example"
+                    ],
+                    "resourceTypes": [
+                      "script"
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "afterApproval": {
+          "userNavigate": {
+            "tabId": 7,
+            "url": "https://sub.news.example/mixed"
+          },
+          "requests": [
+            {
+              "method": "GET",
+              "url": "https://sub.news.example/mixed"
+            },
+            {
+              "method": "GET",
+              "url": "https://news.example/tracker.js"
+            },
+            {
+              "method": "GET",
+              "url": "https://sub.news.example/tracker.js"
+            }
+          ]
         }
       }
     }
