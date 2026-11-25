@@ -2,9 +2,11 @@
 
 Kotoba-only, WASM-only browser engine orchestrator.
 
-This is not a Chrome/Servo wrapper and it is not a JavaScript-compatibility
-browser. It is the kotoba-native browser surface, executed as kotoba-clj/WASM
-guests against explicit host ABIs:
+This is not a Chrome/Servo wrapper. Web and Chrome-extension compatibility is
+limited to the bounded, measured scope defined by
+[ADR 0003](docs/adr/0003-brave-class-web-compatible-browser.md). This is the
+kotoba-native browser surface, executed as kotoba-clj/WASM guests against
+explicit host ABIs:
 
 ```text
 navigation request
@@ -61,13 +63,15 @@ kotoba-clj/WASM guests.
 
 ## Non-goals
 
-- No JavaScript compatibility layer.
+- No JavaScript, web or extension compatibility beyond the bounded scope of
+  [ADR 0003](docs/adr/0003-brave-class-web-compatible-browser.md), which is the
+  authority for that scope.
 - No browser DOM API calls as the engine substrate.
 - No ambient network/filesystem/HID/GPU access.
 - No Playwright/Chrome dependency for execution.
 - No JVM or native process as the production document runtime.
 
-Document scripts should target kotoba-clj/WASM capabilities, not JS.
+Kotoba document scripts should target kotoba-clj/WASM capabilities, not JS.
 
 ## OS UI
 

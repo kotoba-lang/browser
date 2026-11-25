@@ -1,7 +1,10 @@
 # ADR-0003: Brave-class web-compatible browser with bounded Chrome extension compatibility
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-10-26
+- Accepted: 2026-11-23 — owner ruling on KOTOBA-147, option (b): every
+  `chrome.*` operation requires `consent: "each-operation"`; there is no
+  host-local prompt-less exception
 - Tracking: [KOTOBA-146](https://linear.app/kotobalabs/issue/KOTOBA-146) (plan), [KOTOBA-147](https://linear.app/kotobalabs/issue/KOTOBA-147) (this ADR)
 
 ## Context
@@ -64,9 +67,9 @@ quirks, service workers, CSP and cross-origin edge cases. This ADR starts that
 "different project" **under the same invariants**, and makes it measurement-
 first precisely because the warning was right about scale.
 
-Follow-up required on acceptance: `README.md` L5/L64 non-goals are rewritten to
-point here. This ADR alone does not edit them, so the repository has one
-authority for the change.
+Follow-up on acceptance (done with the accepted update): the `README.md` L5/L64
+non-goals are rewritten to point here, so the repository has one authority for
+the bounded web- and extension-compatibility scope.
 
 ### Ruling 2 — Chrome compatibility is a bounded, declared, consent-mapped subset
 
@@ -84,18 +87,20 @@ Mapping rules:
    (present on `origin/main`; product-local copies remain prohibited).
 2. **Install-time consent = descriptor approval**, displayed with the
    extension's identity, origins, namespaces and data categories.
-3. **Two runtime tiers over that approval:**
-   - *declared reads inside the approved scope* (`chrome.cookies.get` on an
-     approved origin, `chrome.storage.local.get`, `chrome.tabs.query` bounded
-     to declared match patterns) are allowed after descriptor validation and
-     audited as datoms;
-   - *state-changing or scope-expanding operations* (`cookies.set`/
-     `remove`, `tabs.create`/`remove`, `scripting.executeScript` into a page,
-     `permissions.request`, any fetch to an undeclared endpoint) require
-     **fresh per-operation consent immediately before invocation; denial sends
-     nothing**.
+3. **Every `chrome.*` operation requires fresh per-operation consent**
+   (`consent: "each-operation"`), requested **immediately before invocation**.
+   This covers the whole v1 slice without exception — reads (`cookies.get`,
+   `storage.local.get`, `tabs.query`), extension-local members (`runtime.id`,
+   `runtime.getURL`, `runtime.onMessage.addListener`) and state-changing
+   operations alike. There is no prompt-less class of operation, and neither
+   descriptor approval nor an earlier approval of the same operation carries
+   over to the next invocation. **Denial sends nothing and executes nothing.**
+   All host effects are audited as datoms. This is the rule the canonical
+   broker already enforces: it refuses a descriptor whose operation declares
+   any other `consent` value.
 4. **Fail closed**: undeclared namespace, origin, argument shape or permission
-   errors; never a silent grant, never an app-origin proxy.
+   errors before any consent prompt; consent cannot widen the descriptor. Never
+   a silent grant, never an app-origin proxy.
 5. **A browser or OS permission prompt — including the extension install
    prompt — is never treated as Kotoba operation consent** (AGENTS.md L44
    extended to extensions; L65 unchanged).
@@ -104,23 +109,28 @@ Mapping rules:
    path.
 
 Stated deviation, part of the documented subset: an extension written for
-Chrome's ambient authority will meet descriptor approval and fresh-consent
-prompts where Chrome proceeds silently, and undeclared capabilities fail
-closed. That is a contract requirement, not a bug to hide.
+Chrome's ambient authority will meet descriptor approval **and** a fresh-consent
+prompt for every `chrome.*` operation — reads included — where Chrome proceeds
+silently, and undeclared capabilities fail closed. A member that is synchronous
+in Chrome (`runtime.id`, `runtime.getURL`, `onMessage.addListener`) keeps its
+synchronous shape; the host suspends the calling extension context until the
+prompt is answered. That is a contract requirement, not a bug to hide.
 
 ### Ruling 3 — the compatibility score is a pinned fixture corpus
 
 No "Chrome API compatible" claim exists outside this corpus:
 
-- **MV3 manifest keys (v1):** `manifest_version` (3), `permissions`,
-  `host_permissions`, `content_scripts`, `background.service_worker`, `action`,
-  `commands`.
-- **`chrome.*` namespace slice (v1):** `chrome.runtime`
-  (`onMessage`/`sendMessage`/`getURL`/`id`), `chrome.storage`
-  (`local`/`sync` get/set/remove), `chrome.tabs` (`query`/`get` read;
-  `create`/`update`/`remove` consent tier), `chrome.cookies` (`get`/`getAll`
-  read; `set`/`remove` consent tier), `chrome.scripting` (`executeScript`
-  within declared matches).
+- **MV3 manifest keys (v1):** `manifest_version` (3), `name`, `version`,
+  `permissions`, `host_permissions`, `content_scripts`,
+  `background.service_worker`, `action`, `commands`,
+  `declarative_net_request.rule_resources` (static rulesets only).
+- **`chrome.*` namespace slice (v1), every operation `each-operation`:**
+  `chrome.runtime` (`onMessage.addListener`/`sendMessage`/`getURL`/`id`),
+  `chrome.storage` (`local`/`sync` get/set/remove), `chrome.tabs`
+  (`query`/`get`/`create`/`update`/`remove` within declared matches),
+  `chrome.cookies` (`get`/`getAll`/`set`/`remove` on declared origins),
+  `chrome.scripting` (`executeScript` within declared matches).
+- **Frozen corpus:** `conformance/webext/v1/`, pinned by its `SHA256SUMS`.
 - **Negative fixtures (mandatory):** undeclared origin, undeclared permission,
   overscoped `tabs.query`, deny-then-network (proves no request is sent),
   undeclared `chrome.*` namespace.
@@ -176,10 +186,11 @@ Chromium fork, and it does not mean a browser-store distribution.
   with a pinned, measurable definition instead of an open-ended "browser
   parity" ambition; every claim routes back to a ledger and a fixture.
 - Capability invariants and the per-operation consent contract survive intact;
-  extension ambient authority is converted into declarations and two-tier
-  consent rather than granted.
+  extension ambient authority is converted into declarations and fresh consent
+  for every `chrome.*` operation rather than granted. The cost is prompt volume:
+  an extension that reads often prompts often.
 - Scope is genuinely large — ADR-0001's warning stands. The mitigation is the
   phase gates: each phase is admitted by measured evidence, and a phase that
   cannot produce its ledger does not advance.
-- On acceptance, `README.md` L5/L64 need the follow-up edit named in Ruling 1,
+- With acceptance, the `README.md` L5/L64 follow-up named in Ruling 1 is made,
   and KOTOBA-148–151 proceed from Todo.
