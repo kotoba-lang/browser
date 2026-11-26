@@ -1715,6 +1715,24 @@
       }
     },
     {
+      "id": "N31-dnr-static-redirect-action",
+      "manifest": "manifests/dnr-redirect.json",
+      "install": true,
+      "expect": {
+        "outcome": "install-refuse",
+        "reason": "dnr-action-outside-v1"
+      }
+    },
+    {
+      "id": "N32-dnr-static-unknown-action",
+      "manifest": "manifests/dnr-unknown-action.json",
+      "install": true,
+      "expect": {
+        "outcome": "install-refuse",
+        "reason": "dnr-action-outside-v1"
+      }
+    },
+    {
       "id": "D01-runtime-getURL",
       "manifest": "manifests/cmp-reader.json",
       "control": "P01-runtime-getURL",

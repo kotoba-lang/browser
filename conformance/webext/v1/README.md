@@ -9,16 +9,16 @@ This corpus is frozen. ADR-0003 was accepted on 2026-11-23 with the owner
 ruling that every `chrome.*` operation requires `consent: "each-operation"`,
 with no prompt-less exception; every case here follows that ruling.
 
-- `manifests/` — 13 manifests and ten static rulesets. `cmp-reader.json` is
+- `manifests/` — 15 manifests and 12 static rulesets. `cmp-reader.json` is
   shaped after the mamori consent reader (cloud-itonami/mamori README:111):
   storage, cookies, tabs and scripting on one declared origin.
-- `cases.json` — 82 cases:
+- `cases.json` — 84 cases:
 
   | Ids | Count | What they show |
   | --- | --- | --- |
   | `P01`–`P20` | 20 | each v1 operation, approved: prompt, result, post-state, requests, audit |
   | `D01`–`D20` (no `D06`) | 19 | the same calls, denied: nothing executes, is sent or is audited as an effect |
-  | `N01`–`N30` | 30 | fail-closed negatives, including the denial of `tabs.create` (N04) |
+  | `N01`–`N32` | 32 | fail-closed negatives, including the denial of `tabs.create` (N04) |
   | `S01`–`S06` | 6 | sequences: consent is fresh for every operation |
   | `I01`–`I07` | 7 | admitted installs; `I02`–`I07` also show where an admitted static rule does and does not take effect |
 
@@ -98,11 +98,11 @@ rule 5). N09–N20 and N22 cover undeclared origins, permissions, argument shape
 and members across the slice. N21 refuses a static ruleset that reaches an
 undeclared origin; I02 admits a valid one and shows that it takes effect.
 
-### Static rules and exact origins
+### Static rules, exact origins and actions
 
-A static rule is admitted only if it cannot match outside the approved exact
-origins (mapping rule 6): its `urlFilter` begins with `|<origin>/`. The declared
-origin is `https://news.example` in all of these cases.
+A static rule is admitted only if its action is `block` and its `urlFilter`
+begins with `|<origin>/` for an approved exact origin (mapping rule 6). The
+declared origin is `https://news.example` in all of these cases.
 
 | Case | Rule or request, under the declared domain | Expected |
 | --- | --- | --- |
@@ -112,6 +112,8 @@ origin is `https://news.example` in all of these cases.
 | N26 | `regexFilter`, even one that names only the declared origin | install refused |
 | N27, N28, N29 | a rule anchored to an undeclared subdomain, scheme or port | install refused |
 | N30 | one valid rule and one wider rule | install refused as a whole |
+| N31 | one valid `block` rule and one `redirect` rule targeting an undeclared origin, both with exact-origin conditions | install refused as a whole |
+| N32 | unknown action type with the same exact-origin condition as the admitted `block` rule | install refused |
 | I03, I04, I05 | admitted rule; the user visits `https://sub.news.example`, `http://news.example`, `https://news.example:8443` | no effect: `tracker.js` is requested |
 | I06 | admitted rule; a declared page loads `tracker.js` from its own origin, the subdomain and the port | only its own is blocked |
 | I07 | admitted rule; a page on the subdomain loads `tracker.js` from the declared origin | no effect: the initiator is undeclared |
@@ -120,8 +122,10 @@ I02 and I06 are the controls: the same rule does block inside the declared
 origin. Refusal reasons: `rule-origin-not-declared` when a rule is confined to an
 origin that is not approved (N21, N27–N29), `rule-scope-exceeds-declared-origins`
 when its `urlFilter` is not confined to one exact origin (N23–N25, N30), and
-`rule-condition-outside-v1-slice` for `regexFilter` (N26). Refusing N21 and
-N23–N30, and the I07 result, are the deviation from Chrome that ADR-0003 states.
+`rule-condition-outside-v1-slice` for `regexFilter` (N26). Any action other
+than `block` causes install refusal with `dnr-action-outside-v1` (N31–N32).
+The origin and action refusals and I07's initiator check exercise the limits
+specified in ADR-0003.
 
 `S01`, `S03`: an approved call is repeated unchanged and denied. `S02`, `S04`:
 an approval is followed by a different operation that is never approved. `S05`:
