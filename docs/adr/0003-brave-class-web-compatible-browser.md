@@ -83,8 +83,11 @@ Mapping rules:
    descriptor.** Declared `chrome.*` namespaces carry their operation sets;
    `content_scripts.matches` / `host_permissions` become endpoint origins;
    `permissions` become data categories. Validation and operation brokering use
-   the canonical `kotoba-lang/wasm-webcomponent/src/kotoba-client-runtime.js`
-   (present on `origin/main`; product-local copies remain prohibited).
+   the [canonical Kotoba client runtime](https://github.com/kotoba-lang/kotoba/blob/bab28344825c8a3f179f3d6217572eb778edf4e6/lib/kotoba.wasmWebcomponent/src/kotoba-client-runtime.js#L797-L805).
+   In `clientRuntimeProblems`, line 803 checks
+   `operation.consent !== 'each-operation'`, and line 804 records
+   `invalid-operation` when the consent value differs. Product-local copies
+   remain prohibited.
 2. **Install-time consent = descriptor approval**, displayed with the
    extension's identity, origins, namespaces and data categories.
 3. **Every `chrome.*` operation requires fresh per-operation consent**
