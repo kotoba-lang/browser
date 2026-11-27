@@ -1,0 +1,14 @@
+[
+  {
+    "id": 1,
+    "priority": 1,
+    "action": {"type": "block"},
+    "condition": {"urlFilter": "|https://news.example/tracker.js", "requestDomains": ["news.example"], "resourceTypes": ["script"]}
+  },
+  {
+    "id": 2,
+    "priority": 1,
+    "action": {"type": "redirect", "redirect": {"url": "https://ads.example/app.js"}},
+    "condition": {"urlFilter": "|https://news.example/app.js", "requestDomains": ["news.example"], "resourceTypes": ["script"]}
+  }
+]

@@ -1,7 +1,10 @@
 # ADR-0003: Brave-class web-compatible browser with bounded Chrome extension compatibility
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-10-26
+- Accepted: 2026-11-23 — owner ruling on KOTOBA-147, option (b): every
+  `chrome.*` operation requires `consent: "each-operation"`; there is no
+  host-local prompt-less exception
 - Tracking: [KOTOBA-146](https://linear.app/kotobalabs/issue/KOTOBA-146) (plan), [KOTOBA-147](https://linear.app/kotobalabs/issue/KOTOBA-147) (this ADR)
 
 ## Context
@@ -64,9 +67,9 @@ quirks, service workers, CSP and cross-origin edge cases. This ADR starts that
 "different project" **under the same invariants**, and makes it measurement-
 first precisely because the warning was right about scale.
 
-Follow-up required on acceptance: `README.md` L5/L64 non-goals are rewritten to
-point here. This ADR alone does not edit them, so the repository has one
-authority for the change.
+Follow-up on acceptance (done with the accepted update): the `README.md` L5/L64
+non-goals are rewritten to point here, so the repository has one authority for
+the bounded web- and extension-compatibility scope.
 
 ### Ruling 2 — Chrome compatibility is a bounded, declared, consent-mapped subset
 
@@ -80,50 +83,92 @@ Mapping rules:
    descriptor.** Declared `chrome.*` namespaces carry their operation sets;
    `content_scripts.matches` / `host_permissions` become endpoint origins;
    `permissions` become data categories. Validation and operation brokering use
-   the canonical `kotoba-lang/wasm-webcomponent/src/kotoba-client-runtime.js`
-   (present on `origin/main`; product-local copies remain prohibited).
+   the [canonical Kotoba client runtime](https://github.com/kotoba-lang/kotoba/blob/bab28344825c8a3f179f3d6217572eb778edf4e6/lib/kotoba.wasmWebcomponent/src/kotoba-client-runtime.js#L797-L805).
+   In `clientRuntimeProblems`, line 803 checks
+   `operation.consent !== 'each-operation'`, and line 804 records
+   `invalid-operation` when the consent value differs. Product-local copies
+   remain prohibited.
 2. **Install-time consent = descriptor approval**, displayed with the
    extension's identity, origins, namespaces and data categories.
-3. **Two runtime tiers over that approval:**
-   - *declared reads inside the approved scope* (`chrome.cookies.get` on an
-     approved origin, `chrome.storage.local.get`, `chrome.tabs.query` bounded
-     to declared match patterns) are allowed after descriptor validation and
-     audited as datoms;
-   - *state-changing or scope-expanding operations* (`cookies.set`/
-     `remove`, `tabs.create`/`remove`, `scripting.executeScript` into a page,
-     `permissions.request`, any fetch to an undeclared endpoint) require
-     **fresh per-operation consent immediately before invocation; denial sends
-     nothing**.
+3. **Every `chrome.*` operation requires fresh per-operation consent**
+   (`consent: "each-operation"`), requested **immediately before invocation**.
+   This covers the whole v1 slice without exception — reads (`cookies.get`,
+   `storage.local.get`, `tabs.query`), extension-local members (`runtime.id`,
+   `runtime.getURL`, `runtime.onMessage.addListener`) and state-changing
+   operations alike. There is no prompt-less class of operation, and neither
+   descriptor approval nor an earlier approval of the same operation carries
+   over to the next invocation. **Denial sends nothing and executes nothing.**
+   All host effects are audited as datoms. This is the rule the canonical
+   broker already enforces: it refuses a descriptor whose operation declares
+   any other `consent` value.
 4. **Fail closed**: undeclared namespace, origin, argument shape or permission
-   errors; never a silent grant, never an app-origin proxy.
+   errors before any consent prompt; consent cannot widen the descriptor. Never
+   a silent grant, never an app-origin proxy.
 5. **A browser or OS permission prompt — including the extension install
    prompt — is never treated as Kotoba operation consent** (AGENTS.md L44
    extended to extensions; L65 unchanged).
 6. **`declarativeNetRequest` rules are declarative data** validated at install
    time against the descriptor; there is no runtime-ambient request-rewriting
-   path.
+   path. **Static rules are validated and applied only within the descriptor's
+   approved exact origins** (scheme, host and port):
+   - *Actions.* v1 admits only the `block` action. Any other action type,
+     including `redirect`, `upgradeScheme`, `allow`, `allowAllRequests` and
+     unknown or future types, causes install-time refusal of the entire
+     ruleset under rule 4. Refusing `redirect` and `upgradeScheme` at install
+     time makes redirect-target validation unnecessary in v1.
+   - *Condition validation.* A rule's condition must show that it cannot
+     match a request URL outside those origins. In v1 that means a
+     `urlFilter` that begins with `|<origin>/`, where `<origin>` is the
+     serialization of an approved origin (`|https://news.example/…`).
+     `requestDomains` may narrow that match further but never establishes it,
+     and may list only the hosts of approved origins.
+   - *Refusal.* Chrome semantics that would widen the scope are not admitted:
+     `requestDomains` also matches subdomains and constrains neither scheme nor
+     port, and an absent or unanchored `urlFilter`, `||` and `|<origin>^` can
+     match other subdomains, schemes or ports. `regexFilter` is outside the v1
+     slice. One such rule refuses the whole install under rule 4; the host
+     never narrows, drops or rewrites a rule to make it fit.
+   - *Application.* An admitted rule takes effect only when the request URL's
+     origin and the request initiator's origin, if it has one, are both
+     approved. A subdomain, another scheme or another port of an approved host
+     is an undeclared origin.
 
 Stated deviation, part of the documented subset: an extension written for
-Chrome's ambient authority will meet descriptor approval and fresh-consent
-prompts where Chrome proceeds silently, and undeclared capabilities fail
-closed. That is a contract requirement, not a bug to hide.
+Chrome's ambient authority will meet descriptor approval **and** a fresh-consent
+prompt for every `chrome.*` operation — reads included — where Chrome proceeds
+silently, and undeclared capabilities fail closed. A static
+`declarativeNetRequest` ruleset that Chrome would accept is refused at install
+if any rule uses an action other than `block` or its condition cannot be shown
+to stay within the approved exact origins. An admitted rule does not act for
+a page on an undeclared origin (rule 6). A member that is synchronous in Chrome
+(`runtime.id`, `runtime.getURL`, `onMessage.addListener`) keeps its synchronous
+shape. The host suspends the calling extension context until the prompt is
+answered.
 
 ### Ruling 3 — the compatibility score is a pinned fixture corpus
 
 No "Chrome API compatible" claim exists outside this corpus:
 
-- **MV3 manifest keys (v1):** `manifest_version` (3), `permissions`,
-  `host_permissions`, `content_scripts`, `background.service_worker`, `action`,
-  `commands`.
-- **`chrome.*` namespace slice (v1):** `chrome.runtime`
-  (`onMessage`/`sendMessage`/`getURL`/`id`), `chrome.storage`
-  (`local`/`sync` get/set/remove), `chrome.tabs` (`query`/`get` read;
-  `create`/`update`/`remove` consent tier), `chrome.cookies` (`get`/`getAll`
-  read; `set`/`remove` consent tier), `chrome.scripting` (`executeScript`
-  within declared matches).
+- **MV3 manifest keys (v1):** `manifest_version` (3), `name`, `version`,
+  `permissions`, `host_permissions`, `content_scripts`,
+  `background.service_worker`, `action`, `commands`,
+  `declarative_net_request.rule_resources` (static rulesets with `block`
+  actions only, within the approved exact origins).
+- **`chrome.*` namespace slice (v1), every operation `each-operation`:**
+  `chrome.runtime` (`onMessage.addListener`/`sendMessage`/`getURL`/`id`),
+  `chrome.storage` (`local`/`sync` get/set/remove), `chrome.tabs`
+  (`query`/`get`/`create`/`update`/`remove` within declared matches),
+  `chrome.cookies` (`get`/`getAll`/`set`/`remove` on declared origins),
+  `chrome.scripting` (`executeScript` within declared matches).
+- **Frozen corpus:** `conformance/webext/v1/`, pinned by its `SHA256SUMS`.
 - **Negative fixtures (mandatory):** undeclared origin, undeclared permission,
   overscoped `tabs.query`, deny-then-network (proves no request is sent),
-  undeclared `chrome.*` namespace.
+  undeclared `chrome.*` namespace. The corpus also shows that static
+  `declarativeNetRequest` rules do not reach an undeclared origin under a
+  declared domain: wider rulesets are refused, and an admitted rule has no
+  effect on another subdomain, scheme or port. A ruleset containing `redirect`
+  or an unknown action is refused even when every condition stays within the
+  approved exact origins.
 - **Acceptance test:** mamori's WebExtension design (README:111) runs against
   the kotoba browser runtime — CMP/TCF consent read, vendor mapping, one-click
   deny.
@@ -176,10 +221,11 @@ Chromium fork, and it does not mean a browser-store distribution.
   with a pinned, measurable definition instead of an open-ended "browser
   parity" ambition; every claim routes back to a ledger and a fixture.
 - Capability invariants and the per-operation consent contract survive intact;
-  extension ambient authority is converted into declarations and two-tier
-  consent rather than granted.
+  extension ambient authority is converted into declarations and fresh consent
+  for every `chrome.*` operation rather than granted. The cost is prompt volume:
+  an extension that reads often prompts often.
 - Scope is genuinely large — ADR-0001's warning stands. The mitigation is the
   phase gates: each phase is admitted by measured evidence, and a phase that
   cannot produce its ledger does not advance.
-- On acceptance, `README.md` L5/L64 need the follow-up edit named in Ruling 1,
+- With acceptance, the `README.md` L5/L64 follow-up named in Ruling 1 is made,
   and KOTOBA-148–151 proceed from Todo.
